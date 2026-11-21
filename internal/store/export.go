@@ -233,8 +233,11 @@ func (s *Store) importBlocks(ex *Export, today int) error {
 			for _, b := range set.blocks {
 				k, err := hex.DecodeString(b.Pair)
 				exp, derr := ParseDayString(b.ExpiresDay)
-				if err != nil || len(k) != sha256.Size || derr != nil || b.Reason != set.reason || exp < today {
-					continue
+				if err != nil || len(k) != sha256.Size || derr != nil || b.Reason != set.reason {
+					return fmt.Errorf("malformed %s entry in the registry export", set.reason) // the whole import fails
+				}
+				if exp < today {
+					continue // expired: dropped, as on export
 				}
 				if err := set.write(tx, k, exp-RetainBlocks); err != nil {
 					return err

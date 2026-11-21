@@ -1125,8 +1125,10 @@ written. On import (at start with an empty data directory or after a damaged sto
 through the operator's `recovery --from`) the relay checks the signature against its own identity key and
 the `host` against its configured name, and every instance must be inside the closed sets the relay writes:
 a lowercase UUIDv4 id, a 32-byte key, a tier of `probation`, `standard`, `suspended` or `revoked`, a reason
-from the closed list (or none) and a device limit from 1 to 150. Any failure makes the whole import fail;
-at start the relay then does not start. Instances whose id or key already exists are skipped.
+from the closed list (or none) and a device limit from 1 to 150. Every block and pin entry must carry a
+32-byte hex hash, its own reason code and a valid expiry day; expired entries are dropped as on export. Any
+failure makes the whole import fail; at start the relay then does not start. Instances whose id or key
+already exists are skipped.
 
 ## Retention
 

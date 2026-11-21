@@ -36,6 +36,8 @@ healthlog_push_acme_email: ""
 healthlog_push_apns_topic: ""
 healthlog_push_apns_key_id: ""
 healthlog_push_apns_team_id: ""
+# Oldest HealthLog server version the relay accepts (for example 1.49.0); empty accepts all.
+healthlog_push_min_client_version: ""
 
 healthlog_push_relay_uid: 65532
 healthlog_push_signer_uid: 65533

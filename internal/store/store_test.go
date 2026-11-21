@@ -191,3 +191,10 @@ func TestImportRefusesFieldsOutsideTheClosedSets(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestImportRefusesMalformedBlocks(t *testing.T) {
+	ex := &Export{Format: ExportFormat, BlockedPairs: []ExportedBlock{{Pair: "zz", Reason: ReasonDeviceOptOut, ExpiresDay: "2099-01-01"}}}
+	if _, err := open(t).Import(ex, 10, 150); err == nil {
+		t.Fatal("malformed block imported")
+	}
+}
