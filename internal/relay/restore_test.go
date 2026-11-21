@@ -46,10 +46,11 @@ func TestMigrationExportRestore(t *testing.T) {
 	if res := moved.push1(alertItem("m2", d)); res.Result != "accepted" {
 		t.Fatalf("push after rebind: %+v", res)
 	}
-	// During the recovery window an unknown instance starts as standard.
+	// During the recovery window an unknown key starts in probation like any other; only keys that come
+	// back from the export keep their tier.
 	if fresh := nh.register(); fresh != nil {
-		if info, _ := nh.r.Instance(fresh.id); info.Tier != store.TierStandard {
-			t.Fatalf("recovery window tier: %s", info.Tier)
+		if info, _ := nh.r.Instance(fresh.id); info.Tier != store.TierProbation {
+			t.Fatalf("recovery window tier of a stranger: %s", info.Tier)
 		}
 	}
 }

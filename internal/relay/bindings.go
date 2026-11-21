@@ -11,8 +11,7 @@ import (
 )
 
 type bindResp struct {
-	State     string `json:"state"`
-	Challenge string `json:"challenge,omitempty"` // "sent" or "quota" on 409
+	State string `json:"state"`
 }
 
 // handleBind implements POST /v1/bindings (spec/protocol.md, "Device binding").

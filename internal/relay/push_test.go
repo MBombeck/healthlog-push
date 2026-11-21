@@ -370,10 +370,9 @@ func TestReceiptsDriveDeliveryHealth(t *testing.T) {
 	if hz, _ := h.r.Health(); hz.Delivery != "unknown" {
 		t.Fatalf("a probation instance moved the delivery signal: %+v", hz)
 	}
-	_, _ = h.r.SetRecovery(99999, nil) // registrations start as standard
 	var std []*instance
 	for n := range 3 {
-		in := h.register()
+		in := h.registerStandard()
 		for k := range 8 {
 			in.activate(newDevice(byte(0x40 + n*8 + k)))
 		}

@@ -459,3 +459,14 @@ func (i *instance) activate(d *device) {
 }
 
 func withDefaultLimits(c *Config) { c.Limits = DefaultLimits }
+
+// registerStandard registers an instance and moves it to the standard tier, as the daily promotion would
+// after seven days with a delivery.
+func (h *harness) registerStandard() *instance {
+	i := h.register()
+	h.r.mu.Lock()
+	s := h.r.instances[i.id]
+	s.rec.Tier, s.rec.QuietSinceDay = store.TierStandard, store.Day(h.clk.Now())
+	h.r.mu.Unlock()
+	return i
+}

@@ -139,11 +139,19 @@ func (r *Relay) inviteIndex(code string, today int) int {
 }
 
 // consumeInvite removes a matching, unexpired invite. Caller holds r.mu.
-func (r *Relay) consumeInvite(code string, today int) {
-	if i := r.inviteIndex(code, today); i >= 0 {
-		r.control.Invites = slices.Delete(r.control.Invites, i, i+1)
-		_ = r.saveControl()
+func (r *Relay) consumeInvite(code string, today int) error {
+	i := r.inviteIndex(code, today)
+	if i < 0 {
+		return nil
 	}
+	next := slices.Delete(slices.Clone(r.control.Invites), i, i+1)
+	prev := r.control.Invites
+	r.control.Invites = next
+	if err := r.saveControl(); err != nil {
+		r.control.Invites = prev // spent only once the store says so; otherwise it stays valid on disk too
+		return err
+	}
+	return nil
 }
 
 // SetNotice sets or clears (empty id) the notice.

@@ -279,7 +279,7 @@ func (r *Relay) promoteLocked(s *instState, today int) {
 // than 20 rebinds.
 func (r *Relay) suspiciousLocked(id string, today int) bool {
 	var sum store.DayCounters
-	for d := today - 7; d <= today; d++ {
+	for d := today - 6; d <= today; d++ { // seven days, as in the suspects overview
 		c := r.st.Counters(d, id)
 		sum.Sent += c.Sent
 		sum.Invalid += c.Invalid

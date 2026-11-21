@@ -82,7 +82,8 @@ func (r *Relay) reply(w http.ResponseWriter, req *http.Request, status int, v an
 	var body []byte
 	if v != nil {
 		var err error
-		if body, err = json.Marshal(v); err != nil {
+		if body, err = json.Marshal(v); err != nil || len(body) > maxResponseBytes {
+			// The documented maximum is a promise to clients; nothing larger ever leaves the relay.
 			status, body = http.StatusInternalServerError, []byte(`{"error":"internal"}`)
 		}
 	}

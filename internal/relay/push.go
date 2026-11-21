@@ -105,8 +105,18 @@ func (r *Relay) collectResults(pb *wire.PushBody, entries []*idemEntry, results 
 			res.Ref = pb.Items[i].Ref
 			results[i] = res
 		case <-deadline.C:
-			results[i] = itemRetry(pb.Items[i].Ref, http.StatusServiceUnavailable, "apns_unavailable", "", 30*time.Second)
 			deadline.Reset(0)
+			// Past the deadline, a result that is already there is still reported as it is.
+			select {
+			case <-ent.done:
+				r.mu.Lock()
+				res := *ent.res
+				r.mu.Unlock()
+				res.Ref = pb.Items[i].Ref
+				results[i] = res
+			default:
+				results[i] = itemRetry(pb.Items[i].Ref, http.StatusServiceUnavailable, "apns_unavailable", "", 30*time.Second)
+			}
 		}
 	}
 }

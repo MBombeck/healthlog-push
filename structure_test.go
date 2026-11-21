@@ -195,7 +195,7 @@ func TestPayloadTemplatesOnlyInAPNs(t *testing.T) {
 // names: Unregistered, the second soft failure on another day, unbind by instance or device, instance
 // deletion or revocation, retention.
 func TestDeletionOnlyThroughKnownPaths(t *testing.T) {
-	re := regexp.MustCompile(`st\.DeleteBinding\(`)
+	re := regexp.MustCompile(`st\.DeleteBindings?\(`)
 	got := map[string]int{}
 	for _, f := range goFiles(t) {
 		if c := len(re.FindAllString(f.src, -1)); c > 0 {

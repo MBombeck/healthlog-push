@@ -89,6 +89,7 @@ services:
       HLP_PUBLIC_HOST: ${HLP_PUBLIC_HOST:?HLP_PUBLIC_HOST must be set}
       # Fingerprint of the secret files; a change recreates the container (not read by the program).
       HLP_SECRETS_REV: ${HLP_SECRETS_REV:-}
+      HLP_MIN_CLIENT_VERSION: ${HLP_MIN_CLIENT_VERSION:-}
       # Keep the Go heap below the container limit so the runtime collects before the kernel kills.
       GOMEMLIMIT: 220MiB
       HLP_LISTEN: ${HLP_LISTEN:-:8443}

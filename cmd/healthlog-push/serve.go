@@ -5,12 +5,14 @@ import (
 	"crypto/ed25519"
 	"crypto/tls"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"regexp"
 	"strings"
 	"syscall"
 	"time"
@@ -30,8 +32,8 @@ const maxStreams = 16
 
 func runRelay() error {
 	host := os.Getenv("HLP_PUBLIC_HOST")
-	if host == "" {
-		return errors.New("HLP_PUBLIC_HOST is required")
+	if err := checkPublicHost(host); err != nil {
+		return err
 	}
 	topic := os.Getenv("HLP_APNS_TOPIC")
 	if topic == "" {
@@ -87,7 +89,11 @@ func runRelay() error {
 func relayConfig(host string, id ed25519.PrivateKey, macKeys [][]byte, exportDir string) (relay.Config, error) {
 	envs := map[string]bool{}
 	for _, e := range strings.Split(env("HLP_APNS_ENVIRONMENT", "production"), ",") {
-		envs[strings.TrimSpace(e)] = true
+		e = strings.TrimSpace(e)
+		if e != "production" && e != "sandbox" {
+			return relay.Config{}, fmt.Errorf("HLP_APNS_ENVIRONMENT: %q is not production or sandbox", e)
+		}
+		envs[e] = true
 	}
 	var minClient [3]int
 	if v := os.Getenv("HLP_MIN_CLIENT_VERSION"); v != "" {
@@ -135,6 +141,7 @@ func serve(ctx context.Context, r *relay.Relay, tlsCfg *tls.Config) error {
 	if err != nil {
 		return err
 	}
+	var exitErr error // non-nil when a listener failed, so the process exits with an error code
 	errc := make(chan listenerExit, 3)
 	go func() { errc <- listenerExit{"public", srv.ServeTLS(cl, "", "")} }()
 	go func() { errc <- listenerExit{"metrics", metricsSrv.ListenAndServe()} }()
@@ -146,6 +153,7 @@ func serve(ctx context.Context, r *relay.Relay, tlsCfg *tls.Config) error {
 	case e := <-errc:
 		if !errors.Is(e.err, http.ErrServerClosed) {
 			logx.Event("relay.listener_failed", logx.Str(logx.KState, e.name))
+			exitErr = fmt.Errorf("%s listener stopped: %w", e.name, e.err)
 		}
 	}
 	sctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -155,7 +163,7 @@ func serve(ctx context.Context, r *relay.Relay, tlsCfg *tls.Config) error {
 	_ = metricsSrv.Close()
 	_ = adminSrv.Close()
 	logx.Event("relay.stop")
-	return nil
+	return exitErr
 }
 
 func adminSocket(path string, r *relay.Relay) (*http.Server, net.Listener, error) {
@@ -169,4 +177,15 @@ func adminSocket(path string, r *relay.Relay) (*http.Server, net.Listener, error
 		return nil, nil, err
 	}
 	return &http.Server{Handler: r.AdminHandler(), ReadHeaderTimeout: 5 * time.Second, ErrorLog: log.New(io.Discard, "", 0)}, ln, nil
+}
+
+var hostRE = regexp.MustCompile(`^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$`)
+
+// checkPublicHost refuses a host name that would silently break every signature: it is part of every
+// signed text, so it must be the bare lower-case DNS name clients use, without port or trailing dot.
+func checkPublicHost(h string) error {
+	if !hostRE.MatchString(h) {
+		return fmt.Errorf("HLP_PUBLIC_HOST %q must be a lower-case DNS name without port, for example push.example.org", h)
+	}
+	return nil
 }

@@ -185,8 +185,7 @@ func TestRequestLevelRefusals(t *testing.T) {
 // TestDeviceLimitRaisedAfterQuietMonth: 50 becomes 80 by itself after 30 quiet days above 80 %.
 func TestDeviceLimitRaisedAfterQuietMonth(t *testing.T) {
 	h := newHarness(t, func(c *Config) { c.Limits.Standard.Devices = 5; c.Limits.StandardDevicesUp = 8 })
-	_, _ = h.r.SetRecovery(99999, nil) // registrations start as standard
-	i := h.register()
+	i := h.registerStandard()
 	for n := range 5 {
 		i.activate(newDevice(byte(0xd0 + n)))
 	}

@@ -131,3 +131,31 @@ func TestInviteKeptWhenLimitRefuses(t *testing.T) {
 		t.Fatal("invite spent by a refused registration")
 	}
 }
+
+// TestSmallContractChecks: DELETE /v1/instances/self takes no body; a revoked instance cannot be suspended
+// (and later unsuspended into probation); an invite survives a registration the store could not record.
+func TestSmallContractChecks(t *testing.T) {
+	h := newHarness(t)
+	i := h.register()
+	if rp := i.do(http.MethodDelete, "/v1/instances/self", []byte(`{"x":1}`)); rp.Status != http.StatusUnprocessableEntity {
+		t.Fatalf("delete with a body: %d", rp.Status)
+	}
+	j := h.register()
+	_ = h.r.Revoke(j.id, "abuse")
+	if err := h.r.Suspend(j.id, "spam"); err == nil {
+		t.Fatal("revoked instance suspended")
+	}
+	_ = h.r.SetRegistration(RegInvite)
+	code, _ := h.r.NewInvite()
+	_ = h.st.Close()
+	_, k, _ := ed25519.GenerateKey(rand.Reader)
+	if rp := (&instance{h: h, key: k}).registerRaw(code); rp.Status != http.StatusServiceUnavailable {
+		t.Fatalf("registration with a dead store: %d", rp.Status)
+	}
+	h.r.mu.Lock()
+	still := h.r.inviteIndex(code, 0) >= 0
+	h.r.mu.Unlock()
+	if !still {
+		t.Fatal("invite spent although nothing was stored")
+	}
+}

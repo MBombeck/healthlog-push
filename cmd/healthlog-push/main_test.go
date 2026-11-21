@@ -174,3 +174,16 @@ func TestTLS12OnlyForPureACMEValidation(t *testing.T) {
 		t.Fatal("more than 16 HTTP/2 streams per connection")
 	}
 }
+
+func TestCheckPublicHost(t *testing.T) {
+	for _, ok := range []string{"push.healthlog.dev", "push.example.org", "a-b.c.example"} {
+		if checkPublicHost(ok) != nil {
+			t.Errorf("%s refused", ok)
+		}
+	}
+	for _, bad := range []string{"", "Push.Example.org", "push.example.org:443", "push.example.org.", "localhost", "https://push.example.org"} {
+		if checkPublicHost(bad) == nil {
+			t.Errorf("%q accepted", bad)
+		}
+	}
+}

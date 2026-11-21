@@ -57,10 +57,7 @@ func (r *Relay) handleRegister(w http.ResponseWriter, req *http.Request) {
 	}
 	in := &store.Instance{
 		ID: newID(), PublicKey: reg.PublicKey, Tier: store.TierProbation, CreatedDay: today,
-		LastSeenWeek: store.Week(today), DeviceLimit: r.cfg.Limits.Standard.Devices, Client: reg.Client,
-	}
-	if recovery {
-		in.Tier, in.QuietSinceDay = store.TierStandard, today
+		LastSeenWeek: store.Week(today), DeviceLimit: r.cfg.Limits.Standard.Devices,
 	}
 	if !r.persist(r.st.PutInstance(in)) {
 		r.fail(w, req, http.StatusServiceUnavailable, errStorage(storageRetry))
@@ -95,7 +92,11 @@ func (r *Relay) registrationGateLocked(req *http.Request, reg *wire.Registration
 		return http.StatusServiceUnavailable, &errBody{Error: "registration_paused", RetryAfter: jitter(time.Hour)}
 	}
 	if r.control.Registration == RegInvite {
-		r.consumeInvite(reg.Invite, today)
+		if err := r.consumeInvite(reg.Invite, today); err != nil {
+			r.setDBError(err)
+			e := errStorage(storageRetry)
+			return http.StatusServiceUnavailable, &e
+		}
 	}
 	return 0, nil
 }
@@ -127,9 +128,10 @@ func (r *Relay) handleRotate(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	old := s.rec.PublicKey
+	oldDay := s.rec.RotatedDay
 	s.rec.PublicKey, s.rec.RotatedDay = reg.PublicKey, today
 	if !r.persist(r.st.ReplaceInstanceKey(s.rec, old)) {
-		s.rec.PublicKey, s.rec.RotatedDay = old, 0
+		s.rec.PublicKey, s.rec.RotatedDay = old, oldDay
 		r.fail(w, req, http.StatusServiceUnavailable, errStorage(0))
 		return
 	}
@@ -140,8 +142,12 @@ func (r *Relay) handleRotate(w http.ResponseWriter, req *http.Request) {
 }
 
 func (r *Relay) handleDeleteInstance(w http.ResponseWriter, req *http.Request) {
-	s, _, ok := r.auth(w, req, maxOtherBody)
+	s, body, ok := r.auth(w, req, maxOtherBody)
 	if !ok {
+		return
+	}
+	if len(body) != 0 {
+		r.fail(w, req, http.StatusUnprocessableEntity, errBody{Error: "invalid_item"})
 		return
 	}
 	r.mu.Lock()
@@ -176,7 +182,6 @@ func (r *Relay) dropInstanceLocked(id string) {
 type statusResp struct {
 	State         string     `json:"state"`
 	Tier          string     `json:"tier"`
-	Reason        string     `json:"reason,omitempty"`
 	Limits        TierLimits `json:"limits"`
 	Devices       devCounts  `json:"devices"`
 	Notice        *Notice    `json:"notice"`
