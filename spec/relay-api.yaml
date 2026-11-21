@@ -1,0 +1,946 @@
+openapi: 3.1.0
+info:
+  title: HealthLog push relay
+  version: "1"
+  summary: Public HTTP API of the HealthLog push relay, protocol version 1.
+  description: |
+    Machine-readable companion to `spec/protocol.md`, which defines the check order, the limits and the
+    semantics. Schemas follow the JSON tags of the Go structs in `internal/wire/bodies.go` and
+    `internal/relay/*.go`. Request bodies are decoded strictly: unknown fields, trailing data or a second
+    JSON value make the body invalid (`422 invalid_item`).
+
+    Every response produced by the relay's JSON reply path, including every `204`, carries the header
+    `HL-Relay-Signature`: the relay identity key's Ed25519 signature over the `hl-relay-resp-v1` text
+    (`spec/statements.md`). A response without a valid signature is a transport error. The plain-text
+    pages `/`, `/privacy` and `/terms` are not signed.
+
+    Keys and signatures are unpadded base64url. Tokens are hex. Token tags are 32 lowercase hex
+    characters. Times are unix seconds.
+  license:
+    name: CC0-1.0
+    identifier: CC0-1.0
+servers:
+  - url: https://push.example.org
+    description: Example relay
+  - url: https://push.healthlog.dev
+    description: Relay operated by the HealthLog project
+tags:
+  - name: instance
+    description: Registration and key management of a HealthLog server.
+  - name: binding
+    description: Device bindings, managed by the instance.
+  - name: app
+    description: Direct calls from the app, signed with the device binding key.
+  - name: push
+    description: Sending pushes and reporting delivery.
+  - name: public
+    description: Unauthenticated information endpoints.
+security:
+  - instanceId: []
+    instanceTimestamp: []
+    instanceNonce: []
+    instanceSignature: []
+paths:
+  /v1/instances:
+    post:
+      tags: [instance]
+      operationId: registerInstance
+      summary: Register a new instance
+      description: |
+        Not signed with `hl-relay-v1`. The body proves possession of the new key: `proof` is the
+        signature of `publicKey` over `hl-register-v1`. A key that is already registered gets its existing
+        instance id back with `200`.
+        Errors: `413 too_large`, `422 invalid_item`, `401 stale_timestamp`, `401 bad_signature`,
+        `403 instance_revoked`, `403 instance_suspended`, `403 invite_required`,
+        `503 storage_unavailable`, `503 registration_paused`.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RegisterBody" }
+      responses:
+        "200":
+          description: The key was already registered; the existing instance.
+          headers: { HL-Relay-Signature: { $ref: "#/components/headers/HL-Relay-Signature" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RegisterResponse" }
+        "201":
+          description: Registered.
+          headers: { HL-Relay-Signature: { $ref: "#/components/headers/HL-Relay-Signature" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RegisterResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+        "422": { $ref: "#/components/responses/Invalid" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+  /v1/instances/self/rotate:
+    post:
+      tags: [instance]
+      operationId: rotateInstanceKey
+      summary: Replace the instance key
+      description: |
+        Signed with the old key (request signing). The body has the registration shape for the new key,
+        with `proof` made by the new key. At most once per UTC day.
+        Errors besides request signing: `422 invalid_item` (also for a stale `time` or an invalid
+        `proof`), `429 instance_rate`, `409 key_in_use`, `503 storage_unavailable`.
+      parameters:
+        - $ref: "#/components/parameters/HL-Client"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RegisterBody" }
+      responses:
+        "200":
+          description: Rotated.
+          headers: { HL-Relay-Signature: { $ref: "#/components/headers/HL-Relay-Signature" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RegisterResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+        "422": { $ref: "#/components/responses/Invalid" }
+        "426": { $ref: "#/components/responses/UpgradeRequired" }
+        "429": { $ref: "#/components/responses/TooMany" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+  /v1/instances/self:
+    delete:
+      tags: [instance]
+      operationId: deleteInstance
+      summary: Delete the instance and all its bindings
+      parameters:
+        - $ref: "#/components/parameters/HL-Client"
+      responses:
+        "204": { $ref: "#/components/responses/NoContent" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+        "426": { $ref: "#/components/responses/UpgradeRequired" }
+        "429": { $ref: "#/components/responses/TooMany" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+  /v1/bindings:
+    post:
+      tags: [binding]
+      operationId: bindDevice
+      summary: Bind a device token to the instance
+      description: |
+        The instance forwards the device statement (`hl-bind-v1`, signed by `bindingKey`) unchanged.
+        `201` when the token was not bound to this instance before, `200` when it was (including an
+        idempotent repeat of the stored statement). `409 binding_conflict` when a live binding holds
+        another key: `reason` is `challenge_sent` (a challenge push went to the token) or
+        `challenge_quota` (no push was sent).
+        Errors besides request signing: `422 invalid_item`, `422 env_unsupported`, `401 stale_timestamp`,
+        `403 binding_refused`, `409 binding_conflict`, `429 binding_quota`, `503 storage_unavailable`.
+      parameters:
+        - $ref: "#/components/parameters/HL-Client"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BindBody" }
+      responses:
+        "200":
+          description: Already bound to this instance; state after the request.
+          headers: { HL-Relay-Signature: { $ref: "#/components/headers/HL-Relay-Signature" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BindResponse" }
+        "201":
+          description: Bound; new bindings start `provisional`.
+          headers: { HL-Relay-Signature: { $ref: "#/components/headers/HL-Relay-Signature" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BindResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+        "422": { $ref: "#/components/responses/Invalid" }
+        "426": { $ref: "#/components/responses/UpgradeRequired" }
+        "429": { $ref: "#/components/responses/TooMany" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+    delete:
+      tags: [binding]
+      operationId: unbindDevice
+      summary: Remove a binding of this instance
+      description: |
+        Answers `204` for every valid body, whether or not the token was bound to this instance.
+      parameters:
+        - $ref: "#/components/parameters/HL-Client"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TokenBody" }
+      responses:
+        "204": { $ref: "#/components/responses/NoContent" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+        "422": { $ref: "#/components/responses/Invalid" }
+        "426": { $ref: "#/components/responses/UpgradeRequired" }
+        "429": { $ref: "#/components/responses/TooMany" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+  /v1/bindings/challenge:
+    post:
+      tags: [app]
+      operationId: answerChallenge
+      summary: Answer a binding conflict challenge (app)
+      description: |
+        Sent by the app. `signature` is the `hl-challenge-v1` signature by `bindingKey`, which must be the
+        key of the conflicting bind request. A challenge is valid for 30 minutes and can be used once.
+        Errors: `429 global`, `413 too_large`, `422 invalid_item`, `403 challenge_refused`,
+        `503 storage_unavailable`.
+      security: []
+      x-signed-by: device binding key (statement and signature in the body)
+      parameters:
+        - $ref: "#/components/parameters/HL-Nonce-Optional"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ChallengeBody" }
+      responses:
+        "200":
+          description: The new binding replaced the old one.
+          headers: { HL-Relay-Signature: { $ref: "#/components/headers/HL-Relay-Signature" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BindResponse" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+        "422": { $ref: "#/components/responses/Invalid" }
+        "429": { $ref: "#/components/responses/TooMany" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+  /v1/bindings/self:
+    delete:
+      tags: [app]
+      operationId: optOut
+      summary: Leave an instance directly (app)
+      description: |
+        The direct opt-out. `signature` is the `hl-unbind-v1` signature by `bindingKey`. On success the
+        binding is deleted and the pair (token, instance) is blocked for 365 days. Any mismatch answers
+        `404 binding_unknown`.
+        Errors: `429 global`, `413 too_large`, `422 invalid_item`, `401 stale_timestamp`,
+        `404 binding_unknown`, `503 storage_unavailable`.
+      security: []
+      x-signed-by: device binding key (statement and signature in the body)
+      parameters:
+        - $ref: "#/components/parameters/HL-Nonce-Optional"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UnbindBody" }
+      responses:
+        "204": { $ref: "#/components/responses/NoContent" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+        "422": { $ref: "#/components/responses/Invalid" }
+        "429": { $ref: "#/components/responses/TooMany" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+    get:
+      tags: [app]
+      operationId: readOwnBinding
+      summary: Read the own binding (app)
+      description: |
+        `HL-Signature` is the `hl-selfread-v1` signature by the key in `HL-Binding-Key`. Any mismatch
+        answers `404 binding_unknown`.
+        Errors: `429 global`, `422 invalid_item`, `401 stale_timestamp`, `404 binding_unknown`.
+      security:
+        - bindingKeySignature: []
+      parameters:
+        - $ref: "#/components/parameters/HL-Token"
+        - $ref: "#/components/parameters/HL-Binding-Key"
+        - $ref: "#/components/parameters/HL-Iat"
+        - $ref: "#/components/parameters/HL-Nonce-Optional"
+      responses:
+        "200":
+          description: What the relay holds about the binding.
+          headers: { HL-Relay-Signature: { $ref: "#/components/headers/HL-Relay-Signature" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SelfReadResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/Invalid" }
+        "429": { $ref: "#/components/responses/TooMany" }
+  /v1/push:
+    post:
+      tags: [push]
+      operationId: push
+      summary: Send up to 50 pushes
+      description: |
+        Body at most 128 KiB. The answer is `200` with one result per item, in item order, unless the
+        whole request is refused. Request-level refusals besides request signing: `422 invalid_item`,
+        `413 too_many_items`, `503 maintenance`, `503 relay_misconfigured`, `503 apns_unavailable`.
+        Per-item results are listed in `spec/protocol.md`, "Results".
+      parameters:
+        - $ref: "#/components/parameters/HL-Client"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PushBody" }
+      responses:
+        "200":
+          description: One result per item.
+          headers: { HL-Relay-Signature: { $ref: "#/components/headers/HL-Relay-Signature" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PushResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+        "422": { $ref: "#/components/responses/Invalid" }
+        "426": { $ref: "#/components/responses/UpgradeRequired" }
+        "429": { $ref: "#/components/responses/TooMany" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+  /v1/receipts:
+    post:
+      tags: [push]
+      operationId: reportReceipts
+      summary: Report device-confirmed deliveries (counts only)
+      description: |
+        At most once per instance per 50 minutes. Counts are summed across instances in memory and feed
+        the `delivery` field of `/healthz`.
+        Errors besides request signing: `422 invalid_item`, `429 instance_rate`.
+      parameters:
+        - $ref: "#/components/parameters/HL-Client"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ReceiptsBody" }
+      responses:
+        "204": { $ref: "#/components/responses/NoContent" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+        "422": { $ref: "#/components/responses/Invalid" }
+        "426": { $ref: "#/components/responses/UpgradeRequired" }
+        "429": { $ref: "#/components/responses/TooMany" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+  /v1/status:
+    get:
+      tags: [instance]
+      operationId: getStatus
+      summary: Relay state, tier, limits and notice for the instance
+      parameters:
+        - $ref: "#/components/parameters/HL-Client"
+      responses:
+        "200":
+          description: Status.
+          headers: { HL-Relay-Signature: { $ref: "#/components/headers/HL-Relay-Signature" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StatusResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+        "426": { $ref: "#/components/responses/UpgradeRequired" }
+        "429": { $ref: "#/components/responses/TooMany" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+  /healthz:
+    get:
+      tags: [public]
+      operationId: getHealth
+      summary: Coarse public health
+      security: []
+      responses:
+        "200":
+          description: "`status` is `ok`."
+          headers: { HL-Relay-Signature: { $ref: "#/components/headers/HL-Relay-Signature" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HealthStatus" }
+        "503":
+          description: "`status` is `degraded` or `down`."
+          headers: { HL-Relay-Signature: { $ref: "#/components/headers/HL-Relay-Signature" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HealthStatus" }
+  /version:
+    get:
+      tags: [public]
+      operationId: getVersion
+      summary: Build version, commit and image digest
+      security: []
+      responses:
+        "200":
+          description: Version.
+          headers: { HL-Relay-Signature: { $ref: "#/components/headers/HL-Relay-Signature" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Version" }
+  /privacy:
+    get:
+      tags: [public]
+      operationId: getPrivacy
+      summary: Privacy notice (plain text, unsigned)
+      security: []
+      responses:
+        "200":
+          description: Privacy notice.
+          content:
+            text/plain:
+              schema: { type: string }
+  /terms:
+    get:
+      tags: [public]
+      operationId: getTerms
+      summary: Terms of use (plain text, unsigned)
+      security: []
+      responses:
+        "200":
+          description: Terms of use.
+          content:
+            text/plain:
+              schema: { type: string }
+  /:
+    get:
+      tags: [public]
+      operationId: getIndex
+      summary: Index page (plain text, unsigned)
+      security: []
+      responses:
+        "200":
+          description: Index page.
+          content:
+            text/plain:
+              schema: { type: string }
+components:
+  securitySchemes:
+    instanceId:
+      type: apiKey
+      in: header
+      name: HL-Instance
+      description: The instance id issued at registration, lowercase UUIDv4. Part of instance request signing.
+    instanceTimestamp:
+      type: apiKey
+      in: header
+      name: HL-Timestamp
+      description: Unix seconds, within 300 s of the relay clock and not before the relay started.
+    instanceNonce:
+      type: apiKey
+      in: header
+      name: HL-Nonce
+      description: 16 random bytes, unpadded base64url (22 characters), used once per instance.
+    instanceSignature:
+      type: apiKey
+      in: header
+      name: HL-Signature
+      description: |
+        Ed25519 signature of the instance key over the `hl-relay-v1` text: host, `HL-Instance`, method,
+        path with query as sent, `HL-Timestamp`, `HL-Nonce` and the hex SHA-256 of the body, joined by line
+        feeds. The four instance headers are required together. Check order: body size, known instance,
+        time window, bad-signature budget, signature, tier, request rate, nonce, minimum client version.
+    bindingKeySignature:
+      type: apiKey
+      in: header
+      name: HL-Signature
+      description: |
+        Ed25519 signature of the device binding key in `HL-Binding-Key` over the `hl-selfread-v1` text:
+        host, hex token tag of `HL-Token`, `HL-Iat`. The binding key must be the key stored for the
+        binding of the token.
+  headers:
+    HL-Relay-Signature:
+      description: |
+        Ed25519 signature of the relay identity key over `hl-relay-resp-v1`: host, the request's
+        `HL-Nonce` (or `-`), the status code and the hex SHA-256 of the body.
+      required: true
+      schema: { $ref: "#/components/schemas/Signature" }
+    Retry-After:
+      description: Seconds until a retry can succeed, spread by plus or minus 30 %. Sent on request-level refusals that carry `retryAfter`.
+      schema: { type: integer, minimum: 1 }
+  parameters:
+    HL-Client:
+      name: HL-Client
+      in: header
+      required: false
+      description: |
+        Software and version of the instance, `name/major.minor.patch`. Required when the relay has a
+        minimum server version configured; otherwise ignored.
+      schema:
+        type: string
+        pattern: '^[a-z0-9-]{1,32}/\d{1,4}\.\d{1,4}\.\d{1,6}$'
+        examples: ["healthlog/1.49.0"]
+    HL-Nonce-Optional:
+      name: HL-Nonce
+      in: header
+      required: false
+      description: Optional on app calls. When well formed it is bound into the response signature; it is neither checked nor recorded.
+      schema: { $ref: "#/components/schemas/Nonce" }
+    HL-Token:
+      name: HL-Token
+      in: header
+      required: true
+      description: The APNs device token, hex.
+      schema: { $ref: "#/components/schemas/Token" }
+    HL-Binding-Key:
+      name: HL-Binding-Key
+      in: header
+      required: true
+      description: The device binding public key.
+      schema: { $ref: "#/components/schemas/PublicKey" }
+    HL-Iat:
+      name: HL-Iat
+      in: header
+      required: true
+      description: Unix seconds, decimal without sign or leading zeros, within 300 s of the relay clock.
+      schema:
+        type: string
+        pattern: '^[1-9][0-9]{0,10}$'
+  responses:
+    NoContent:
+      description: Done. Empty body, still signed.
+      headers: { HL-Relay-Signature: { $ref: "#/components/headers/HL-Relay-Signature" } }
+    Unauthorized:
+      description: "`unknown_instance`, `stale_timestamp` (with `relayTime`), `bad_signature` or `replayed`."
+      headers: { HL-Relay-Signature: { $ref: "#/components/headers/HL-Relay-Signature" } }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Forbidden:
+      description: "`instance_revoked`, `instance_suspended` (with `reason`), `invite_required`, `binding_refused` or `challenge_refused`."
+      headers: { HL-Relay-Signature: { $ref: "#/components/headers/HL-Relay-Signature" } }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    NotFound:
+      description: "`binding_unknown`, or `not_found` for an unknown route."
+      headers: { HL-Relay-Signature: { $ref: "#/components/headers/HL-Relay-Signature" } }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Conflict:
+      description: "`key_in_use`, or `binding_conflict` with `reason` `challenge_sent` or `challenge_quota`."
+      headers: { HL-Relay-Signature: { $ref: "#/components/headers/HL-Relay-Signature" } }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    TooLarge:
+      description: "`too_large` (body over the limit) or `too_many_items` (more than 50 push items)."
+      headers: { HL-Relay-Signature: { $ref: "#/components/headers/HL-Relay-Signature" } }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Invalid:
+      description: "`invalid_item` or `env_unsupported`."
+      headers: { HL-Relay-Signature: { $ref: "#/components/headers/HL-Relay-Signature" } }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    UpgradeRequired:
+      description: "`min_server_version`: `HL-Client` is missing or older than the relay's minimum."
+      headers: { HL-Relay-Signature: { $ref: "#/components/headers/HL-Relay-Signature" } }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    TooMany:
+      description: "`instance_rate`, `binding_quota` or `global`, with `scope` and `retryAfter`; `limits` on the request-rate refusal and on `binding_quota`."
+      headers:
+        HL-Relay-Signature: { $ref: "#/components/headers/HL-Relay-Signature" }
+        Retry-After: { $ref: "#/components/headers/Retry-After" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Unavailable:
+      description: "`overloaded`, `storage_unavailable`, `registration_paused`, `maintenance`, `relay_misconfigured` or `apns_unavailable`."
+      headers:
+        HL-Relay-Signature: { $ref: "#/components/headers/HL-Relay-Signature" }
+        Retry-After: { $ref: "#/components/headers/Retry-After" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+  schemas:
+    PublicKey:
+      description: Ed25519 public key, 32 bytes, unpadded base64url.
+      type: string
+      pattern: '^[A-Za-z0-9_-]{43}$'
+    Signature:
+      description: Ed25519 signature, 64 bytes, unpadded base64url.
+      type: string
+      pattern: '^[A-Za-z0-9_-]{86}$'
+    Nonce:
+      description: 16 bytes, unpadded base64url.
+      type: string
+      pattern: '^[A-Za-z0-9_-]{22}$'
+    Token:
+      description: APNs device or activity token, hex (upper- or lowercase), 32 to 100 bytes.
+      type: string
+      pattern: '^([0-9A-Fa-f]{2}){32,100}$'
+    TokenTag:
+      description: SHA-256("hl-push-token" || token)[0..16], lowercase hex.
+      type: string
+      pattern: '^[0-9a-f]{32}$'
+    InstanceId:
+      description: Instance id, lowercase UUIDv4.
+      type: string
+      pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+    UnixTime:
+      description: Unix seconds.
+      type: integer
+      format: int64
+    Day:
+      description: A UTC day, YYYY-MM-DD.
+      type: string
+      pattern: '^\d{4}-\d{2}-\d{2}$'
+    Env:
+      type: string
+      enum: [production, sandbox]
+    BindingState:
+      type: string
+      enum: [provisional, active, soft_invalid]
+    Tier:
+      type: string
+      enum: [probation, standard, suspended, revoked]
+    RegisterBody:
+      type: object
+      additionalProperties: false
+      required: [publicKey, time, proof]
+      properties:
+        publicKey: { $ref: "#/components/schemas/PublicKey" }
+        client:
+          description: "`name/major.minor.patch`, as in `HL-Client`."
+          type: string
+          pattern: '^[a-z0-9-]{1,32}/\d{1,4}\.\d{1,4}\.\d{1,6}$'
+        time:
+          description: Unix seconds within 300 s of the relay clock; part of the signed text.
+          type: integer
+          format: int64
+        proof:
+          description: Signature of `publicKey` over `hl-register-v1`.
+          allOf: [{ $ref: "#/components/schemas/Signature" }]
+        invite:
+          description: One-time registration code; only needed in invite mode.
+          type: string
+          maxLength: 64
+    RegisterResponse:
+      type: object
+      required: [instanceId, tier, limits]
+      properties:
+        instanceId: { $ref: "#/components/schemas/InstanceId" }
+        tier: { $ref: "#/components/schemas/Tier" }
+        limits: { $ref: "#/components/schemas/TierLimits" }
+    TierLimits:
+      type: object
+      required: [devices, provisional, newBindingsPerDay, requestsPerMinute, pushesPerDay, pushesPerMinute, invalidTokensPerDay, challengesPerDay, badSignatureBurst]
+      properties:
+        devices: { type: integer, description: Active bindings. }
+        provisional: { type: integer, description: Concurrent provisional bindings. }
+        newBindingsPerDay: { type: integer, format: int64 }
+        requestsPerMinute: { type: integer, format: int64, description: Authenticated requests per minute. }
+        pushesPerDay: { type: integer, format: int64 }
+        pushesPerMinute: { type: integer, format: int64 }
+        invalidTokensPerDay: { type: integer, format: int64 }
+        challengesPerDay: { type: integer, format: int64 }
+        badSignatureBurst: { type: integer, format: int64, description: Failed signatures before refusal; refills within one minute. }
+    Statement:
+      description: The `hl-bind-v1` device statement.
+      type: object
+      additionalProperties: false
+      required: [instanceId, tokenTag, kind, seq, iat]
+      properties:
+        instanceId: { $ref: "#/components/schemas/InstanceId" }
+        tokenTag: { $ref: "#/components/schemas/TokenTag" }
+        kind: { type: string, const: device }
+        seq: { type: integer, format: int64, minimum: 0 }
+        iat: { $ref: "#/components/schemas/UnixTime" }
+    Consent:
+      type: object
+      additionalProperties: false
+      required: [textVersion, day]
+      properties:
+        textVersion: { type: string, pattern: '^[A-Za-z0-9._-]{1,32}$' }
+        day: { $ref: "#/components/schemas/Day" }
+    BindBody:
+      type: object
+      additionalProperties: false
+      required: [token, env, bindingKey, statement, signature, consent]
+      properties:
+        token: { $ref: "#/components/schemas/Token" }
+        env: { $ref: "#/components/schemas/Env" }
+        bindingKey: { $ref: "#/components/schemas/PublicKey" }
+        statement: { $ref: "#/components/schemas/Statement" }
+        signature: { $ref: "#/components/schemas/Signature" }
+        consent: { $ref: "#/components/schemas/Consent" }
+    BindResponse:
+      type: object
+      required: [state]
+      properties:
+        state: { $ref: "#/components/schemas/BindingState" }
+        challenge:
+          description: Declared in the response struct but not set by this relay version; conflicts are reported through the error envelope.
+          type: string
+    TokenBody:
+      type: object
+      additionalProperties: false
+      required: [token]
+      properties:
+        token: { $ref: "#/components/schemas/Token" }
+    UnbindBody:
+      type: object
+      additionalProperties: false
+      required: [token, bindingKey, statement, signature]
+      properties:
+        token: { $ref: "#/components/schemas/Token" }
+        bindingKey: { $ref: "#/components/schemas/PublicKey" }
+        statement:
+          type: object
+          additionalProperties: false
+          required: [instanceId, tokenTag, iat]
+          properties:
+            instanceId: { $ref: "#/components/schemas/InstanceId" }
+            tokenTag: { $ref: "#/components/schemas/TokenTag" }
+            iat: { $ref: "#/components/schemas/UnixTime" }
+        signature:
+          description: "`hl-unbind-v1` signature by `bindingKey`."
+          allOf: [{ $ref: "#/components/schemas/Signature" }]
+    ChallengeBody:
+      type: object
+      additionalProperties: false
+      required: [bindingKey, challenge, tokenTag, signature]
+      properties:
+        bindingKey: { $ref: "#/components/schemas/PublicKey" }
+        challenge:
+          description: The `c` value of the challenge push, 32 bytes in unpadded base64url.
+          type: string
+          pattern: '^[A-Za-z0-9_-]{43}$'
+        tokenTag: { $ref: "#/components/schemas/TokenTag" }
+        signature:
+          description: "`hl-challenge-v1` signature by `bindingKey`."
+          allOf: [{ $ref: "#/components/schemas/Signature" }]
+    SelfReadResponse:
+      type: object
+      required: [kind, instanceId, state, env, boundDay, lastUsedWeekOf, consentVersion, consentDay]
+      properties:
+        kind: { type: string, const: device }
+        instanceId: { $ref: "#/components/schemas/InstanceId" }
+        state: { $ref: "#/components/schemas/BindingState" }
+        env: { $ref: "#/components/schemas/Env" }
+        boundDay: { $ref: "#/components/schemas/Day" }
+        lastUsedWeekOf:
+          description: First day of the week of the last use; weeks are blocks of seven UTC days from the Unix epoch.
+          allOf: [{ $ref: "#/components/schemas/Day" }]
+        consentVersion: { type: string }
+        consentDay: { type: string }
+    Class:
+      type: string
+      enum: [alert, silent, liveactivity]
+    Activity:
+      description: The Live Activity part of a `liveactivity` item.
+      type: object
+      additionalProperties: false
+      required: [token, bindingKey, statement, signature]
+      properties:
+        token:
+          description: The Live Activity push token.
+          allOf: [{ $ref: "#/components/schemas/Token" }]
+        bindingKey: { $ref: "#/components/schemas/PublicKey" }
+        statement:
+          type: object
+          additionalProperties: false
+          required: [instanceId, tokenTag, laTokenTag, iat]
+          properties:
+            instanceId: { $ref: "#/components/schemas/InstanceId" }
+            tokenTag:
+              description: Tag of the item's device token.
+              allOf: [{ $ref: "#/components/schemas/TokenTag" }]
+            laTokenTag:
+              description: Tag of `activity.token`.
+              allOf: [{ $ref: "#/components/schemas/TokenTag" }]
+            iat:
+              description: At most 300 s in the future and at most 43200 s in the past when the item arrives.
+              allOf: [{ $ref: "#/components/schemas/UnixTime" }]
+        signature:
+          description: "`hl-activity-v1` signature by `bindingKey`."
+          allOf: [{ $ref: "#/components/schemas/Signature" }]
+    PushItem:
+      type: object
+      additionalProperties: false
+      required: [ref, token, env, class, ttlSeconds]
+      description: |
+        alert: `envelope` and `collapse` required, no `activity`. silent: `envelope` required, `collapse`
+        optional, no `activity`. liveactivity: `activity` required, no `envelope`, no `collapse`.
+      properties:
+        ref:
+          description: Idempotency reference, unique within the batch.
+          type: string
+          pattern: '^[A-Za-z0-9._:-]{1,40}$'
+        token: { $ref: "#/components/schemas/Token" }
+        env: { $ref: "#/components/schemas/Env" }
+        class: { $ref: "#/components/schemas/Class" }
+        ttlSeconds:
+          description: Lifetime in seconds, above 0; clamped to 21600 (alert), 3600 (silent), 14400 (liveactivity).
+          type: integer
+          format: int64
+          minimum: 1
+        envelope:
+          description: The sealed envelope (`spec/envelope.md`), 1075 bytes for alert and silent, unpadded base64url.
+          type: string
+          pattern: '^[A-Za-z0-9_-]{1434}$'
+        collapse:
+          description: APNs collapse id, 22 base64url characters.
+          type: string
+          pattern: '^[A-Za-z0-9_-]{22}$'
+        activity: { $ref: "#/components/schemas/Activity" }
+    PushBody:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          description: At least one item; more than 50 answers `413 too_many_items`.
+          type: array
+          minItems: 1
+          maxItems: 50
+          items: { $ref: "#/components/schemas/PushItem" }
+    ItemResult:
+      type: object
+      required: [ref, status]
+      properties:
+        ref: { type: string }
+        status:
+          description: HTTP-style status of the item.
+          type: integer
+          enum: [200, 403, 404, 410, 422, 429, 502, 503]
+        result:
+          description: Set when `status` is 200.
+          type: string
+          enum: [accepted, soft_invalid, activity_gone]
+        error:
+          description: Set when `status` is not 200.
+          type: string
+          enum: [activity_refused, binding_unknown, unregistered, invalid_item, device_quota, binding_quota, instance_quota, instance_rate, global, apns_rejected, apns_unavailable, relay_misconfigured, maintenance, queue_full]
+        reason:
+          description: Apple's reason for `soft_invalid` and `apns_rejected`, from a closed set, otherwise `other`.
+          type: string
+        scope:
+          type: string
+          enum: [device, instance, tier, global]
+        retryAfter:
+          description: Seconds, spread by plus or minus 30 %.
+          type: integer
+          minimum: 1
+        duplicate:
+          description: True when the result is replayed from the idempotency store.
+          type: boolean
+    Notice:
+      type: object
+      required: [id, level]
+      properties:
+        id:
+          description: Fixed identifier; the text ships with the HealthLog server.
+          type: string
+          pattern: '^[a-z0-9_]{1,40}$'
+        level:
+          type: string
+          enum: [info, planned, action_required]
+        until:
+          description: Unix seconds after which the notice no longer appears.
+          type: integer
+          format: int64
+    PushResponse:
+      type: object
+      required: [results, notice, relayTime]
+      properties:
+        results:
+          type: array
+          items: { $ref: "#/components/schemas/ItemResult" }
+        notice:
+          oneOf:
+            - $ref: "#/components/schemas/Notice"
+            - type: "null"
+        relayTime: { $ref: "#/components/schemas/UnixTime" }
+    ReceiptsBody:
+      type: object
+      additionalProperties: false
+      required: [accepted, confirmed]
+      description: Counts only. `0 <= confirmed <= accepted <= 100000`.
+      properties:
+        accepted: { type: integer, format: int64, minimum: 0, maximum: 100000 }
+        confirmed: { type: integer, format: int64, minimum: 0, maximum: 100000 }
+    StatusResponse:
+      type: object
+      required: [state, tier, limits, devices, notice, relayTime, registration]
+      properties:
+        state:
+          type: string
+          enum: [ok, degraded, maintenance, misconfigured]
+        tier: { $ref: "#/components/schemas/Tier" }
+        reason:
+          description: Declared in the response struct; not set by this relay version (a suspended instance is refused before it reaches this endpoint).
+          type: string
+        limits: { $ref: "#/components/schemas/TierLimits" }
+        devices:
+          type: object
+          required: [active, provisional, limit]
+          properties:
+            active: { type: integer, description: Active and soft-invalid bindings. }
+            provisional: { type: integer }
+            limit: { type: integer }
+        notice:
+          oneOf:
+            - $ref: "#/components/schemas/Notice"
+            - type: "null"
+        keyRotatedDay:
+          description: Day of the last key rotation, present for 7 days after it.
+          allOf: [{ $ref: "#/components/schemas/Day" }]
+        relayTime: { $ref: "#/components/schemas/UnixTime" }
+        registration:
+          type: string
+          enum: [open, invite, closed]
+    HealthStatus:
+      type: object
+      required: [status, db_writable, apns_recent, breaker, delivery]
+      properties:
+        status:
+          type: string
+          enum: [ok, degraded, down]
+        db_writable: { type: boolean }
+        apns_recent:
+          description: Apple accepted a push within the last 15 minutes.
+          type: boolean
+        breaker:
+          type: string
+          enum: [closed, open, half_open]
+        delivery:
+          type: string
+          enum: [ok, degraded, unknown]
+    Version:
+      type: object
+      required: [version, commit, imageDigest]
+      properties:
+        version: { type: string }
+        commit: { type: string }
+        imageDigest: { type: string }
+    Error:
+      description: The error envelope of every refused request and every refused item.
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+          enum: [not_found, too_large, too_many_items, invalid_item, env_unsupported, unknown_instance, stale_timestamp, bad_signature, replayed, instance_revoked, instance_suspended, invite_required, binding_refused, challenge_refused, binding_unknown, key_in_use, binding_conflict, min_server_version, instance_rate, binding_quota, global, overloaded, storage_unavailable, registration_paused, maintenance, relay_misconfigured, apns_unavailable, internal]
+        scope:
+          type: string
+          enum: [device, instance, tier, global]
+        retryAfter:
+          description: Seconds, spread by plus or minus 30 %; also sent as `Retry-After`.
+          type: integer
+          minimum: 1
+        relayTime:
+          description: Relay clock, on `stale_timestamp`.
+          allOf: [{ $ref: "#/components/schemas/UnixTime" }]
+        reason:
+          description: Suspension reason (`abuse`, `spam`, `invalid_tokens`, `harassment`, `legal`, `compromised`, `terms`, `operator_request`) or conflict outcome (`challenge_sent`, `challenge_quota`).
+          type: string
+        limits: { $ref: "#/components/schemas/TierLimits" }
