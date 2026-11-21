@@ -8,6 +8,7 @@ import (
 	"math/rand/v2"
 	"net/http"
 	"net/netip"
+	"path"
 	"slices"
 	"strconv"
 	"strings"
@@ -58,11 +59,18 @@ func (r *Relay) Handler() http.Handler {
 		// Every /v1 request carries a nonce so that its signed response cannot be replayed onto another
 		// request (spec/statements.md, hl-relay-resp-v2). Only the public monitoring endpoints may omit it.
 		// Checked before routing, so even a 404 under /v1 is bound to a nonce.
-		if strings.HasPrefix(req.URL.Path, "/v1/") {
+		p := req.URL.Path
+		if p == "/v1" || strings.HasPrefix(p, "/v1/") {
 			if _, err := wire.ParseNonce(req.Header.Get("HL-Nonce")); err != nil {
 				r.fail(w, req, http.StatusBadRequest, errBody{Error: "nonce_required"})
 				return
 			}
+		}
+		// Only canonical paths are routed. ServeMux would answer a path like /v1//push with an unsigned
+		// redirect; every answer here must be signed, so such paths are a plain signed 404.
+		if path.Clean(p) != p {
+			r.fail(w, req, http.StatusNotFound, errBody{Error: "not_found"})
+			return
 		}
 		if _, pattern := mux.Handler(req); pattern == "" {
 			r.fail(w, req, http.StatusNotFound, errBody{Error: "not_found"})

@@ -311,3 +311,27 @@ func TestNotFoundUnderV1NeedsNonce(t *testing.T) {
 		t.Fatalf("suspects without rows: %s", out)
 	}
 }
+
+// TestNonCanonicalPathsAreSigned404: a path with a doubled or trailing slash, or /v1 itself, gets a signed
+// 404 or nonce refusal, never an unsigned redirect.
+func TestNonCanonicalPathsAreSigned404(t *testing.T) {
+	h := newHarness(t)
+	for _, p := range []string{"/v1//push", "/v1/push/", "/v1/./status", "/healthz/"} {
+		req, _ := http.NewRequest(http.MethodPost, h.srv.URL+p, strings.NewReader("{}"))
+		req.Header.Set("HL-Nonce", randNonce())
+		h.client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+		rp := h.send(req, req.Header.Get("HL-Nonce"))
+		if rp.Status != http.StatusNotFound {
+			t.Errorf("%s: %d", p, rp.Status)
+		}
+	}
+	req, _ := http.NewRequest(http.MethodGet, h.srv.URL+"/v1", http.NoBody)
+	resp, err := h.client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("/v1 without nonce: %d", resp.StatusCode)
+	}
+}

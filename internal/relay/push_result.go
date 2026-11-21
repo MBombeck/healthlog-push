@@ -51,6 +51,11 @@ func (r *Relay) applyLocked(p *sent, res apns.Result, now time.Time) (ItemResult
 	case apns.Accepted:
 		r.labelLocked(c, today, "accepted")
 		r.applyAcceptedLocked(p, established, now, today)
+		// A newer provider token that Apple accepts clears an earlier rejection: only a rejection of the
+		// very next token after a rejection stops the relay.
+		if r.providerBadIat != 0 && res.TokenIat > r.providerBadIat {
+			r.providerBadIat = 0
+		}
 		return ItemResult{Status: http.StatusOK, Result: "accepted"}, true
 	case apns.Unregistered, apns.SoftInvalid:
 		return r.applyTokenFailureLocked(p, res, established, now, today)

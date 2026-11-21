@@ -445,3 +445,28 @@ func TestFlushIsOneTransaction(t *testing.T) {
 		t.Fatalf("tick after traffic wrote %d transactions, want 1", w)
 	}
 }
+
+// TestOldProviderRejectionForgotten: one InvalidProviderToken, then days of accepted pushes with renewed
+// tokens, then another single rejection: that is not "the renewed token was rejected too" and must not stop
+// the relay.
+func TestOldProviderRejectionForgotten(t *testing.T) {
+	h := newHarness(t)
+	i := h.register()
+	d := newDevice(0x24)
+	i.activate(d)
+	h.apns.setAnswer(func(string, apnsReq) (int, string) { return 403, "InvalidProviderToken" })
+	i.push1(alertItem("r1", d))
+	h.clk.Add(30 * time.Minute)
+	h.tokens.renew(t, h.clk.Now())
+	h.apns.setAnswer(func(string, apnsReq) (int, string) { return 200, "" })
+	if res := i.push1(alertItem("ok", d)); res.Result != "accepted" {
+		t.Fatal(res)
+	}
+	h.clk.Add(5 * 24 * time.Hour)
+	h.tokens.renew(t, h.clk.Now())
+	h.apns.setAnswer(func(string, apnsReq) (int, string) { return 403, "InvalidProviderToken" })
+	i.push1(alertItem("r2", d))
+	if hz, _ := h.r.Health(); hz.Status != "ok" {
+		t.Fatalf("an old rejection plus a new one stopped the relay: %+v", hz)
+	}
+}
