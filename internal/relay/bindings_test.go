@@ -120,15 +120,38 @@ func TestChallengeFlow(t *testing.T) {
 
 func TestConflictFallbackAfterSevenQuietDays(t *testing.T) {
 	h := newHarness(t)
-	a, b := h.register(), h.register()
+	a := h.register()
 	d := newDevice(6)
 	a.activate(d)
 	h.clk.Add(8 * 24 * time.Hour)
-	if rp := b.bind(newDevice(6)); rp.Status != 201 {
-		t.Fatalf("after 8 quiet days: %d %s", rp.Status, rp.Raw)
+	// The holding instance may replace its own silent binding with a new key (restored app).
+	restored := newDevice(6)
+	if rp := a.bind(restored); rp.Status != 200 {
+		t.Fatalf("holder after 8 quiet days: %d %s", rp.Status, rp.Raw)
+	}
+	if rp := h.selfRead(restored); rp.Status != 200 {
+		t.Fatal("the new key does not hold the binding")
+	}
+}
+
+// TestFormerInstanceCannotTakeOverASilentBinding: a device moved from A to B; B stays silent for eight days.
+// A knows the token and signs with a key of its own: that is a conflict that needs the device's challenge
+// answer, never a direct takeover.
+func TestFormerInstanceCannotTakeOverASilentBinding(t *testing.T) {
+	h := newHarness(t)
+	a, b := h.register(), h.register()
+	d := newDevice(7)
+	a.activate(d)
+	if rp := b.bind(d); rp.Status != 201 {
+		t.Fatalf("move: %d", rp.Status)
+	}
+	b.push1(alertItem("b1", d))
+	h.clk.Add(8 * 24 * time.Hour)
+	if rp := a.bind(newDevice(7)); rp.Status != 409 {
+		t.Fatalf("former instance after 8 quiet days: %d %s", rp.Status, rp.Raw)
 	}
 	if h.bindingOwner(d) != b.id {
-		t.Fatal("fallback did not move the binding")
+		t.Fatal("binding taken over")
 	}
 }
 

@@ -121,10 +121,12 @@ func (r *Relay) bindPrecheckLocked(s *instState, b *wire.Bind, m string, kh []by
 		}
 	}
 	// A different key on a live binding is a conflict, resolved by a challenge push to the token, never by
-	// last-writer-wins. Only a binding without an accepted push for seven days may be replaced directly.
+	// last-writer-wins. Only the instance that holds the binding may replace it directly, and only after
+	// seven days without an accepted push (a restored app with a new key whose challenge did not arrive).
+	// Any other instance always needs the challenge, which only the device can answer.
 	if cur != nil && !bytes.Equal(cur.KeyHash, kh) {
 		lastGood := max(cur.LastSuccessDay, cur.BoundDay)
-		if store.Day(now)-lastGood < conflictStaleDays {
+		if cur.InstanceID != s.rec.ID || store.Day(now)-lastGood < conflictStaleDays {
 			return http.StatusConflict, nil, r.startChallenge(s, m, b, kh, now)
 		}
 	}
