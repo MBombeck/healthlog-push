@@ -1,6 +1,7 @@
 package store
 
 import (
+	"bytes"
 	"path/filepath"
 	"slices"
 	"testing"
@@ -100,6 +101,12 @@ func TestExportBlocksRetention(t *testing.T) {
 	today := 20000
 	_ = s.BlockPair([]byte("old-mac"), "i", today-366)
 	_ = s.BlockPair([]byte("new-mac"), "i", today-10)
+	_ = s.BlockToken([]byte("old-token-mac"), today-366)
+	_ = s.BlockToken([]byte("new-token-mac"), today-10)
+	_ = s.PutDeny(&DenyEntry{InstanceID: "gone", Reason: "abuse", Day: today - 366})
+	_ = s.PutDeny(&DenyEntry{InstanceID: "kept", Reason: "spam", Day: today - 10})
+	_ = s.PutInstance(&Instance{ID: "gone", PublicKey: make([]byte, 32), Tier: TierRevoked, ReasonDay: today - 366})
+	_ = s.PutInstance(&Instance{ID: "kept", PublicKey: bytes.Repeat([]byte{1}, 32), Tier: TierSuspended, ReasonDay: today - 10})
 	ex, err := s.BuildExport(today)
 	if err != nil {
 		t.Fatal(err)
@@ -107,13 +114,16 @@ func TestExportBlocksRetention(t *testing.T) {
 	if len(ex.BlockedPairs) != 1 || ex.BlockedPairs[0].ExpiresDay != DayString(today-10+RetainBlocks) {
 		t.Fatalf("export: %+v", ex.BlockedPairs)
 	}
+	if len(ex.BlockedTokens) != 1 || len(ex.Denylist) != 1 || ex.Denylist[0].InstanceID != "kept" || len(ex.Instances) != 1 {
+		t.Fatalf("12-month retention not applied on export: %+v %+v %+v", ex.BlockedTokens, ex.Denylist, ex.Instances)
+	}
 	ex.BlockedPairs = append(ex.BlockedPairs, ExportedBlock{Pair: ex.BlockedPairs[0].Pair[:62] + "00", Reason: ReasonDeviceOptOut, ExpiresDay: DayString(today - 1)})
 	s2 := open(t)
 	if _, err := s2.Import(ex, today); err != nil {
 		t.Fatal(err)
 	}
-	if !s2.PairBlocked([]byte("new-mac"), "i") {
-		t.Fatal("block lost on import")
+	if !s2.PairBlocked([]byte("new-mac"), "i") || !s2.TokenBlocked([]byte("new-token-mac")) || s2.TokenBlocked([]byte("old-token-mac")) {
+		t.Fatal("blocks not restored exactly")
 	}
 	ex2, _ := s2.BuildExport(today)
 	if len(ex2.BlockedPairs) != 1 {

@@ -324,6 +324,14 @@ func pairKey(mac []byte, instanceID string) []byte {
 	return h.Sum(nil)
 }
 
+// tokenKey is the stored form of an operator token block: SHA-256 over a label and the token MAC.
+func tokenKey(mac []byte) []byte {
+	h := sha256.New()
+	h.Write([]byte("hl-blocked-token\n"))
+	h.Write(mac)
+	return h.Sum(nil)
+}
+
 // BlockPair records that the device opted out of this instance.
 func (s *Store) BlockPair(mac []byte, instanceID string, day int) error {
 	return s.db.Update(func(tx *bolt.Tx) error {
@@ -343,19 +351,19 @@ func (s *Store) PairBlocked(mac []byte, instanceID string) bool {
 
 // BlockToken blocks a token MAC for every instance except its current holder.
 func (s *Store) BlockToken(mac []byte, day int) error {
-	return s.db.Update(func(tx *bolt.Tx) error { return tx.Bucket(bBlockedToken).Put(mac, []byte(strconv.Itoa(day))) })
+	return s.db.Update(func(tx *bolt.Tx) error { return tx.Bucket(bBlockedToken).Put(tokenKey(mac), []byte(strconv.Itoa(day))) })
 }
 
 // UnblockToken removes a token block.
 func (s *Store) UnblockToken(mac []byte) error {
-	return s.db.Update(func(tx *bolt.Tx) error { return tx.Bucket(bBlockedToken).Delete(mac) })
+	return s.db.Update(func(tx *bolt.Tx) error { return tx.Bucket(bBlockedToken).Delete(tokenKey(mac)) })
 }
 
 // TokenBlocked reports whether a token MAC is blocked.
 func (s *Store) TokenBlocked(mac []byte) bool {
 	found := false
 	_ = s.db.View(func(tx *bolt.Tx) error {
-		found = tx.Bucket(bBlockedToken).Get(mac) != nil
+		found = tx.Bucket(bBlockedToken).Get(tokenKey(mac)) != nil
 		return nil
 	})
 	return found

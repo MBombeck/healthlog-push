@@ -178,10 +178,9 @@ app does not depend on the relay for anything else. Protections against a self-i
 - **Blocks depend on the configured MAC keys.** Opt-out and token blocks are looked up under the current and
   the previous token MAC key, so they survive one rotation. Once the previous key is removed from the
   secrets, blocks recorded under it no longer match (bindings have moved by then; blocks are not rewritten).
-- **Operator token blocks do not survive a database loss.** Device opt-out blocks travel in the daily
-  export (keyed pair hash, reason, expiry) and are restored; `block-token` entries are not exported and must
-  be set again after a restore. A restore with a different token MAC key would not match the exported pair
-  hashes; the MAC keys come from the secret store, never from the old disk.
+- **A restore needs the same token MAC keys.** All blocks travel in the daily export and are restored, but
+  opt-out and token blocks are hashes over the token MAC; a restore with a different MAC key would not match
+  them. The MAC keys come from the secret store, never from the old disk.
 - **Receipt counts are self-reported.** `POST /v1/receipts` sums counts from all instances. The `delivery`
   signal needs reports from at least three instances in 24 hours, so one instance alone cannot turn it to
   `degraded`; three cooperating instances could, and the deploy health gate would then refuse a new image
@@ -227,7 +226,8 @@ app does not depend on the relay for anything else. Protections against a self-i
 | Live Activity ends must be device-authorised | activity statement checked against the binding key | `TestLiveActivityEnd` |
 | Malformed input must be refused, not guessed | strict JSON, size limits, fuzzed parsers | `TestParsePushBodyRefusesUnknownFields`, `TestValidateItem`, `TestParseRegistration`, `TestParseUnixAndNonce`, `TestParseClient`, `TestRequestLevelRefusals`, `FuzzParseRegistration`, `FuzzPushItems`, `FuzzParseUnbind`, `FuzzParseChallenge`, `FuzzParseSelfRead`, `FuzzHeaders`, `FuzzParseReceipts` |
 | The store must hold only what the protocol allows | closed bucket list, retention, weeks start on Monday | `TestStoreBucketsAreClosed`, `TestRetention`, `TestWeeksStartOnMonday` |
-| A backup must not contain bindings or tokens | export holds instances, denylist and opt-out pair hashes only; restore keeps ids | `TestExportRoundTrip`, `TestMigrationExportRestore` |
+| A backup must not contain bindings or tokens | export holds instances, denylist and keyed block hashes only; restore keeps ids | `TestExportRoundTrip`, `TestMigrationExportRestore` |
+| An abuse block must survive a restore | token blocks, denylist and blocked instance tiers in the export, 12-month retention on export and import | `TestAbuseBlocksSurviveRestore`, `TestExportBlocksRetention` |
 | A device opt-out must survive a restore | opt-out blocks in the export, 12-month retention applied on export and import | `TestOptOutSurvivesRestore`, `TestExportBlocksRetention`, `TestDamagedStoreRecovers` |
 | MAC key rotation must not orphan bindings in use | bindings move to the current key on use | `TestMACKeyRotation` |
 | An opt-out must survive a MAC key rotation | blocks are checked under every configured MAC key | `TestBlocksSurviveMACRotation` |

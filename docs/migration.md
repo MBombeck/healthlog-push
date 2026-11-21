@@ -16,7 +16,7 @@ Example values: public name `push.example.org`, old host `203.0.113.10` /
 | Image | The same digest, deployed by the Ansible role, verified again by cosign |
 | Relay identity key, token MAC keys, ACME account key | From the secret store, same values. Pinned relay keys and token MACs stay valid. |
 | APNs key | From the secret store, into the signer path only |
-| Instance registry, denylist and device opt-out blocks | `/srv/healthlog-push/export/registry.json`, the only file copied from the old host |
+| Instance registry, denylist, device opt-out blocks and operator token blocks | `/srv/healthlog-push/export/registry.json`, the only file copied from the old host |
 | bbolt database (`/data`) | **Not moved.** The new host starts with an empty `/data`. |
 | TLS certificate and key (`/acme`) | **Not moved.** The new host obtains a fresh certificate via TLS-ALPN-01. |
 | Device bindings | **Not moved.** They return through the rebind path. |

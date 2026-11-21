@@ -324,3 +324,47 @@ func TestOptOutSurvivesRestore(t *testing.T) {
 		t.Fatalf("another instance after restore: %d %s", rp.Status, rp.Raw)
 	}
 }
+
+// TestAbuseBlocksSurviveRestore: operator token blocks and suspended or revoked instances are still in force
+// on a relay rebuilt from the export; an abuse block that vanished on restore would reopen the abuse.
+func TestAbuseBlocksSurviveRestore(t *testing.T) {
+	old := newHarness(t)
+	holder, abuser, revoked, suspended := old.register(), old.register(), old.register(), old.register()
+	d := newDevice(0x63)
+	holder.activate(d)
+	if err := old.r.BlockToken(d.hex(), "", false); err != nil {
+		t.Fatal(err)
+	}
+	_ = old.r.Revoke(revoked.id, "abuse")
+	_ = old.r.Suspend(suspended.id, "spam")
+	if err := old.r.ExportNow(); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(filepath.Join(old.dir, "registry.json"))
+	var ex store.Export
+	_ = json.Unmarshal(raw, &ex)
+	if len(ex.BlockedTokens) != 1 || ex.BlockedTokens[0].Reason != store.ReasonOperatorBlock || len(ex.Denylist) != 2 {
+		t.Fatalf("export: tokens %+v denylist %+v", ex.BlockedTokens, ex.Denylist)
+	}
+	if bytes.Contains(raw, []byte(d.hex())) || bytes.Contains(raw, []byte(hex.EncodeToString([]byte(mac(old.r.cfg.MACKeys[0], d.token))))) {
+		t.Fatal("export leaks the token or its MAC")
+	}
+	restored := newHarness(t, func(c *Config) { c.MACKeys = old.r.cfg.MACKeys })
+	if _, err := restored.r.SetRecovery(store.Day(restored.clk.Now())+14, &ex); err != nil {
+		t.Fatal(err)
+	}
+	// Bindings are gone after a restore; the blocked token must not be bindable by another instance.
+	a := &instance{h: restored, key: abuser.key, id: abuser.id}
+	if rp := a.bind(d); rp.Status != 403 || rp.str("error") != "binding_refused" {
+		t.Fatalf("token block lost on restore: %d %s", rp.Status, rp.Raw)
+	}
+	if rp := (&instance{h: restored, key: revoked.key, id: revoked.id}).do(http.MethodGet, "/v1/status", nil); rp.Status != 403 || rp.str("error") != "instance_revoked" {
+		t.Fatalf("revocation lost on restore: %d %s", rp.Status, rp.Raw)
+	}
+	if rp := (&instance{h: restored, key: revoked.key}).registerRaw(""); rp.Status != 403 {
+		t.Fatalf("revoked key registered again after restore: %d", rp.Status)
+	}
+	if rp := (&instance{h: restored, key: suspended.key, id: suspended.id}).do(http.MethodGet, "/v1/status", nil); rp.Status != 403 || rp.str("reason") != "spam" {
+		t.Fatalf("suspension lost on restore: %d %s", rp.Status, rp.Raw)
+	}
+}

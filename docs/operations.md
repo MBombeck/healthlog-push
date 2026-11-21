@@ -229,8 +229,9 @@ export ([Restore](#restore)).
 
 ### export
 
-Writes `/export/registry.json` now: instances, the denylist and the device opt-out blocks (keyed pair hash,
-reason `device_opt_out`, expiry day; blocks past 365 days are left out), no bindings, no counters, no
+Writes `/export/registry.json` now: instances (suspended and revoked ones with their tier), the denylist
+(instance id, reason code, expiry day), the device opt-out blocks and the operator token blocks (keyed hash,
+reason `device_opt_out` or `operator_block`, expiry day). Entries past the 365-day retention are left out; no bindings, no counters, no
 secrets. The
 relay also writes it at start and at every UTC day change.
 
@@ -320,10 +321,11 @@ time it is used.
    retention anyway, so after that no binding is left under the old key.
 5. Remove `token_mac_key_previous` and recreate the relay.
 
-Opt-out blocks and token blocks are keyed with the MAC and are not moved. After a rotation the relay no
-longer recognises them: re-apply the token blocks you still need with `admin block-token --token`; opt-out
-blocks cannot be restored, because the relay never knew the tokens. Rotate this key only when it is
-exposed.
+Opt-out blocks and token blocks are stored as hashes over the token MAC and are not rewritten. While the
+old key is configured as `token_mac_key_previous` the relay checks blocks under both keys. Once it is
+removed, blocks recorded under it no longer match: re-apply the token blocks you still need with
+`admin block-token --token`; opt-out blocks cannot be re-created, because the relay never knew the tokens.
+Keep the previous key for the 365-day block retention, or rotate this key only when it is exposed.
 
 ### ACME account key
 
@@ -491,8 +493,10 @@ Device bindings are not restored. The first push for a device answers `404 bindi
 submits its stored device statement again, or gets a fresh one from the app. Bindings come back over a few
 hours. Device opt-out blocks are restored from the export, so a server a device opted out of stays blocked;
 the restore must use the same token MAC keys (current and previous) from the secret store, because the pair
-hash is built from the token MAC. Operator token blocks (`block-token`) are not exported; set them again
-from the abuse records after a restore.
+hash is built from the token MAC. Operator token blocks (`block-token`, reason `operator_block`) and the
+denylist travel in the export as well, and suspended or revoked instances keep their tier, so every abuse
+block is still in force after a restore. Check with `admin stats` (tiers) and one `admin instance <id>` of a
+blocked instance.
 
 Test a restore regularly: start a relay with an empty `/data` and a copy of the export on a test host, and
 check that `admin stats` shows the imported instances.
