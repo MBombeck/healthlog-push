@@ -256,7 +256,9 @@ paths:
       summary: Leave an instance directly (app)
       description: |
         The direct opt-out. `signature` is the `hl-unbind-v1` signature by `bindingKey`. On success the
-        binding is deleted and the pair (token, instance) is blocked for 365 days. Any mismatch answers
+        binding is deleted and the pair (token, instance) is blocked for 365 days. Only a later bind
+        statement by the same binding key, with a higher `seq` and a later `iat`, lifts the block
+        (`spec/protocol.md`, "Returning"). Any mismatch answers
         `404 binding_unknown`. Failed attempts are charged to the relay-wide bucket (`429 global` once it is
         empty); a verified call is limited per device token (`429 device_quota`).
         Errors: `400 nonce_required`, `411 length_required`, `413 too_large`, `422 invalid_item`,

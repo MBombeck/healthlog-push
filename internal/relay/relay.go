@@ -261,6 +261,17 @@ func (r *Relay) pairBlocked(token []byte, instanceID string) bool {
 	return false
 }
 
+// pairBlock returns the device opt-out of the pair and the token MAC it is stored under.
+func (r *Relay) pairBlock(token []byte, instanceID string) (string, store.PairBlock, bool) {
+	for _, k := range r.cfg.MACKeys {
+		m := mac(k, token)
+		if b, ok := r.st.GetPairBlock([]byte(m), instanceID); ok {
+			return m, b, true
+		}
+	}
+	return "", store.PairBlock{}, false
+}
+
 func (r *Relay) tokenBlocked(token []byte) bool {
 	for _, k := range r.cfg.MACKeys {
 		if r.st.TokenBlocked([]byte(mac(k, token))) {

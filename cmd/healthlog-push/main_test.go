@@ -22,7 +22,7 @@ func TestDamagedStoreRecovers(t *testing.T) {
 	}
 	_ = st.PutInstance(&store.Instance{ID: "6f1c2a4e-1b9d-4c3e-8a7f-0d2b5e9c1a37", PublicKey: bytes.Repeat([]byte{1}, 32), Tier: store.TierStandard})
 	today := store.Day(time.Now())
-	_ = st.BlockPair([]byte("token-mac"), "6f1c2a4e-1b9d-4c3e-8a7f-0d2b5e9c1a37", today)
+	_ = st.BlockPair([]byte("token-mac"), "6f1c2a4e-1b9d-4c3e-8a7f-0d2b5e9c1a37", store.PairBlock{Day: today})
 	ex, _ := st.BuildExport(today)
 	_ = st.Close()
 	if err := store.WriteExport(export, ex); err != nil {

@@ -68,7 +68,11 @@ func (r *Relay) bindLocked(s *instState, b *wire.Bind, now time.Time) (int, *bin
 	m := r.tokenMAC(b.Token)
 	kh := keyHash(b.BindingKey)
 	cur := r.bindings[m]
-	if r.pairBlocked(b.Token, id) {
+	// A device opt-out holds against the instance. Only the device can undo it: a statement by the same
+	// binding key, with a higher seq than the binding it left and made after its opt-out statement. The
+	// instance has no such statement unless the device signed one after leaving.
+	blockMAC, block, blocked := r.pairBlock(b.Token, id)
+	if blocked && !optOutReturn(block, kh, b) {
 		return http.StatusForbidden, nil, &errBody{Error: "binding_refused"}
 	}
 	if r.tokenBlocked(b.Token) && (cur == nil || cur.InstanceID != id) {
@@ -94,6 +98,12 @@ func (r *Relay) bindLocked(s *instState, b *wire.Bind, now time.Time) (int, *bin
 	if code, e := r.admitNewBinding(s, cur, now); e != nil {
 		return code, nil, e
 	}
+	if blocked {
+		if !r.persist(r.st.UnblockPair([]byte(blockMAC), id)) {
+			return http.StatusServiceUnavailable, nil, &errBody{Error: "storage_unavailable", RetryAfter: jitter(r5m)}
+		}
+		r.M.Inc("hlp_bindings_total", "result", "opt_out_lifted")
+	}
 	nb := &store.Binding{
 		InstanceID: id, KeyHash: kh, Seq: b.Seq, Env: b.Env, State: store.StateProvisional, BoundDay: today,
 		LastUsedWeek: store.Week(today), ConsentVersion: b.Consent.TextVersion, ConsentDay: b.Consent.Day,
@@ -117,6 +127,13 @@ func (r *Relay) bindLocked(s *instState, b *wire.Bind, now time.Time) (int, *bin
 		status = http.StatusOK
 	}
 	return status, &bindResp{State: nb.State}, nil
+}
+
+// optOutReturn reports whether b undoes the opt-out recorded in block: same binding key, a higher seq than
+// the binding that left, and made after the opt-out statement. A block without a key (restored from an
+// export) is never undone this way.
+func optOutReturn(block store.PairBlock, kh []byte, b *wire.Bind) bool {
+	return len(block.KeyHash) > 0 && bytes.Equal(block.KeyHash, kh) && b.Seq > block.Seq && b.Iat > block.Iat
 }
 
 // admitNewBinding checks the binding quotas for a binding that is new to this instance.
@@ -278,7 +295,8 @@ func (r *Relay) handleUnbindSelf(w http.ResponseWriter, req *http.Request) {
 	if !r.appAllowedLocked(w, req, m) {
 		return
 	}
-	if !r.persist(r.st.BlockPair([]byte(m), u.InstanceID, store.Day(now))) || !r.persist(r.st.DeleteBinding([]byte(m))) {
+	block := store.PairBlock{Day: store.Day(now), KeyHash: b.KeyHash, Seq: b.Seq, Iat: u.Iat}
+	if !r.persist(r.st.BlockPair([]byte(m), u.InstanceID, block)) || !r.persist(r.st.DeleteBinding([]byte(m))) {
 		r.fail(w, req, http.StatusServiceUnavailable, errBody{Error: "storage_unavailable"})
 		return
 	}

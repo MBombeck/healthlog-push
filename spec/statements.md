@@ -213,6 +213,8 @@ hl-unbind-v1
 - **Verifies:** the relay, on `DELETE /v1/bindings/self`, sent by the app itself. The key must be the one
   stored for the binding of that token and instance.
 - `iat` within 300 s of the relay clock.
+- The relay keeps this `iat` with the opt-out block. Only an `hl-bind-v1` statement by the same key with a
+  later `iat` and a higher `seq` returns the device to that instance (`spec/protocol.md`, "Returning").
 - **Vector:** `unbind`. Negative: `unbindOtherInstance`.
 
 ## hl-challenge-v1

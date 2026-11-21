@@ -83,7 +83,7 @@ func (s *Store) BuildExport(today int) (*Export, error) {
 	collect := func(bucket []byte, reason string, out *[]ExportedBlock) func(tx *bolt.Tx) error {
 		return func(tx *bolt.Tx) error {
 			return tx.Bucket(bucket).ForEach(func(k, v []byte) error {
-				d, _ := strconv.Atoi(string(v))
+				d := blockDay(v)
 				if today-d > RetainBlocks {
 					return nil
 				}

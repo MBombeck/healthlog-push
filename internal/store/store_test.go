@@ -2,6 +2,7 @@ package store
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"path/filepath"
 	"slices"
 	"testing"
@@ -35,8 +36,11 @@ func TestStoreBucketsAreClosed(t *testing.T) {
 func TestRetention(t *testing.T) {
 	s := open(t)
 	today := 20000
-	_ = s.BlockPair([]byte("m1"), "i", today-366)
-	_ = s.BlockPair([]byte("m2"), "i", today-10)
+	_ = s.BlockPair([]byte("m1"), "i", PairBlock{Day: today - 366})
+	_ = s.BlockPair([]byte("m2"), "i", PairBlock{Day: today - 10})
+	kh := sha256.Sum256([]byte("key"))
+	_ = s.BlockPair([]byte("m3"), "i", PairBlock{Day: today - 366, KeyHash: kh[:], Seq: 4, Iat: 1795000000})
+	_ = s.BlockPair([]byte("m4"), "i", PairBlock{Day: today - 10, KeyHash: kh[:], Seq: 4, Iat: 1795000000})
 	_ = s.AddCounters(today-8, "i", DayCounters{Sent: 1})
 	_ = s.AddCounters(today-6, "i", DayCounters{Sent: 1})
 	_ = s.AddGlobal(today-401, "alert", "accepted", 1)
@@ -47,6 +51,12 @@ func TestRetention(t *testing.T) {
 	}
 	if s.PairBlocked([]byte("m1"), "i") || !s.PairBlocked([]byte("m2"), "i") {
 		t.Error("blocked pairs: 12 months")
+	}
+	if s.PairBlocked([]byte("m3"), "i") || !s.PairBlocked([]byte("m4"), "i") {
+		t.Error("blocked pairs with a key: 12 months")
+	}
+	if b, _ := s.GetPairBlock([]byte("m4"), "i"); !bytes.Equal(b.KeyHash, kh[:]) || b.Seq != 4 || b.Iat != 1795000000 || b.Day != today-10 {
+		t.Errorf("stored opt-out: %+v", b)
 	}
 	if s.Counters(today-8, "i").Sent != 0 || s.Counters(today-6, "i").Sent != 1 {
 		t.Error("per-instance counters: 7 days")
@@ -99,8 +109,8 @@ func TestWeeksStartOnMonday(t *testing.T) {
 func TestExportBlocksRetention(t *testing.T) {
 	s := open(t)
 	today := 20000
-	_ = s.BlockPair([]byte("old-mac"), "i", today-366)
-	_ = s.BlockPair([]byte("new-mac"), "i", today-10)
+	_ = s.BlockPair([]byte("old-mac"), "i", PairBlock{Day: today - 366})
+	_ = s.BlockPair([]byte("new-mac"), "i", PairBlock{Day: today - 10})
 	_ = s.BlockToken([]byte("old-token-mac"), today-366)
 	_ = s.BlockToken([]byte("new-token-mac"), today-10)
 	_ = s.PutDeny(&DenyEntry{InstanceID: "gone", Reason: "abuse", Day: today - 366})

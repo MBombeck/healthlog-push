@@ -401,6 +401,47 @@ func TestDirectOptOut(t *testing.T) {
 	}
 }
 
+// TestOptOutReturnNeedsTheDevice: after a direct opt-out only a statement the same binding key made later,
+// with a higher seq, binds the pair again. A statement signed before the opt-out, another key, and a block
+// restored without its key all stay refused.
+func TestOptOutReturnNeedsTheDevice(t *testing.T) {
+	h := newHarness(t)
+	a := h.register()
+	d := newDevice(8)
+	a.activate(d)
+	early := d.bindBody(a.id, h.clk.Now().Unix()) // signed before the opt-out, never sent
+	h.clk.Add(time.Second)
+	if rp := h.unbindSelf(d, d.key, a.id); rp.Status != 204 {
+		t.Fatalf("opt-out: %d %s", rp.Status, rp.Raw)
+	}
+	if rp := a.do(http.MethodPost, "/v1/bindings", early); rp.Status != 403 || rp.str("error") != "binding_refused" {
+		t.Fatalf("statement from before the opt-out: %d %s", rp.Status, rp.Raw)
+	}
+	if rp := a.bind(d); rp.Status != 403 {
+		t.Fatalf("statement in the opt-out second: %d %s", rp.Status, rp.Raw)
+	}
+	other := newDevice(8)
+	h.clk.Add(time.Second)
+	if rp := a.bind(other); rp.Status != 403 {
+		t.Fatalf("another key returned the pair: %d %s", rp.Status, rp.Raw)
+	}
+	if rp := a.bind(d); rp.Status != 201 || rp.str("state") != "provisional" {
+		t.Fatalf("device return: %d %s", rp.Status, rp.Raw)
+	}
+	if h.bindingOwner(d) != a.id {
+		t.Fatal("binding not restored")
+	}
+	// Leaving again blocks again, and the old return statement does not work twice.
+	again := d.bindBody(a.id, h.clk.Now().Unix())
+	h.clk.Add(time.Second)
+	if rp := h.unbindSelf(d, d.key, a.id); rp.Status != 204 {
+		t.Fatalf("second opt-out: %d", rp.Status)
+	}
+	if rp := a.do(http.MethodPost, "/v1/bindings", again); rp.Status != 403 {
+		t.Fatalf("pre-opt-out statement after the second opt-out: %d", rp.Status)
+	}
+}
+
 // TestUnregisteredIsTheOnlyFinalDeletion covers F1 (abuse) and 4.4.
 func TestUnregisteredIsTheOnlyFinalDeletion(t *testing.T) {
 	h := newHarness(t)

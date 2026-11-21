@@ -359,21 +359,76 @@ func tokenKey(mac []byte) []byte {
 	return h.Sum(nil)
 }
 
-// BlockPair records that the device opted out of this instance.
-func (s *Store) BlockPair(mac []byte, instanceID string, day int) error {
+// PairBlock is a stored device opt-out. KeyHash, Seq and Iat describe the binding key that opted out, the
+// sequence number of the binding it left and the time of its opt-out statement: only a later statement by
+// that same key may lift the block. A block restored from an export carries no key and cannot be lifted.
+type PairBlock struct {
+	Day     int
+	KeyHash []byte
+	Seq     int64
+	Iat     int64
+}
+
+// encode stores a block as "day" (restored, no key) or "day|hex(keyHash)|seq|iat".
+func (b PairBlock) encode() []byte {
+	if len(b.KeyHash) == 0 {
+		return []byte(strconv.Itoa(b.Day))
+	}
+	return []byte(fmt.Sprintf("%d|%x|%d|%d", b.Day, b.KeyHash, b.Seq, b.Iat))
+}
+
+func decodePairBlock(v []byte) PairBlock {
+	parts := strings.Split(string(v), "|")
+	var b PairBlock
+	b.Day, _ = strconv.Atoi(parts[0])
+	if len(parts) == 4 {
+		if kh, err := hex.DecodeString(parts[1]); err == nil && len(kh) == sha256.Size {
+			b.KeyHash = kh
+			b.Seq, _ = strconv.ParseInt(parts[2], 10, 64)
+			b.Iat, _ = strconv.ParseInt(parts[3], 10, 64)
+		}
+	}
+	return b
+}
+
+// blockDay is the day of a stored block value in either form.
+func blockDay(v []byte) int {
+	d, _, _ := strings.Cut(string(v), "|")
+	n, _ := strconv.Atoi(d)
+	return n
+}
+
+// BlockPair records that the device opted out of this instance with the binding key hashed in b.KeyHash.
+func (s *Store) BlockPair(mac []byte, instanceID string, b PairBlock) error {
 	return s.update(func(tx *bolt.Tx) error {
-		return tx.Bucket(bBlockedPairs).Put(pairKey(mac, instanceID), []byte(strconv.Itoa(day)))
+		return tx.Bucket(bBlockedPairs).Put(pairKey(mac, instanceID), b.encode())
 	})
 }
 
 // PairBlocked reports whether the pair is blocked.
 func (s *Store) PairBlocked(mac []byte, instanceID string) bool {
-	found := false
+	_, ok := s.GetPairBlock(mac, instanceID)
+	return ok
+}
+
+// GetPairBlock returns the stored opt-out of the pair.
+func (s *Store) GetPairBlock(mac []byte, instanceID string) (PairBlock, bool) {
+	var (
+		b     PairBlock
+		found bool
+	)
 	_ = s.db.View(func(tx *bolt.Tx) error {
-		found = tx.Bucket(bBlockedPairs).Get(pairKey(mac, instanceID)) != nil
+		if v := tx.Bucket(bBlockedPairs).Get(pairKey(mac, instanceID)); v != nil {
+			b, found = decodePairBlock(v), true
+		}
 		return nil
 	})
-	return found
+	return b, found
+}
+
+// UnblockPair removes a device opt-out; the relay calls it only for a return the same key signed.
+func (s *Store) UnblockPair(mac []byte, instanceID string) error {
+	return s.update(func(tx *bolt.Tx) error { return tx.Bucket(bBlockedPairs).Delete(pairKey(mac, instanceID)) })
 }
 
 // BlockToken blocks a token MAC for every instance except its current holder.
@@ -518,7 +573,7 @@ func (s *Store) Prune(today int) error {
 			}
 			return nil
 		}
-		valDay := func(_, v []byte) int { n, _ := strconv.Atoi(string(v)); return n }
+		valDay := func(_, v []byte) int { return blockDay(v) }
 		keyDay := func(k, _ []byte) int { d, _, _ := strings.Cut(string(k), "|"); n, _ := strconv.Atoi(d); return n }
 		denyDay := func(_, v []byte) int { var e DenyEntry; _ = json.Unmarshal(v, &e); return e.Day }
 		for _, step := range []struct {

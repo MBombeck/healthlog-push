@@ -279,7 +279,7 @@ Rules, in order:
 |---|---|---|
 | 1 | `env` is not served by this relay (the hosted relay serves `production` only) | `422 env_unsupported` |
 | 2 | the store does not accept writes | `503 storage_unavailable`, retry about 5 min |
-| 3 | the pair (token, this instance) is blocked by a direct opt-out | `403 binding_refused` |
+| 3 | the pair (token, this instance) is blocked by a direct opt-out, and the statement is not the device's return (see "DELETE /v1/bindings/self") | `403 binding_refused` |
 | 4 | the token is blocked by the operator and not currently bound to this instance | `403 binding_refused` |
 | 5 | same binding key as the stored binding, same instance, same `seq` | `200` with the stored state (idempotent repeat) |
 | 6 | same binding key, `seq` not higher than the stored one | `403 binding_refused` |
@@ -392,9 +392,21 @@ The direct opt-out. The device leaves an instance without the instance's coopera
 | done | `204` |
 
 On success the relay deletes the binding, drops pending challenges for the token and blocks the pair
-(token MAC, instance id) for 365 days. That instance cannot bind the token again, not even with a valid
-statement; another instance can. A deliberate return to the same instance needs a new token (reinstalling
-the app).
+(token MAC, instance id) for 365 days. With the block it keeps the SHA-256 of the binding key, the `seq` of
+the binding that left and the `iat` of the opt-out statement. Another instance can bind the token at once.
+The instance that was left cannot bind it again with anything it holds: a statement made before the opt-out
+has an older `iat`, and it cannot make a new one without the binding key.
+
+**Returning.** Only the device lifts the block. A `POST /v1/bindings` from that instance whose statement is
+signed by the same binding key, with a `seq` higher than the stored one and an `iat` later than the opt-out
+statement's, removes the block and is then handled as a new binding (rules 4 to 9, `provisional`, the
+binding quotas apply). Any other statement for the pair still gets `403 binding_refused`. A block restored
+from the registry export carries no key and can be lifted by nobody; after a restore a device returns to that
+instance only with a new token.
+
+The app signs such a statement only when the person turns the relay on again for that server. After a
+direct opt-out it treats the relay as off for that account: a later `rebind_needed` or any other server
+state never makes it sign a new binding statement on its own.
 
 ### GET /v1/bindings/self
 
@@ -992,7 +1004,7 @@ no field for a raw device token, an address, or a push class per instance.
 | instance | instance id | Ed25519 public key, tier, suspension reason, creation day, last contact week, device limit, first delivery day, last rotation day, quiet-since day, last delivery day, client version string |
 | instance key index | hex public key | instance id |
 | binding | HMAC-SHA256 of the raw token under the token MAC key | instance id, SHA-256 of the binding key, `seq`, environment, state (`provisional`, `active`, `soft_invalid`), binding day, last-used week, last success day, soft-invalid day, consent text version, consent day, alerts today and their day |
-| blocked pair | SHA-256("hl-blocked-pair\n" ‖ token MAC ‖ "\n" ‖ instance id) | day of the opt-out |
+| blocked pair | SHA-256("hl-blocked-pair\n" ‖ token MAC ‖ "\n" ‖ instance id) | day of the opt-out; SHA-256 of the binding key that opted out, the `seq` of the binding it left, the `iat` of its opt-out statement |
 | blocked token | SHA-256("hl-blocked-token\n" ‖ token MAC) | day of the block |
 | denylist | instance id | reason (closed set), day |
 | instance day counters | day and instance id | pushes accepted, invalid tokens, rebinds; no class |
@@ -1018,8 +1030,9 @@ with an error and leaves the file in place. After moving a damaged file aside th
 all blocks from its daily registry export and opens a recovery window of 14 days. Denylist entries are
 exported as `{instanceId, reason, expiresDay}`; opt-out and token blocks as `{pair, reason, expiresDay}` with
 `pair` the hex keyed hash above and `reason` `device_opt_out` (field `blockedPairs`) or `operator_block`
-(field `blockedTokens`). Entries past their expiry are neither exported nor imported. Bindings are not
-exported; devices bind again through the normal binding path.
+(field `blockedTokens`). Entries past their expiry are neither exported nor imported. The binding key hash,
+`seq` and `iat` of an opt-out are not exported, so a restored opt-out cannot be lifted by the device's
+return statement. Bindings are not exported; devices bind again through the normal binding path.
 
 ## Retention
 

@@ -75,7 +75,9 @@ All times in the relay's database are day or week numbers (UTC), never a time of
   Apple reports the token as no longer valid, when the binding has had no notification for about 90 days
   (13 weeks), or when it is still provisional more than two days after it was created.
 - Opt-out block: after you opt out directly, a keyed hash of the pair of your device token and that
-  server's instance id, with the day. Kept for 365 days, so that this server cannot bind your device again, and abuse blocks stay in force.
+  server's instance id, with the day, a hash of your app's binding key and the counter and time of your
+  opt-out. Kept for 365 days, so that this server cannot bind your device again unless you turn the relay
+  on for it again in the app, and abuse blocks stay in force.
   Neither your token nor its HMAC can be read back from the hash.
 - Token block: a keyed hash of a token the operator blocked against abuse, with the day. Kept for 365 days.
 - HealthLog server (instance): instance id, public key, tier, a suspension reason from a fixed list, the day
@@ -184,7 +186,7 @@ You have the right of access, rectification, erasure, restriction, data portabil
 - Erasure and withdrawal of consent: switch the relay off in the app, or leave the server. The app sends a
   signed request directly to the relay (DELETE /v1/bindings/self). The relay deletes the binding at once,
   without the cooperation of your HealthLog server, and blocks that server from binding your device again
-  for 365 days.
+  for 365 days, unless you turn the relay on for that server again in the app.
 
 You can also write to privacy@healthlog.dev. Because the relay cannot identify you, include the instance id
 your app shows; do not send a device token by e-mail.

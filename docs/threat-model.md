@@ -125,8 +125,9 @@ restricts certificate issuance to its own ACME account and to TLS-ALPN-01 with a
 
 An instance operator can push to the devices of its own users until they leave. The device leaves without
 the operator's cooperation: `DELETE /v1/bindings/self`, signed with the binding key, deletes the binding and
-blocks the pair of token HMAC and instance id for 365 days, so the instance cannot bind that token again even
-with a valid statement. Until then the per-device limits bound the harassment: an alert bucket of 20 that
+blocks the pair of token HMAC and instance id for 365 days, so the instance cannot bind that token again with
+any statement it holds. Only a statement the same binding key signs after the opt-out, with a higher `seq`,
+lifts the block, which is the person turning the relay on again in the app. Until then the per-device limits bound the harassment: an alert bucket of 20 that
 refills 6 per hour, at most 100 alerts per day, 300 pushes of all classes per day.
 
 An instance that knows a token bound elsewhere learns nothing from the relay: pushes and unbinds for a

@@ -316,6 +316,9 @@ func TestOptOutSurvivesRestore(t *testing.T) {
 		t.Fatal(err)
 	}
 	h2 := &instance{h: restored, key: hostile.key, id: hostile.id}
+	// The export carries no binding key, so even a later statement by the device cannot lift a restored
+	// block: after a restore only a new token returns the device to that instance.
+	restored.clk.Add(time.Hour)
 	if rp := h2.bind(d); rp.Status != 403 || rp.str("error") != "binding_refused" {
 		t.Fatalf("opt-out lost on restore: %d %s", rp.Status, rp.Raw)
 	}
