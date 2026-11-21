@@ -152,6 +152,7 @@ func TestVectorsStatements(t *testing.T) {
 		"response":             {ResponseText(h, "POST", "/v1/push", k.Nonce, 200, []byte(`{"items":[]}`)), rel},
 		"responseAppEndpoint":  {ResponseText(h, "DELETE", "/v1/bindings/self", k.Nonce, 204, nil), rel},
 		"responseWithoutNonce": {ResponseText(h, "GET", "/healthz", "-", 200, []byte(`{"status":"ok"}`)), rel},
+		"registryExport":       {ExportText(h, []byte(`{"format":"healthlog-push-registry-v2"}`)), rel},
 		"statusFile":           {StatusFileText(h, []byte(`{"notice":null}`)), rel},
 	}
 	for _, s := range v.Statements {

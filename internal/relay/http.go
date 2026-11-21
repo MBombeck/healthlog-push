@@ -47,6 +47,7 @@ func (r *Relay) Handler() http.Handler {
 	mux.HandleFunc("GET /version", r.handleVersion)
 	mux.HandleFunc("GET /privacy", textPage(notice.Privacy))
 	mux.HandleFunc("GET /terms", textPage(notice.Terms))
+	mux.HandleFunc("GET /.well-known/security.txt", textPage(notice.SecurityTxt))
 	mux.HandleFunc("GET /{$}", textPage(notice.Index))
 	return r.edge(mux)
 }

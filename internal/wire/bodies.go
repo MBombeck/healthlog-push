@@ -10,8 +10,12 @@ import (
 // validEnv reports whether env names an APNs environment.
 func validEnv(env string) bool { return env == "production" || env == "sandbox" }
 
-// DecodeStrict decodes exactly one JSON value into v, refusing unknown fields and trailing data.
+// DecodeStrict decodes exactly one JSON value into v, refusing unknown fields, keys that match only
+// case-insensitively, duplicate keys and trailing data.
 func DecodeStrict(b []byte, v any) error {
+	if err := exactKeys(b, v); err != nil {
+		return err
+	}
 	dec := json.NewDecoder(bytes.NewReader(b))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(v); err != nil {

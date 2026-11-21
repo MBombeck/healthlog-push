@@ -179,3 +179,21 @@ func TestJWTIssuedAt(t *testing.T) {
 		t.Fatal(n, err)
 	}
 }
+
+// TestStrictKeys: encoding/json alone would accept a key in another case and the last of two duplicates.
+func TestStrictKeys(t *testing.T) {
+	for _, b := range []string{
+		`{"Token":"` + strings.Repeat("ab", 32) + `"}`,
+		`{"token":"` + strings.Repeat("ab", 32) + `","token":"` + strings.Repeat("cd", 32) + `"}`,
+	} {
+		if _, err := ParseTokenBody([]byte(b)); err == nil {
+			t.Errorf("accepted %s", b[:20])
+		}
+	}
+	if _, err := ParseTokenBody([]byte(`{"token":"` + strings.Repeat("ab", 32) + `"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ParsePushBody([]byte(`{"items":[{"ref":"a","Class":"alert"}]}`)); err == nil {
+		t.Error("nested key in another case accepted")
+	}
+}

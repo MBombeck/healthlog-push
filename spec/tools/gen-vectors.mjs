@@ -128,6 +128,7 @@ export function build() {
     st("response", relayKey, join("hl-relay-resp-v2", HOST, "POST", "/v1/push", nonce, 200, bodyHash), { body }),
     st("responseAppEndpoint", relayKey, join("hl-relay-resp-v2", HOST, "DELETE", "/v1/bindings/self", nonce, 204, hex(sha(Buffer.alloc(0)))), { body: "" }),
     st("responseWithoutNonce", relayKey, join("hl-relay-resp-v2", HOST, "GET", "/healthz", "-", 200, hex(sha(Buffer.from('{"status":"ok"}')))), { body: '{"status":"ok"}' }),
+    st("registryExport", relayKey, join("hl-relay-export-v1", HOST, hex(sha(Buffer.from('{"format":"healthlog-push-registry-v2"}')))), { body: '{"format":"healthlog-push-registry-v2"}' }),
     st("statusFile", relayKey, join("hl-relay-status-v1", HOST, hex(sha(Buffer.from('{"notice":null}')))), { body: '{"notice":null}' }),
   ];
   // Mutations that must fail verification against the same public key and signature.

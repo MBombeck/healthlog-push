@@ -742,6 +742,13 @@
       "body": "{\"status\":\"ok\"}"
     },
     {
+      "name": "registryExport",
+      "publicKey": "SAdaWX5yGhVuLgeZ3lzAxTJNxufq8c3UYlCGjsUyFd0",
+      "text": "hl-relay-export-v1\npush.healthlog.dev\n964e23291eb432b11140e40636b961e32410fd97eabf4b1c94b93e4fdb1dab25",
+      "signature": "hjrR5-_oRcmoLhBlyIbmuq0oOAXsTlxBipbGDGyZnp_TZRpBb5wa4Tr1EbbL89Hic8k2btv1jZ33ZlZ9TfzRDw",
+      "body": "{\"format\":\"healthlog-push-registry-v2\"}"
+    },
+    {
       "name": "statusFile",
       "publicKey": "SAdaWX5yGhVuLgeZ3lzAxTJNxufq8c3UYlCGjsUyFd0",
       "text": "hl-relay-status-v1\npush.healthlog.dev\n91011b6044c878a04a4aae18357804e8b6474a8ca608533635046e294bfa958e",

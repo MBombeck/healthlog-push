@@ -27,4 +27,14 @@ Health:         /healthz
 Version:        /version
 Source:         https://github.com/MBombeck/healthlog-push
 Contact:        relay@healthlog.dev, abuse@healthlog.dev, privacy@healthlog.dev
+Security:       /.well-known/security.txt
+`
+
+// SecurityTxt is served at /.well-known/security.txt (RFC 9116). Expires must be renewed every year;
+// TestSecurityTxtCurrent fails a month before it lapses.
+const SecurityTxt = `Contact: mailto:relay@healthlog.dev
+Contact: https://github.com/MBombeck/healthlog-push/security/advisories/new
+Expires: 2027-11-21T00:00:00Z
+Preferred-Languages: en, de
+Policy: https://github.com/MBombeck/healthlog-push/blob/main/SECURITY.md
 `
