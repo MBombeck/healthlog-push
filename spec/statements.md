@@ -263,8 +263,8 @@ hl-challenge-v1
 
 ## hl-activity-v1
 
-The Live Activity statement, made by the device when an activity starts, sent to the relay only with the
-`end` push.
+The Live Activity statement over an activity's update token, made by the device when the activity starts.
+The relay checks it on every `update` and `end` push of that activity.
 
 ```
 hl-activity-v1
@@ -288,6 +288,78 @@ hl-activity-v1
 - The window differs from the other statements: `iat` may be at most 300 s in the future and at most
   43200 s (12 h: the activity lifetime of 8 h plus the class deadline of 4 h) in the past.
 - **Vector:** `activity`. Negative: `activityTokenSwapped`.
+
+## hl-la-start-v1
+
+The push-to-start statement: the device allows its instance to start Live Activities through the relay with
+this push-to-start token.
+
+```
+hl-la-start-v1
+<host>
+<instanceId>
+<hex(tokenTag)>
+<hex(startTokenTag)>
+<iat>
+```
+
+| Field | Value |
+|---|---|
+| `tokenTag` | tag of the APNs device token of the binding (the item's `token`) |
+| `startTokenTag` | tag of the push-to-start token (the item's `activity.token`) |
+| `iat` | unix seconds when the device signed; the app signs again whenever the push-to-start token changes and at least every 30 days |
+
+- **Signs:** the device binding key. **Verifies:** the relay, on a `liveactivity` item with `event: "start"`,
+  against the binding key of the active binding of the same token and the requesting instance.
+- Window: at most 300 s in the future and at most 2592000 s (30 days) in the past.
+- An `hl-activity-v1` statement never starts an activity, and this statement never updates or ends one.
+- **Vector:** `laStart`. Negative: `laStartAsActivity`.
+
+## hl-la-consent-v1
+
+The device's consent to Live Activity start and update over the relay. It is separate from the relay
+consent: start and update carry the content state in the clear, so with this consent the relay and Apple see
+when a dose is due.
+
+```
+hl-la-consent-v1
+<host>
+<instanceId>
+<hex(tokenTag)>
+<textVersion>
+<iat>
+```
+
+| Field | Value |
+|---|---|
+| `tokenTag` | tag of the APNs device token of the binding |
+| `textVersion` | the version of the consent text the person accepted, `[A-Za-z0-9._-]{1,32}`, for example `2026-11-21` |
+| `iat` | unix seconds; within 300 s of the relay clock when presented |
+
+- **Signs:** the device binding key. **Verifies:** the relay, on `POST /v1/bindings/liveactivity`, against
+  the binding key of the binding of that token held by the requesting instance. The HealthLog server passes
+  it on unchanged. The relay stores the text version and the day with the binding.
+- The consent belongs to the binding key: it survives a rebind by the same key to the same instance and is
+  dropped when the binding changes key or instance.
+- **Vector:** `laConsent`. Negative: `laConsentOtherVersion`.
+
+## hl-la-withdraw-v1
+
+The device withdraws its Live Activity consent directly at the relay, without its instance.
+
+```
+hl-la-withdraw-v1
+<host>
+<instanceId>
+<hex(tokenTag)>
+<iat>
+```
+
+- **Signs:** the device binding key. **Verifies:** the relay, on `DELETE /v1/bindings/self/liveactivity`
+  (body shaped like the opt-out: `token`, `bindingKey`, `statement {instanceId, tokenTag, iat}`,
+  `signature`). `iat` within 300 s. The binding stays; only the Live Activity consent is removed.
+- **Vector:** `laWithdraw`. Negative: `laWithdrawAsUnbind` (an opt-out statement is not a withdrawal and the
+  other way round).
 
 ## hl-selfread-v1
 
@@ -320,6 +392,9 @@ hl-selfread-v1
 | `hl-unbind-v1` | binding key | relay | `iat` within 300 s | `unbind` |
 | `hl-challenge-v1` | binding key | relay | challenge age at most 30 min | `challenge` |
 | `hl-activity-v1` | binding key | relay | `iat` at most 300 s ahead, at most 12 h old | `activity` |
+| `hl-la-start-v1` | binding key | relay | `iat` at most 300 s ahead, at most 30 days old | `laStart` |
+| `hl-la-consent-v1` | binding key | relay | `iat` within 300 s | `laConsent` |
+| `hl-la-withdraw-v1` | binding key | relay | `iat` within 300 s | `laWithdraw` |
 | `hl-selfread-v1` | binding key | relay | `iat` within 300 s | `selfRead` |
 
 Each vector carries the public key (`publicKey`), the exact text (`text`), the signature (`signature`) and,
