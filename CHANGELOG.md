@@ -4,6 +4,41 @@ All notable changes to this project are documented in this file. The format foll
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.1] - 2026-11-21
+
+### Security
+
+- A new store no longer starts with open registration. Until the first `admin registration` command, a fresh
+  relay accepted registrations from anyone for as long as it took the operator to close it. The relay now
+  takes its mode from `HLP_REGISTRATION_MODE` (`invite` when unset, also `closed` or `open`), stores it and
+  only then accepts requests. A mode stored with `admin registration` wins over the variable, so a restart
+  never reopens what an operator closed. A value other than `open`, `invite` or `closed` stops the relay at
+  start.
+- AppArmor profiles for both containers in `deploy/apparmor/`: the relay reads only its own secrets, writes only
+  `/data`, `/acme`, `/export` and the refresh marker and has no capability; the signer has no network and
+  writes only the provider token. They are opt-in through `HLP_APPARMOR_RELAY` and `HLP_APPARMOR_SIGNER`
+  (Docker's `docker-default` otherwise); the Ansible role takes `healthlog_push_apparmor_relay` and
+  `healthlog_push_apparmor_signer`, refuses a profile the kernel has not loaded in enforce mode, and checks
+  after the start that each container runs under its profile.
+
+### Changed
+
+- The SLSA provenance is now SLSA v1 (`slsaprovenance1`), signed by the reusable workflow
+  `.github/workflows/provenance.yml` with GitHub's `attest-build-provenance` and stored as a Sigstore bundle
+  next to the signature and the SBOM. cosign 3 verifies all three without format flags. The provenance of
+  v1.0.0 came from the SLSA generator in the older `.att` format, which cosign 3 finds only with
+  `--new-bundle-format=false`; [docs/release-verification.md](docs/release-verification.md) has the commands for both.
+- The Ansible role verifies the provenance with the new identity and type and pins cosign v3.1.4 with the
+  SHA-256 of the amd64 and arm64 binaries in its defaults. Releases before v1.0.1 do not pass the new
+  provenance step; deploy them with the role of their own tag.
+- `HLP_REGISTRATION_MODE` is passed by the compose file (default `invite`) and rendered by the role from
+  `healthlog_push_registration_mode`.
+
+### Updating
+
+- A store on which no mode was ever set (the relay answered `open` without having stored it) now starts in
+  `invite`. To keep accepting registrations from anyone, run `admin registration open` once.
+
 ## [1.0.0] - 2026-11-21
 
 First release.
@@ -171,4 +206,5 @@ First release.
   `HLP_MIN_CLIENT_VERSION`; the admin socket default follows `HLP_DATA_DIR` for server and client; a failing
   listener makes the process exit with an error.
 
+[1.0.1]: https://github.com/MBombeck/healthlog-push/releases/tag/v1.0.1
 [1.0.0]: https://github.com/MBombeck/healthlog-push/releases/tag/v1.0.0
