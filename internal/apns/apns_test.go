@@ -1,6 +1,7 @@
 package apns
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -55,5 +56,23 @@ func TestTemplates(t *testing.T) {
 	_ = json.Unmarshal(LiveActivityEndPayload(time.Unix(1795000000, 0)), &la)
 	if la.APS.Event != "end" || la.APS.TS != 1795000000 || len(la.APS.CS) != 6 {
 		t.Fatalf("live activity end: %+v", la)
+	}
+}
+
+type fixedTokens struct{}
+
+func (fixedTokens) Token() (string, int64, bool) { return "h.c.s", 1, true }
+func (fixedTokens) RequestRefresh()              {}
+
+// TestWarmUpEndsAfterFirstAttempt: when Apple cannot be reached at start, the one-at-a-time warm-up must
+// end after the first attempt, or every sender would queue behind one lock for the full timeout.
+func TestWarmUpEndsAfterFirstAttempt(t *testing.T) {
+	c := &Client{HTTP: NewHTTPClient(nil), BaseURL: "https://127.0.0.1:1", Topic: "t", Tokens: fixedTokens{}}
+	res := c.Send(context.Background(), &Push{Token: []byte{1}, Payload: []byte("{}"), Expiration: time.Now()})
+	if res.Outcome != Unavailable {
+		t.Fatalf("outcome %s", res.Outcome)
+	}
+	if !c.warm.Load() {
+		t.Fatal("warm-up still active after a failed first attempt")
 	}
 }

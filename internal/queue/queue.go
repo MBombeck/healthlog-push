@@ -116,6 +116,12 @@ func (q *Queue) estimate(high bool) time.Duration {
 	if high {
 		ahead = q.countLane(q.high)
 	}
+	// Nothing queued means a free worker takes the job now. Without this, a run of slow sends (Apple
+	// unreachable) would push the average above maxWait and refuse all work forever, because the average
+	// only moves when jobs run.
+	if ahead == 0 {
+		return 0
+	}
 	return time.Duration(int64(ahead/q.workers+1)) * q.avgService
 }
 

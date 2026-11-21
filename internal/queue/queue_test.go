@@ -109,3 +109,23 @@ func TestStaleJobsDropped(t *testing.T) {
 		t.Fatal("stale job neither ran nor dropped")
 	}
 }
+
+// TestRecoversAfterSlowSends: after a run of sends that each hit the timeout, an empty queue still accepts
+// work, and the average falls again once sends are fast.
+func TestRecoversAfterSlowSends(t *testing.T) {
+	q := New(1, 100, 100, 50*time.Millisecond)
+	defer q.Close(time.Second)
+	for range 8 {
+		done := make(chan struct{})
+		if err := q.Push(&Job{Instance: "a", Run: func() { time.Sleep(80 * time.Millisecond); close(done) }, Drop: func() {}}); err != nil {
+			t.Fatalf("slow job refused: %v", err)
+		}
+		<-done
+	}
+	time.Sleep(10 * time.Millisecond)
+	done := make(chan struct{})
+	if err := q.Push(&Job{Instance: "a", Run: func() { close(done) }, Drop: func() {}}); err != nil {
+		t.Fatalf("empty queue refuses after slow sends: %v", err)
+	}
+	<-done
+}

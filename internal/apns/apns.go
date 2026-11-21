@@ -169,7 +169,7 @@ type Client struct {
 	Tokens     TokenSource
 
 	// Until Apple has answered once, requests go out one at a time (warmMu), so the first connection is
-	// set up once instead of by every concurrent sender. warm is set by the first response.
+	// set up once instead of by every concurrent sender. warm is set after the first attempt.
 	warmMu sync.Mutex
 	warm   atomic.Bool
 }
@@ -228,11 +228,13 @@ func (c *Client) Send(ctx context.Context, p *Push) Result {
 	start := time.Now()
 	resp, err := c.HTTP.Do(req)
 	lat := time.Since(start)
+	// The first attempt ends the warm-up whatever its outcome, so an unreachable Apple at start cannot
+	// serialise every sender behind one lock.
+	c.warm.Store(true)
 	if err != nil {
 		return Result{Outcome: Unavailable, Reason: "transport", Latency: lat, TokenIat: iat}
 	}
 	defer func() { _ = resp.Body.Close() }()
-	c.warm.Store(true)
 	var body struct {
 		Reason string `json:"reason"`
 	}
