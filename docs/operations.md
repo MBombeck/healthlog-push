@@ -417,7 +417,9 @@ Metrics are served on `127.0.0.1:9464/metrics` and carry no instance, device or 
 | certificate valid for less than 14 days (external check) | renewal over TLS-ALPN-01 failed | check DNS, port 443 reachability and the CAA record |
 
 Other metrics: `hlp_requests_total{status="2xx"|"4xx"|"5xx"}`, `hlp_bindings_total{result}` (`bound`,
-`conflict`, `challenge_resolved`, `unbound_instance`, `unbound_self`), `hlp_challenges_total{result}` and
+`conflict`, `challenge_resolved`, `opt_out_lifted`, `unbound_instance`, `unbound_self`,
+`liveactivity_consent` for a stored Live Activity consent, `liveactivity_consent_withdrawn` for one removed by
+the device or the instance), `hlp_challenges_total{result}` and
 the usage gauges below. Log lines are JSON with the keys `ts` (to the second), `action` and a closed set of
 value keys; the summary line `relay.summary` carries `pushes`, `errors` by reason, `events` (counts of
 `registered`, `rotated`, `deleted` and `challenge_resolved` in the period) and `p95_ms`. Registrations, key

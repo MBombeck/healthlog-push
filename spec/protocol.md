@@ -13,8 +13,8 @@ Examples use the host `push.example.org`. The relay operated by the HealthLog pr
 
 | Actor | Holds | Talks to the relay |
 |---|---|---|
-| **Instance**: one self-hosted HealthLog server | an Ed25519 instance key per relay host, an X25519 sender key per relay host | all `/v1` endpoints except the three app endpoints, every request signed |
-| **App**: the HealthLog iOS app on one device | an Ed25519 binding key per installation and relay host, X25519 device keys | only `POST /v1/bindings/challenge`, `DELETE /v1/bindings/self`, `GET /v1/bindings/self`, each signed with the binding key |
+| **Instance**: one self-hosted HealthLog server | an Ed25519 instance key per relay host, an X25519 sender key per relay host | all `/v1` endpoints except the four app endpoints, every request signed |
+| **App**: the HealthLog iOS app on one device | an Ed25519 binding key per installation and relay host, X25519 device keys | only `POST /v1/bindings/challenge`, `DELETE /v1/bindings/self`, `GET /v1/bindings/self`, `DELETE /v1/bindings/self/liveactivity`, each signed with the binding key |
 | **Relay** | the relay identity key (Ed25519), the token MAC keys, read access to a short-lived APNs provider token | Apple Push Notification service |
 | **Apple** (APNs) | | receives fixed-template pushes from the relay |
 | **Operator** of the relay | a local operator interface on the relay host | not over HTTP |
@@ -25,6 +25,9 @@ What each party learns:
   never learns the content: every alert and silent push carries a sealed envelope it cannot open, and the
   only visible text it can produce is a fixed localisation key.
 - Apple learns the same metadata plus the opaque envelope.
+- With the device's separate Live Activity consent, the relay and Apple also see the content state of Live
+  Activity starts and updates in the clear: when a dose is due and its state, from a closed template without
+  any free text (see "Live Activity consent").
 - An instance learns nothing about devices bound to other instances. Every answer about a token that is not
   bound to the asking instance is the same `404 binding_unknown`.
 
@@ -78,7 +81,8 @@ never stored or logged.
 ## Request signing
 
 Instance endpoints: `POST /v1/instances/self/rotate`, `DELETE /v1/instances/self`, `POST /v1/bindings`,
-`DELETE /v1/bindings`, `POST /v1/push`, `POST /v1/receipts`, `GET /v1/status`.
+`DELETE /v1/bindings`, `POST /v1/bindings/liveactivity`, `DELETE /v1/bindings/liveactivity`,
+`POST /v1/push`, `POST /v1/receipts`, `GET /v1/status`.
 
 Each request carries `HL-Instance`, `HL-Timestamp`, `HL-Nonce` and `HL-Signature`, the last being the
 instance key's signature over the `hl-relay-v1` text (`spec/statements.md`). The nonce and the declared body
@@ -138,7 +142,7 @@ Every refused request and every refused push item uses the same JSON shape. Only
 | Field | Type | Present when |
 |---|---|---|
 | `error` | string | always: a fixed identifier from the tables below |
-| `scope` | string | for rate and quota refusals: `device`, `instance`, `tier` or `global` |
+| `scope` | string | for rate and quota refusals: `device`, `activity` (the update limit of one Live Activity), `instance`, `tier` or `global` |
 | `retryAfter` | integer, seconds | when the relay knows when a retry can succeed |
 | `relayTime` | integer, unix seconds | on `stale_timestamp` |
 | `reason` | string | on `instance_suspended` (closed set: `abuse`, `spam`, `invalid_tokens`, `harassment`, `legal`, `compromised`, `terms`, `operator_request`) and on `binding_conflict` (`challenge_sent`, `challenge_quota`, `challenge_unsent`) |
@@ -384,9 +388,68 @@ Instance-authenticated. Body `{ "token": "<hex>" }`. Removes the binding when th
 requesting instance. Answers `204` in every case where the body is valid, bound or not, so it reveals
 nothing; `422 invalid_item` for a malformed body, `503 storage_unavailable` when the delete fails.
 
+### Live Activity consent
+
+Live Activity start and update need a second, separate consent of the device, besides the relay consent of
+the binding. ActivityKit cannot decrypt, so start and update carry their content state in the clear: with
+this consent the relay and Apple see when a dose is due and its state (see "Live Activity content state").
+Without it, the instance can only end an activity, as before. The consent is state of the binding: the text
+version and the day are stored with it, `GET /v1/bindings/self` returns them, and they live and die with
+the binding.
+
+- The device signs it (`hl-la-consent-v1`, `spec/statements.md`); the instance passes it on unchanged with
+  `POST /v1/bindings/liveactivity`.
+- The instance drops it when the person switches it off in the app: `DELETE /v1/bindings/liveactivity`.
+- The device withdraws it directly at the relay, without its instance: `DELETE /v1/bindings/self/liveactivity`
+  (`hl-la-withdraw-v1`, see "Direct calls from the app").
+- It belongs to the binding key that signed it. A rebind by the same key to the same instance keeps it; a
+  binding with another key, a move to another instance, an opt-out and every deletion of the binding drop
+  it.
+
+### POST /v1/bindings/liveactivity
+
+Instance-authenticated, body at most 4 KiB.
+
+```json
+{
+  "token": "<hex>",
+  "bindingKey": "<base64url 32>",
+  "consent": { "textVersion": "2026-11-21", "day": "2026-11-21", "iat": 1795000000 },
+  "signature": "<base64url 64>"
+}
+```
+
+| Field | Format |
+|---|---|
+| `token` | APNs device token of the binding, hex, 64 to 200 characters |
+| `bindingKey` | the binding key of the device, base64url |
+| `consent.textVersion` | the version of the Live Activity consent text the person accepted, `[A-Za-z0-9._-]{1,32}` |
+| `consent.day` | `YYYY-MM-DD`, the day of the consent |
+| `consent.iat` | unix seconds within 300 s of the relay clock |
+| `signature` | `hl-la-consent-v1` signature by `bindingKey` over host, the requesting instance, the token tag, `textVersion` and `iat` |
+
+| Check | Result |
+|---|---|
+| malformed body, unknown field, bad format | `422 invalid_item` |
+| `consent.iat` stale | `401 stale_timestamp` with `relayTime` |
+| signature does not verify | `403 binding_refused` |
+| the instance is gone | `401 unknown_instance` |
+| no binding of the token held by the requesting instance, or another binding key | `404 binding_unknown` |
+| store write failed | `503 storage_unavailable`, retry about 5 min |
+| stored | `200 { "liveActivity": "granted" }` |
+
+A repeated consent replaces the stored text version and day.
+
+### DELETE /v1/bindings/liveactivity
+
+Instance-authenticated. Body `{ "token": "<hex>" }`. Removes the Live Activity consent of the binding when
+the token is bound to the requesting instance; the binding stays. Like `DELETE /v1/bindings` it answers
+`204` in every case where the body is valid, bound or not, with or without a consent; `422 invalid_item`
+for a malformed body, `503 storage_unavailable` when the write fails.
+
 ## Direct calls from the app
 
-The app talks to the relay only on these three endpoints, without any account identifier or server
+The app talks to the relay only on these four endpoints, without any account identifier or server
 credential, each signed with its binding key and carrying `HL-Nonce`. It verifies every answer against the
 pinned relay identity keys.
 
@@ -396,8 +459,8 @@ request, before it looks up any binding; so the response time does not reveal wh
 binding or bad signature) is charged to one relay-wide token bucket (capacity 100, refill 20 per second);
 when it is empty, failed attempts are answered `429 global`, scope `global`, retry about 2 s, instead of
 their own refusal. A request that verifies is never charged there, so junk traffic cannot block an opt-out,
-a self-read or a challenge answer. Verified calls are limited per device token: a bucket of 10, refilling 10
-per hour, shared by the three endpoints; over it `429 device_quota`, scope `device`, with `retryAfter`.
+a self-read, a withdrawal or a challenge answer. Verified calls are limited per device token: a bucket of 10, refilling 10
+per hour, shared by the four endpoints; over it `429 device_quota`, scope `device`, with `retryAfter`.
 
 ### DELETE /v1/bindings/self
 
@@ -469,12 +532,39 @@ The device reads everything the relay holds about its binding. Inputs travel in 
   "boundDay": "2026-11-21",
   "lastUsedWeekOf": "2026-11-16",
   "consentVersion": "2026-11-21",
-  "consentDay": "2026-11-21"
+  "consentDay": "2026-11-21",
+  "liveActivityConsentVersion": "2026-11-21",
+  "liveActivityConsentDay": "2026-11-21"
 }
 ```
 
 `lastUsedWeekOf` is the first day of the week of the last accepted push. Weeks are blocks of seven UTC days
-starting on a Monday, so `lastUsedWeekOf` is always a Monday.
+starting on a Monday, so `lastUsedWeekOf` is always a Monday. `liveActivityConsentVersion` and
+`liveActivityConsentDay` are the separate Live Activity consent; both are absent when it was not given or
+was withdrawn.
+
+### DELETE /v1/bindings/self/liveactivity
+
+The device withdraws its Live Activity consent directly, without its instance. The body has the shape of
+the opt-out; the statement is `hl-la-withdraw-v1`.
+
+```json
+{ "token": "<hex>", "bindingKey": "<base64url 32>", "statement": { "instanceId": "...", "tokenTag": "<hex 32>", "iat": 1795000000 }, "signature": "<base64url 64>" }
+```
+
+| Check | Result |
+|---|---|
+| body over 4 KiB | `413 too_large` |
+| malformed, tag not matching the token, instance id not a UUIDv4 | `422 invalid_item` |
+| `iat` stale | `401 stale_timestamp` with `relayTime` |
+| no binding for the token, bound to another instance, other key, or `hl-la-withdraw-v1` signature invalid (an opt-out signature does not verify here) | `404 binding_unknown` |
+| per-device limit for verified app calls | `429 device_quota`, scope `device` |
+| store write failed | `503 storage_unavailable` |
+| done | `204` |
+
+On success the relay removes the Live Activity consent from the binding; the binding, its relay consent and
+its state stay. A withdrawal without a stored consent also answers `204`. From then on start and update
+items for the token are refused with `403 liveactivity_consent_required`; an `end` still goes through.
 
 ### Uniform answers
 
@@ -506,6 +596,20 @@ Instance-authenticated. Body at most 128 KiB.
       "ttlSeconds": 3600,
       "activity": { "token": "<hex>", "bindingKey": "<base64url 32>",
                     "statement": { "instanceId": "...", "tokenTag": "<hex 32>", "laTokenTag": "<hex 32>", "iat": 1795000000 },
+                    "signature": "<base64url 64>" } },
+    { "ref": "start-cm_med_1-2026-11-21", "token": "<hex>", "env": "production", "class": "liveactivity",
+      "ttlSeconds": 3600,
+      "activity": { "event": "start", "token": "<hex push-to-start token>", "bindingKey": "<base64url 32>",
+                    "state": { "status": "due", "countdownTarget": 1795000600, "isOverdue": false,
+                               "confirmed": false, "pendingConfirm": false, "timeFormatRaw": "AUTO" },
+                    "statement": { "instanceId": "...", "tokenTag": "<hex 32>", "laTokenTag": "<hex 32>", "iat": 1794000000 },
+                    "signature": "<base64url 64>" } },
+    { "ref": "upd-cm_med_1-2026-11-21-1", "token": "<hex>", "env": "production", "class": "liveactivity",
+      "ttlSeconds": 3600,
+      "activity": { "event": "update", "token": "<hex update token>", "bindingKey": "<base64url 32>",
+                    "state": { "status": "overdue", "countdownTarget": 1795000600, "isOverdue": true,
+                               "confirmed": false, "pendingConfirm": false, "timeFormatRaw": "AUTO" },
+                    "statement": { "instanceId": "...", "tokenTag": "<hex 32>", "laTokenTag": "<hex 32>", "iat": 1794999000 },
                     "signature": "<base64url 64>" } }
   ]
 }
@@ -543,15 +647,49 @@ Each item is checked on its own; a bad item does not affect the others.
 | `envelope` | alert and silent: required, base64url of exactly 1075 bytes with a valid outer frame for the class (`spec/envelope.md`, "What the relay checks"); liveactivity: must be absent |
 | `collapse` | alert: required, `^[A-Za-z0-9_-]{22}$`; silent: optional, same format; liveactivity: must be absent |
 | `activity` | liveactivity: required; alert and silent: must be absent |
-| `activity.token` | the Live Activity push token, hex, 64 to 200 characters |
+| `activity.event` | `start`, `update` or `end`; `end` when absent; any other value is refused |
+| `activity.state` | `start` and `update`: required, the content state (below); `end`: must be absent (the end carries a fixed state) |
+| `activity.token` | hex, 64 to 200 characters: for `start` the push-to-start token of the app, for `update` and `end` the update token of the activity |
 | `activity.bindingKey` | the binding key of the device, base64url |
 | `activity.statement.tokenTag` | tag of the item's `token` |
 | `activity.statement.laTokenTag` | tag of `activity.token` |
 | `activity.statement.instanceId` | a UUIDv4 |
-| `activity.signature` | `hl-activity-v1` signature, checked against the binding (see "Limits and checks per item") |
+| `activity.signature` | `start`: `hl-la-start-v1` signature; `update` and `end`: `hl-activity-v1` signature; checked against the binding (see "Limits and checks per item") |
 
 A failure of any rule is `422 invalid_item`; a token that is not bound to the instance is `404
 binding_unknown`.
+
+#### Live Activity content state
+
+The content state is the only Live Activity content the relay forwards. It is a closed template: exactly
+these six keys, all required, with fixed types, closed enumerations and a bounded time, and no free text, in
+particular no medication name.
+
+| Key | Type and range |
+|---|---|
+| `status` | one of `pending`, `due`, `overdue`, `snoozed`, `taken`, `skipped` |
+| `countdownTarget` | integer, unix seconds: `0` (no countdown) or from 86400 s (one day) before to 172800 s (two days) after the relay clock, bounds included |
+| `isOverdue` | boolean |
+| `confirmed` | boolean |
+| `pendingConfirm` | boolean |
+| `timeFormatRaw` | one of `AUTO`, `H12`, `H24` |
+
+A key outside the template, a key that differs only in case, a repeated key or a value of the wrong type
+makes the whole request invalid (`422 invalid_item` for the request, strict decoding). A missing or `null`
+key, a value outside its enumeration and a `countdownTarget` outside its bounds refuse the item with `422
+invalid_item` (step 5 below).
+
+#### Statements per event
+
+| `event` | `activity.token` | Statement | `iat` window |
+|---|---|---|---|
+| `start` | push-to-start token | `hl-la-start-v1` over the push-to-start token | at most 300 s ahead, at most 2592000 s (30 days) old |
+| `update` | update token of the activity | `hl-activity-v1` over the update token | at most 300 s ahead, at most 43200 s (12 h) old |
+| `end` | update token of the activity | `hl-activity-v1` over the update token | at most 300 s ahead, at most 43200 s (12 h) old |
+
+An `hl-activity-v1` statement never starts an activity, and an `hl-la-start-v1` statement never updates or
+ends one. The app signs the start statement again whenever its push-to-start token changes and at least
+every 30 days; it signs the activity statement when the activity starts.
 
 The collapse id is meant to differ per device: a HealthLog server derives it as the first 22 characters of
 `base64url(HMAC-SHA256(collapse secret of the instance, token || key))`, so that the relay and Apple cannot
@@ -567,7 +705,9 @@ counted against any limit only when every check passed.
 | 1 | an operator pause covers the class and the instance's tier | `503 maintenance` with `retryAfter` |
 | 2 | silent only: silent pushes are switched off relay-wide (Apple throttling, see "Failure handling") | `429 global`, scope `global` |
 | 3 | Apple throttled this device for this class within the last hour | `429 device_quota`, scope `device` |
-| 4 | liveactivity only: the binding is not provisional, `activity.bindingKey` is the binding's key, the statement verifies for the requesting instance, its `iat` is at most 300 s ahead and at most 43200 s old | otherwise `403 activity_refused` |
+| 4 | liveactivity only: the binding is not provisional, `activity.bindingKey` is the binding's key, the statement of the event (see "Statements per event") verifies for the requesting instance and its `iat` is inside the window of the event | otherwise `403 activity_refused` |
+| 4a | liveactivity `start` and `update` only: the binding holds the device's Live Activity consent | otherwise `403 liveactivity_consent_required` |
+| 4b | liveactivity `start` and `update` only: the content state is inside the template at the relay clock | otherwise `422 invalid_item` |
 | 5 | soft-invalid binding: it did not fail today (one probe push per day) | `429 binding_quota`, scope `device`, retry until the next UTC midnight |
 | 6 | binding not `active` (provisional or soft-invalid): the instance is not blocked by its invalid-token budget | `429 binding_quota`, scope `instance`, retry until the block ends |
 | 7 | provisional binding: active bindings below `devices` | `429 binding_quota`, scope `instance`, retry 1 h |
@@ -576,7 +716,9 @@ counted against any limit only when every check passed.
 | 10 | device pushes today below 300 (all classes) | `429 device_quota`, scope `device` |
 | 11 | alert: device alerts today below 100; then a token in the device's alert bucket | `429 device_quota`, scope `device` |
 | | silent: device silent pushes this hour below 6 | `429 device_quota`, scope `device` |
-| | liveactivity: device `end` events today below 12 | `429 device_quota`, scope `device` |
+| | liveactivity `start`: device starts today below 12 | `429 device_quota`, scope `device` |
+| | liveactivity `update`: updates of this activity (keyed by its update token) this hour below 12 and today below 48 | `429 device_quota`, scope `activity` |
+| | liveactivity `end`: device `end` events today below 12 | `429 device_quota`, scope `device` |
 | 12 | probation instance: the probation pool has room this minute | `429 global`, scope `tier` |
 | | standard instance: the standard pool has room this minute for the class share | `429 global`, scope `global` |
 | 13 | the send queue admits the item | `503 queue_full`, retry about 2 s; scope `instance` when the instance's own queue share is full |
@@ -613,8 +755,10 @@ No `apns-id` is sent. Per class:
 
 `<topic>` is the app's bundle id, `dev.healthlog.app` for the HealthLog app.
 
-The payloads are constants in `internal/apns/apns.go`. An instance chooses the class, the envelope, the
-lifetime and the collapse id, never any visible text, category, sound or other key.
+The payloads are templates in `internal/apns/apns.go` (alert, silent, challenge) and
+`internal/apns/liveactivity.go` (Live Activity). An instance chooses the class, the envelope, the lifetime
+and the collapse id, and for a Live Activity start or update a content state inside the closed template;
+never any visible text, category, sound or other key.
 
 Alert (`<envelope>` is the item's envelope, unpadded base64url):
 
@@ -634,17 +778,38 @@ Conflict challenge (`<challenge>` generated by the relay, not content):
 {"aps":{"content-available":1},"c":"<challenge>"}
 ```
 
-Live Activity `end`, with `<now>` the relay clock in unix seconds for both `timestamp` and `dismissal-date`:
+Live Activity payloads, with `<now>` the relay clock in unix seconds. In `start` and `update`, the values
+of `content-state` are those of the item's `activity.state` after the template check, written in this key
+order; nothing else of the item reaches the payload.
+
+`start` (to the push-to-start token; the attributes type and the attributes are fixed, so nothing about the
+dose travels in them, and the alert is a fixed pair of localization keys):
 
 ```
-{"aps":{"timestamp":<now>,"event":"end","dismissal-date":<now>,"content-state":{"status":"taken","countdownTarget":0,"confirmed":false,"pendingConfirm":false,"isOverdue":false,"timeFormatRaw":"AUTO"}}}
+{"aps":{"timestamp":<now>,"event":"start","content-state":{"status":"<status>","countdownTarget":<countdownTarget>,"confirmed":<confirmed>,"pendingConfirm":<pendingConfirm>,"isOverdue":<isOverdue>,"timeFormatRaw":"<timeFormatRaw>"},"attributes-type":"HealthLogDoseAttributes","attributes":{"v":1},"alert":{"title":{"loc-key":"HL_LA_START_TITLE"},"body":{"loc-key":"HL_LA_START_BODY"}}}}
+```
+
+`update` (to the activity's update token):
+
+```
+{"aps":{"timestamp":<now>,"event":"update","content-state":{"status":"<status>","countdownTarget":<countdownTarget>,"confirmed":<confirmed>,"pendingConfirm":<pendingConfirm>,"isOverdue":<isOverdue>,"timeFormatRaw":"<timeFormatRaw>"}}}
+```
+
+`end`, with `<now>` for both `timestamp` and `dismissal-date` and a constant content state:
+
+```
+{"aps":{"timestamp":<now>,"event":"end","content-state":{"status":"taken","countdownTarget":0,"confirmed":false,"pendingConfirm":false,"isOverdue":false,"timeFormatRaw":"AUTO"},"dismissal-date":<now>}}
 ```
 
 The alert carries no `category`, `thread-id` or `interruption-level`. What the notification can do is set by
 the notification service extension after it opened the envelope.
 
-The Live Activity token reaches the relay only together with the `end` event, and the relay stores nothing
-about it. The relay never learns when an activity starts.
+Without the Live Activity consent, a Live Activity token reaches the relay only together with the `end`
+event, and the relay never learns when an activity starts. With it, the push-to-start token reaches the
+relay with every start and the update token with every update, together with the content state in the
+clear; Apple receives that state as well. The relay stores neither token nor any state: it keeps, in memory
+only, the start count of the device and the update counts of each activity, keyed by an HMAC of its update
+token, until the end of the UTC day.
 
 ## Results
 
@@ -655,11 +820,12 @@ about it. The relay never learns when an activity starts.
 | 200 | `result: accepted` | | Apple accepted the push |
 | 200 | `result: soft_invalid` | `reason` (`BadDeviceToken` or `DeviceTokenNotForTopic`) | Apple refused the token softly; the binding is marked, not deleted |
 | 200 | `result: activity_gone` | | liveactivity: Apple reported the activity token as gone or invalid; nothing changes |
-| 403 | `activity_refused` | | the activity statement or the binding does not allow the `end` |
+| 403 | `activity_refused` | | the activity statement or the binding does not allow the event: a provisional binding, another binding key, a statement that does not verify for the event, or an `iat` outside its window |
+| 403 | `liveactivity_consent_required` | | a `start` or `update` for a binding without the device's Live Activity consent |
 | 404 | `binding_unknown` | | the token is not bound to this instance |
 | 410 | `unregistered` | | Apple reported the device token as unregistered; the binding is deleted |
-| 422 | `invalid_item` | | the item failed validation or names another environment than its binding |
-| 429 | `device_quota` | `scope: device`, `retryAfter` | a per-device limit or Apple's per-device throttling |
+| 422 | `invalid_item` | | the item failed validation, names another environment than its binding, or carries a content state outside the template |
+| 429 | `device_quota` | `scope: device` or `activity`, `retryAfter` | `device`: a per-device limit or Apple's per-device throttling; `activity`: the update limit of one Live Activity |
 | 429 | `binding_quota` | `scope: device` or `instance`, `retryAfter` | `device`: a soft-invalid binding on the day it failed; `instance`: a provisional binding that does not fit, or a non-active binding while the instance is over its invalid-token budget |
 | 429 | `instance_quota` | `scope: instance`, `retryAfter` | the instance's daily push limit |
 | 429 | `instance_rate` | `scope: instance`, `retryAfter` | the instance's per-minute push limit |
@@ -680,15 +846,15 @@ reported as `other`.
 |---|---|---|---|
 | 400 | `nonce_required` | every `/v1` endpoint | signed with nonce `-` |
 | 401 | `unknown_instance` | instance endpoints | |
-| 401 | `stale_timestamp` | instance endpoints, registration, `POST /v1/bindings`, `DELETE /v1/bindings/self`, `GET /v1/bindings/self` | `relayTime` |
+| 401 | `stale_timestamp` | instance endpoints, registration, `POST /v1/bindings`, `POST /v1/bindings/liveactivity`, `DELETE /v1/bindings/self`, `DELETE /v1/bindings/self/liveactivity`, `GET /v1/bindings/self` | `relayTime` |
 | 401 | `bad_signature` | instance endpoints, registration | |
 | 401 | `replayed` | instance endpoints | |
 | 403 | `instance_revoked` | instance endpoints, registration | |
 | 403 | `instance_suspended` | instance endpoints, registration | `reason` |
 | 403 | `invite_required` | registration | |
-| 403 | `binding_refused` | `POST /v1/bindings` | |
+| 403 | `binding_refused` | `POST /v1/bindings`, `POST /v1/bindings/liveactivity` | |
 | 403 | `challenge_refused` | `POST /v1/bindings/challenge` | |
-| 404 | `binding_unknown` | `DELETE /v1/bindings/self`, `GET /v1/bindings/self` | |
+| 404 | `binding_unknown` | `POST /v1/bindings/liveactivity`, `DELETE /v1/bindings/self`, `DELETE /v1/bindings/self/liveactivity`, `GET /v1/bindings/self` | |
 | 404 | `not_found` | any unknown route, a known path with another method, any non-canonical path | |
 | 409 | `key_in_use` | rotation | |
 | 409 | `binding_conflict` | `POST /v1/bindings` | `reason`: `challenge_sent`, `challenge_quota`, or `challenge_unsent` with `retryAfter` |
@@ -850,11 +1016,13 @@ The same for every tier.
 | pushes per day, all classes | 300 | `429 device_quota` |
 | alerts | token bucket of 20, refilled at 6 per hour; at most 100 per day | `429 device_quota` |
 | silent pushes per hour | 6 | `429 device_quota` |
+| Live Activity `start` per day (only with the Live Activity consent) | 12 | `429 device_quota` |
+| Live Activity `update` per activity (only with the Live Activity consent) | 12 per hour, 48 per day | `429 device_quota`, scope `activity` |
 | Live Activity `end` per day | 12 | `429 device_quota` |
 | soft-invalid binding | no push on the day it failed (one probe per day) | `429 binding_quota`, scope `device` |
 | Apple `429 TooManyRequests` | the class is suspended for 1 h | `429 device_quota` |
 | conflict challenges | 1 per token, instance and day | `409 binding_conflict`, `reason: challenge_quota` |
-| verified app calls (opt-out, self-read, challenge answer) | token bucket of 10, refilled at 10 per hour | `429 device_quota`, scope `device` |
+| verified app calls (opt-out, self-read, Live Activity withdrawal, challenge answer) | token bucket of 10, refilled at 10 per hour | `429 device_quota`, scope `device` |
 
 ### Global pools
 
@@ -886,8 +1054,8 @@ per-address caps still apply.
 Counts kept only in memory are lost on a restart. So that a restart does not hand out fresh quotas:
 
 - until the next UTC midnight after the start, the global registration caps are halved (15 per hour, 100
-  per day), and the per-device limits for silent pushes (3 per hour) and Live Activity `end` events (6 per
-  day) are halved;
+  per day), and the per-device limits for silent pushes (3 per hour), Live Activity `start` events (6 per
+  day) and Live Activity `end` events (6 per day) are halved;
 - the per-device alert count of the day is stored with the binding (flushed every minute) and survives;
 - the per-instance daily push count is restored from the stored day counters;
 - an instance flag is stored as a day and survives;
@@ -896,7 +1064,8 @@ Counts kept only in memory are lost on a restart. So that a restart does not han
 
 Known limitation: the other in-memory counters start from zero after a restart. These are, per instance, the
 new bindings of the day (`newBindingsPerDay`), the challenges of the day (`challengesPerDay`) and the
-24-hour block after an exceeded invalid-token budget, and the per token, instance and day challenge record.
+24-hour block after an exceeded invalid-token budget, the per token, instance and day challenge record, and
+the per-activity update counts of Live Activities, which are not halved.
 The per-instance invalid-token count of the day is restored from the stored day counters, but a block that
 was already running ends with the restart. Each restart therefore gives every instance these allowances
 afresh for the rest of the day.
@@ -1062,7 +1231,7 @@ no field for a raw device token, an address, or a push class per instance.
 |---|---|---|
 | instance | instance id | Ed25519 public key, tier, reason of a suspension or revocation (closed set) and its day, creation day, last contact week, device limit, first delivery day, last rotation day, quiet-since day, last delivery day, flagged day |
 | instance key index | hex public key | instance id |
-| binding | HMAC-SHA256 of the raw token under the token MAC key | instance id, SHA-256 of the binding key, `seq`, environment, state (`provisional`, `active`, `soft_invalid`), binding day, last-used week, last success day, soft-invalid day, consent text version, consent day, alerts today and their day |
+| binding | HMAC-SHA256 of the raw token under the token MAC key | instance id, SHA-256 of the binding key, `seq`, environment, state (`provisional`, `active`, `soft_invalid`), binding day, last-used week, last success day, soft-invalid day, consent text version, consent day, alerts today and their day, Live Activity consent text version and day (empty without that consent) |
 | blocked pair (`blocked_pairs`) | SHA-256("hl-blocked-pair\n" ‖ token MAC ‖ "\n" ‖ instance id) | JSON: day of the opt-out, SHA-256 of the binding key that opted out, the `seq` of the binding it left |
 | blocked token (`blocked_tokens`) | SHA-256("hl-blocked-token\n" ‖ token MAC) | day of the block |
 | opt-out pin (`optout_pins`) | SHA-256("hl-optout-pin\n" ‖ token MAC) | JSON: day of the opt-out, SHA-256 of the binding key that opted out (none after a restore) |
@@ -1072,7 +1241,8 @@ no field for a raw device token, an address, or a push class per instance.
 
 Only in memory: nonces, idempotency entries, per-device counters (except the alert count), pending
 challenges, the per token, instance and day challenge record, the per-instance counts of new bindings and
-challenges of the day and the 24-hour invalid-budget block, the `iat` of an opt-out (10 minutes),
+challenges of the day and the 24-hour invalid-budget block, the per-activity Live Activity update counts
+(keyed by an HMAC of the update token, cleared at the end of the UTC day), the `iat` of an opt-out (10 minutes),
 registration counters (keyed by salted prefix hashes), receipts, Apple throttling counts.
 
 Suspension and revocation live in the instance record (tier, reason, reason day); there is no separate
@@ -1118,7 +1288,8 @@ The relay writes `registry.json` once a day (format `healthlog-push-registry-v2`
 `pair` is the hex keyed hash of the stored record above. Entries past their expiry are neither exported nor
 imported. The binding key hash and `seq` of an opt-out and the key of a pin are not exported, so a restored
 opt-out cannot be lifted by the device's return statement and a restored pin sends every new binding of the
-token through the challenge. Bindings are not exported; devices bind again through the normal binding path.
+token through the challenge. Bindings are not exported, and with them no Live Activity consent; devices bind again through the normal
+binding path and give that consent again.
 
 The signature covers the export marshaled as JSON without its `signature` field. An unsigned export is never
 written. On import (at start with an empty data directory or after a damaged store was moved aside, and
@@ -1138,6 +1309,7 @@ already exists are skipped.
 | provisional binding | more than 2 days after its binding day without an accepted push |
 | instance without authenticated contact | 13 weeks after its last contact week, with its bindings |
 | instance that never had an accepted push | more than 2 days after its creation day, with its bindings |
+| Live Activity consent | with its binding; earlier when the instance drops it, the device withdraws it, or the binding changes key or instance |
 | blocked pairs, blocked tokens, opt-out pins | 365 days |
 | suspended and revoked instance records | 365 days after the reason day, with their bindings |
 | instance day counters | 7 days |

@@ -32,8 +32,13 @@ The relay sees:
 - a SHA-256 hash of the device's binding key, the binding sequence number, the consent text version and
   the day of consent;
 - the IP address of a device when the app calls the relay directly (opt-out, reading its own binding,
-  answering a conflict challenge), in memory only, never stored or logged;
-- a Live Activity token only at the moment the activity is ended.
+  withdrawing the Live Activity consent, answering a conflict challenge), in memory only, never stored or
+  logged;
+- a Live Activity token only at the moment the activity is ended, unless the person gives the separate Live
+  Activity consent: then the relay starts and updates the dose Live Activity, and the relay and Apple see its
+  content state in the clear (when a dose is due and its state, from a closed template of six fields without
+  any free text), along with the push-to-start and update tokens. The relay stores the version and day of
+  that consent with the binding, and nothing of the state.
 
 The relay never sees medication names, doses, readings, notes, user names, account data, the host name of
 a HealthLog server, the device's encryption key or any plaintext of a notification. The code contains no
@@ -65,7 +70,7 @@ flowchart LR
   R -- "signed responses" --> I
   R -- "HTTP/2, fixed payload templates" --> A
   A --> D
-  D -- "direct: opt-out, self-read, challenge answer" --> R
+  D -- "direct: opt-out, self-read, Live Activity withdrawal, challenge answer" --> R
 ```
 
 - Every request from an instance is signed with its Ed25519 key; every `/v1` response is signed with the
@@ -160,7 +165,7 @@ version. Host provisioning with Ansible is described in [deploy/ansible/README.m
 ## Limits
 
 Defaults of the hosted relay (`DefaultLimits` in `internal/relay/config.go`, `DefaultRegistrationLimits` in
-`internal/limits/limits.go`). Every `429` names its scope (`device`, `instance`, `tier` or `global`) and
+`internal/limits/limits.go`). Every `429` names its scope (`device`, `activity`, `instance`, `tier` or `global`) and
 carries a retry hint spread by plus or minus 30 %: the `retryAfter` field, and on a refusal of the whole
 request also the `Retry-After` header. Clients take the hint only from the signed `retryAfter` (capped at one
 day), never from the unsigned header. Request-rate and binding-quota refusals include the instance's limits.
@@ -182,10 +187,12 @@ day), never from the unsigned header. Request-rate and binding-quota refusals in
 | All classes per day | 300 | `429 device_quota` |
 | Alerts | bucket of 20, refills 6 per hour, at most 100 per day | `429 device_quota` |
 | Silent pushes per hour | 6 | `429 device_quota` |
+| Live Activity starts per day (only with the Live Activity consent) | 12 | `429 device_quota` |
+| Live Activity updates per activity (only with the Live Activity consent) | 12 per hour, 48 per day | `429 device_quota`, scope `activity` |
 | Live Activity ends per day | 12 | `429 device_quota` |
 | Soft-invalid binding | no push on the day it failed, then one probe a day | `429 binding_quota`, scope `device` |
 | Challenges per token | 1 per token, instance and day | `409 binding_conflict`, `challenge_quota` |
-| Verified app calls (opt-out, self-read, challenge answer) | bucket of 10, refills 10 per hour | `429 device_quota` |
+| Verified app calls (opt-out, self-read, Live Activity withdrawal, challenge answer) | bucket of 10, refills 10 per hour | `429 device_quota` |
 
 | Relay-wide | Value |
 |---|---|
@@ -201,7 +208,8 @@ day), never from the unsigned header. Request-rate and binding-quota refusals in
 | Signed time window | plus or minus 300 s |
 
 After a restart, counts held in memory are gone. Until the next UTC midnight the relay therefore halves the
-global registration caps and the per-device silent and Live Activity limits. The daily alert count of a
+global registration caps and the per-device silent and Live Activity start and end limits; the
+per-activity update counts start again from zero. The daily alert count of a
 device, the daily push count of an instance and an instance's anomaly flag are stored and survive a restart.
 The per-instance counts of new bindings and challenges and the 24-hour block after an exceeded invalid-token
 budget do not; see the known limitations in [docs/threat-model.md](docs/threat-model.md#known-limitations).

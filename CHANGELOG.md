@@ -14,12 +14,13 @@ First release.
 - Relay API: instance registration with proof of possession, key rotation and deletion
   (`/v1/instances`), device bindings with a device-signed statement (`/v1/bindings`), conflict resolution
   by a challenge push (`/v1/bindings/challenge`), the direct opt-out and self-read for the app
-  (`/v1/bindings/self`), batched pushes of up to 50 items (`/v1/push`), envelope receipt counts
+  (`/v1/bindings/self`), the Live Activity consent (`/v1/bindings/liveactivity`) and its direct withdrawal
+  (`/v1/bindings/self/liveactivity`), batched pushes of up to 50 items (`/v1/push`), envelope receipt counts
   (`/v1/receipts`) and the instance status (`/v1/status`).
 - Ed25519 request signatures with a 300-second window, nonce replay protection and refusal of time stamps
   from before the relay started; every `/v1` response, `/healthz` and `/version` signed with the relay
   identity key (`hl-relay-resp-v2`) and bound to the request method, path and nonce.
-- Fixed APNs payload templates for alert, silent and Live Activity end; envelopes are checked for version,
+- Fixed APNs payload templates for alert, silent and Live Activity start, update and end; envelopes are checked for version,
   suite, class and exact length and never opened. Envelopes exist for alert and silent only; the Live
   Activity class byte `0x03` is reserved and the vectors carry no envelope of that class.
 - Direct opt-out with a device-only return: the pair stays blocked against the instance, and only a later
@@ -27,6 +28,25 @@ First release.
   start, lifts the block. The binding key that opted out is pinned to the token for 365 days (bucket
   `optout_pins`): while the token is unbound, a binding with any other key, also by a newly registered
   instance, is `409 binding_conflict` with a challenge push that only the device can answer.
+- Live Activity start and update over the relay (`activity.event` `start`, `update` or `end`, `end` when
+  absent), only with the device's second, separate Live Activity consent: signed by the binding key
+  (`hl-la-consent-v1`), passed on by the instance with `POST /v1/bindings/liveactivity`, dropped by it with
+  `DELETE /v1/bindings/liveactivity`, withdrawn by the device directly with
+  `DELETE /v1/bindings/self/liveactivity` (`hl-la-withdraw-v1`). The consent version and day are stored with
+  the binding, returned by the self-read (`liveActivityConsentVersion`, `liveActivityConsentDay`) and kept on
+  a rebind by the same key to the same instance. Without it a start or update answers
+  `403 liveactivity_consent_required`.
+- A closed content state for start and update, forwarded in the clear: `status` (`pending`, `due`,
+  `overdue`, `snoozed`, `taken`, `skipped`), `countdownTarget` (`0` or one day back to two days ahead of the
+  relay clock), `isOverdue`, `confirmed`, `pendingConfirm` and `timeFormatRaw` (`AUTO`, `H12`, `H24`), all
+  required and nothing else; a start names the fixed attributes type `HealthLogDoseAttributes` with
+  `{"v":1}` and a fixed localized alert. A start is signed over the push-to-start token (`hl-la-start-v1`, at
+  most 30 days old); an update or end over the update token (`hl-activity-v1`, at most 12 hours old).
+- Live Activity limits: 12 starts per device and day, 12 updates per activity and hour and 48 per day
+  (`429 device_quota`, scope `activity`), 12 ends per device and day. Metrics
+  `hlp_bindings_total{result="liveactivity_consent"}` and `{result="liveactivity_consent_withdrawn"}`.
+- Fixed shapes, with vectors, for the `DATA_CHANGED`, `HEALTHKIT_CATCH_UP` and `SECURITY_ALERT` plaintexts
+  (`spec/envelope.md`, "Types with a fixed shape").
 - Signer process without network access that holds the APNs key and writes an ES256 provider token to a
   shared tmpfs every 30 minutes, or on request at most every 20 minutes.
 - Per-instance, per-device, per-tier and relay-wide limits, registration limits by IPv4 address and IPv6

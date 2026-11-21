@@ -328,6 +328,108 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
         "422": { $ref: "#/components/responses/Invalid" }
         "429": { $ref: "#/components/responses/TooMany" }
+  /v1/bindings/liveactivity:
+    post:
+      tags: [binding]
+      operationId: grantLiveActivityConsent
+      summary: Pass on the device's Live Activity consent
+      description: |
+        The device's separate consent to Live Activity start and update over the relay, signed by the
+        binding key (`hl-la-consent-v1` over host, the requesting instance, the token tag, `textVersion` and
+        `iat`) and passed on unchanged by the instance. Start and update carry their content state in the
+        clear, so with this consent the relay and Apple see when a dose is due and its state. The relay
+        stores the text version and the day with the binding; they live and die with it, survive a rebind
+        by the same key to the same instance and are returned by `GET /v1/bindings/self`. A repeated
+        consent replaces them.
+        Errors besides request signing: `422 invalid_item`, `401 stale_timestamp` (on `consent.iat`),
+        `403 binding_refused` (signature), `404 binding_unknown` (no binding of the token held by this
+        instance, or another binding key), `503 storage_unavailable`.
+      parameters:
+        - $ref: "#/components/parameters/HL-Client"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LAConsentBody" }
+      responses:
+        "200":
+          description: The consent is stored with the binding.
+          headers: { HL-Relay-Signature: { $ref: "#/components/headers/HL-Relay-Signature" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LAConsentResponse" }
+        "400": { $ref: "#/components/responses/NonceRequired" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "411": { $ref: "#/components/responses/LengthRequired" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+        "422": { $ref: "#/components/responses/Invalid" }
+        "426": { $ref: "#/components/responses/UpgradeRequired" }
+        "429": { $ref: "#/components/responses/TooMany" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+    delete:
+      tags: [binding]
+      operationId: dropLiveActivityConsent
+      summary: Drop the Live Activity consent of a binding of this instance
+      description: |
+        The person switched Live Activities over the relay off in the app. Removes the Live Activity
+        consent; the binding stays. Answers `204` for every valid body, whether or not the token was bound
+        to this instance and whether or not it had a consent.
+      parameters:
+        - $ref: "#/components/parameters/HL-Client"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TokenBody" }
+      responses:
+        "204": { $ref: "#/components/responses/NoContent" }
+        "400": { $ref: "#/components/responses/NonceRequired" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "411": { $ref: "#/components/responses/LengthRequired" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+        "422": { $ref: "#/components/responses/Invalid" }
+        "426": { $ref: "#/components/responses/UpgradeRequired" }
+        "429": { $ref: "#/components/responses/TooMany" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+  /v1/bindings/self/liveactivity:
+    delete:
+      tags: [app]
+      operationId: withdrawLiveActivityConsent
+      summary: Withdraw the Live Activity consent directly (app)
+      description: |
+        The device withdraws its Live Activity consent without its instance. The body has the shape of the
+        opt-out; `signature` is the `hl-la-withdraw-v1` signature by `bindingKey` (an opt-out signature does
+        not verify here, and this one is no opt-out). On success the consent is removed and the binding
+        stays; start and update items for the token are then refused with
+        `403 liveactivity_consent_required`. The signature is checked first for every request. Any mismatch
+        answers `404 binding_unknown`. Failed attempts are charged to the relay-wide bucket (`429 global` once
+        it is empty); a verified call is limited per device token, shared with the other app endpoints
+        (`429 device_quota`).
+        Errors: `400 nonce_required`, `411 length_required`, `413 too_large`, `422 invalid_item`,
+        `401 stale_timestamp`, `404 binding_unknown`, `429 global`, `429 device_quota`,
+        `503 storage_unavailable`, `503 overloaded`.
+      security: []
+      x-signed-by: device binding key (statement and signature in the body)
+      parameters:
+        - $ref: "#/components/parameters/HL-Nonce"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UnbindBody" }
+      responses:
+        "204": { $ref: "#/components/responses/NoContent" }
+        "400": { $ref: "#/components/responses/NonceRequired" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "411": { $ref: "#/components/responses/LengthRequired" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+        "422": { $ref: "#/components/responses/Invalid" }
+        "429": { $ref: "#/components/responses/TooMany" }
+        "503": { $ref: "#/components/responses/Unavailable" }
   /v1/push:
     post:
       tags: [push]
@@ -814,8 +916,36 @@ components:
             tokenTag: { $ref: "#/components/schemas/TokenTag" }
             iat: { $ref: "#/components/schemas/UnixTime" }
         signature:
-          description: "`hl-unbind-v1` signature by `bindingKey`."
+          description: "`hl-unbind-v1` signature by `bindingKey` (`DELETE /v1/bindings/self`), or `hl-la-withdraw-v1` (`DELETE /v1/bindings/self/liveactivity`)."
           allOf: [{ $ref: "#/components/schemas/Signature" }]
+    LAConsentBody:
+      type: object
+      additionalProperties: false
+      required: [token, bindingKey, consent, signature]
+      properties:
+        token: { $ref: "#/components/schemas/Token" }
+        bindingKey: { $ref: "#/components/schemas/PublicKey" }
+        consent:
+          type: object
+          additionalProperties: false
+          required: [textVersion, day, iat]
+          properties:
+            textVersion:
+              description: Version of the Live Activity consent text the person accepted.
+              type: string
+              pattern: '^[A-Za-z0-9._-]{1,32}$'
+            day: { $ref: "#/components/schemas/Day" }
+            iat:
+              description: Within 300 s of the relay clock.
+              allOf: [{ $ref: "#/components/schemas/UnixTime" }]
+        signature:
+          description: "`hl-la-consent-v1` signature by `bindingKey`."
+          allOf: [{ $ref: "#/components/schemas/Signature" }]
+    LAConsentResponse:
+      type: object
+      required: [liveActivity]
+      properties:
+        liveActivity: { type: string, const: granted }
     ChallengeBody:
       type: object
       additionalProperties: false
@@ -844,17 +974,56 @@ components:
           allOf: [{ $ref: "#/components/schemas/Day" }]
         consentVersion: { type: string }
         consentDay: { type: string }
+        liveActivityConsentVersion:
+          description: Text version of the separate Live Activity consent; absent when it was not given or was withdrawn.
+          type: string
+        liveActivityConsentDay:
+          description: Day of the Live Activity consent; absent with it.
+          type: string
     Class:
       type: string
       enum: [alert, silent, liveactivity]
+    ContentState:
+      description: |
+        The closed Live Activity content state, forwarded in the clear to Apple for `start` and `update`.
+        Exactly these six keys, all required; no other key (an unknown key, a wrong type or a repeated key
+        makes the whole request invalid). A missing or null key, a value outside its enumeration or a
+        `countdownTarget` outside its bounds refuses the item with `422 invalid_item`.
+      type: object
+      additionalProperties: false
+      required: [status, countdownTarget, isOverdue, confirmed, pendingConfirm, timeFormatRaw]
+      properties:
+        status:
+          type: string
+          enum: [pending, due, overdue, snoozed, taken, skipped]
+        countdownTarget:
+          description: Unix seconds; 0 (no countdown) or from 86400 s before to 172800 s after the relay clock, bounds included.
+          type: integer
+          format: int64
+        isOverdue: { type: boolean }
+        confirmed: { type: boolean }
+        pendingConfirm: { type: boolean }
+        timeFormatRaw:
+          type: string
+          enum: [AUTO, H12, H24]
     Activity:
-      description: The Live Activity part of a `liveactivity` item.
+      description: |
+        The Live Activity part of a `liveactivity` item. `start` and `update` need the device's Live
+        Activity consent (`403 liveactivity_consent_required`); `end` does not.
       type: object
       additionalProperties: false
       required: [token, bindingKey, statement, signature]
       properties:
+        event:
+          description: "`end` when absent."
+          type: string
+          enum: [start, update, end]
+          default: end
+        state:
+          description: Required for `start` and `update`, refused for `end`.
+          allOf: [{ $ref: "#/components/schemas/ContentState" }]
         token:
-          description: The Live Activity push token.
+          description: "`start`: the app's push-to-start token; `update` and `end`: the update token of the activity."
           allOf: [{ $ref: "#/components/schemas/Token" }]
         bindingKey: { $ref: "#/components/schemas/PublicKey" }
         statement:
@@ -870,10 +1039,10 @@ components:
               description: Tag of `activity.token`.
               allOf: [{ $ref: "#/components/schemas/TokenTag" }]
             iat:
-              description: At most 300 s in the future and at most 43200 s in the past when the item arrives.
+              description: "At most 300 s in the future when the item arrives, and at most 2592000 s (30 days) in the past for `start`, 43200 s for `update` and `end`."
               allOf: [{ $ref: "#/components/schemas/UnixTime" }]
         signature:
-          description: "`hl-activity-v1` signature by `bindingKey`."
+          description: "`start`: `hl-la-start-v1` signature by `bindingKey` over the push-to-start token; `update` and `end`: `hl-activity-v1` signature over the update token."
           allOf: [{ $ref: "#/components/schemas/Signature" }]
     PushItem:
       type: object
@@ -931,13 +1100,14 @@ components:
         error:
           description: Set when `status` is not 200.
           type: string
-          enum: [activity_refused, binding_unknown, unregistered, invalid_item, device_quota, binding_quota, instance_quota, instance_rate, global, apns_rejected, apns_unavailable, relay_misconfigured, maintenance, queue_full]
+          enum: [activity_refused, liveactivity_consent_required, binding_unknown, unregistered, invalid_item, device_quota, binding_quota, instance_quota, instance_rate, global, apns_rejected, apns_unavailable, relay_misconfigured, maintenance, queue_full]
         reason:
           description: Apple's reason for `soft_invalid` and `apns_rejected`, from a closed set, otherwise `other`.
           type: string
         scope:
+          description: "`activity` only on `device_quota` for the update limit of one Live Activity."
           type: string
-          enum: [device, instance, tier, global]
+          enum: [device, activity, instance, tier, global]
         retryAfter:
           description: Seconds, spread by plus or minus 30 %.
           type: integer
@@ -1041,10 +1211,10 @@ components:
       properties:
         error:
           type: string
-          enum: [not_found, nonce_required, length_required, too_large, too_many_items, invalid_item, env_unsupported, unknown_instance, stale_timestamp, bad_signature, replayed, instance_revoked, instance_suspended, invite_required, binding_refused, challenge_refused, binding_unknown, key_in_use, binding_conflict, min_server_version, instance_rate, binding_quota, device_quota, global, overloaded, storage_unavailable, registration_paused, maintenance, relay_misconfigured, apns_unavailable, internal]
+          enum: [not_found, nonce_required, length_required, too_large, too_many_items, invalid_item, env_unsupported, unknown_instance, stale_timestamp, bad_signature, replayed, instance_revoked, instance_suspended, invite_required, binding_refused, challenge_refused, binding_unknown, activity_refused, liveactivity_consent_required, key_in_use, binding_conflict, min_server_version, instance_rate, binding_quota, device_quota, global, overloaded, storage_unavailable, registration_paused, maintenance, relay_misconfigured, apns_unavailable, internal]
         scope:
           type: string
-          enum: [device, instance, tier, global]
+          enum: [device, activity, instance, tier, global]
         retryAfter:
           description: Seconds, spread by plus or minus 30 %; also sent as the unsigned `Retry-After` header, which clients ignore. Clients cap it at 86400.
           type: integer

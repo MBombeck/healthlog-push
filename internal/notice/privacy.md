@@ -35,8 +35,8 @@ agree. Without it the app works as before; only the relay notifications are miss
 ## 3. What the relay never sees
 
 Medication names, doses, readings, notes, journal text, user names, e-mail addresses, account data, the host
-name of your HealthLog server, the encryption key of your device, the content of a Live Activity, or any
-plaintext of a notification.
+name of your HealthLog server, the encryption key of your device, or any plaintext of a notification.
+Without the separate Live Activity consent (section 4) it never sees the content of a Live Activity either.
 
 
 ## 4. What the relay sees
@@ -50,12 +50,27 @@ plaintext of a notification.
   (IPv6) of an open connection for the connection limit. It is not stored and not logged.
 - The IP address of your device when your app talks to the relay directly: when you switch the relay off or
   leave a server (opt-out), when you read what the relay holds about you, and when your app answers a
-  binding conflict challenge. It is not stored and not logged.
-- For every notification: its class (alert, background, or Live Activity end), its lifetime, its size,
-  which is fixed per class, and the time it was sent.
-- A Live Activity token, only at the moment the activity is ended.
+  binding conflict challenge, and when you withdraw the Live Activity consent directly. It is not stored
+  and not logged.
+- For every notification: its class (alert, background, or Live Activity start, update or end), its
+  lifetime, its size, which is fixed per class, and the time it was sent.
+- A Live Activity token, only at the moment the activity is ended, unless you give the Live Activity
+  consent below.
 - Counts that HealthLog servers report about delivery (how many accepted notifications a device confirmed).
   These are numbers only, without any id.
+
+**Live Activity consent.** The app can show the next dose as a Live Activity on the lock screen. If you
+want your HealthLog server to start and update it through the relay, the app asks for a second, separate
+consent. Apple's Live Activities cannot decrypt anything, so the content state of a start or an update
+travels in the clear. With this consent the relay and Apple see that content state: when a dose is due and
+its state (pending, due, overdue, snoozed, taken or skipped), whether it is overdue, confirmed or waiting for
+confirmation, the countdown time and the time format of the display. They never see a medication name, a
+dose or any free text: the relay forwards only this fixed set of six fields with fixed values and refuses
+anything else. With this consent the relay also sees the token your app uses to start Live Activities and
+the token of each running activity, while it sends to them. Without this consent nothing changes: your
+server can only end an activity, and the relay sees nothing of its content. You can withdraw this consent at
+any time in the app; the app then tells the relay directly, without your HealthLog server, and starts and
+updates over the relay stop at once.
 
 To be open about it: the relay cannot read content, but time patterns can say something about health. The
 time of a notification, and its class, can reveal for example that a dose was recorded on another of your
@@ -69,8 +84,12 @@ All times in the relay's database are day or week numbers (UTC), never a time of
 - Device binding: the HMAC of your device token (keyed with a secret of the relay), the instance id of your
   server, a SHA-256 hash of the binding key your app created, a sequence number, the APNs environment, the
   state (provisional, active or soft-invalid), the day of binding, the week of last use, the day of the last
-  accepted notification, the version of the consent text you accepted and the day you accepted it, and the
-  number of alerts sent to the device today.
+  accepted notification, the version of the consent text you accepted and the day you accepted it, the
+  number of alerts sent to the device today, and, only if you gave the Live Activity consent, the version of
+  that consent text and the day you gave it. The relay stores nothing of a Live Activity's content state and
+  none of its tokens.
+  The Live Activity consent lives and dies with the binding: it is deleted when you withdraw it, when your
+  server drops it, when the binding changes to another key or another server, and with the binding itself.
   Deleted when you opt out, when your server removes it, when your server unregisters or is revoked, when
   Apple reports the token as no longer valid, when the binding has had no notification for about 90 days
   (13 weeks), or when it is still provisional more than two days after it was created.
@@ -101,7 +120,8 @@ All times in the relay's database are day or week numbers (UTC), never a time of
   registration codes (as hashes). No personal data.
 
 Kept in memory only, gone at the latest on restart: the device token during a request, the nonces of recent
-requests, recent push results for retries (10 minutes), per-device rate counters, the hashed address
+requests, recent push results for retries (10 minutes), per-device rate counters, the update counters of
+each running Live Activity (keyed by an HMAC of its token, cleared at the end of each UTC day), the hashed address
 counters of the registration limit (reset daily), pending conflict challenges (30 minutes) and the time of a
 direct opt-out (10 minutes).
 
@@ -149,7 +169,8 @@ discarded. On the relay host, logs are limited to three files of 10 MB each.
 ## 8. Who else receives data
 
 - Apple. APNs delivers every notification. Apple receives the device token, the time, the type of push and
-  the app's topic, and can link the token to an Apple account. Apple acts as an independent controller; see
+  the app's topic, and can link the token to an Apple account. With the Live Activity consent, Apple also
+  receives the content state of each Live Activity start and update in the clear (section 4). Apple acts as an independent controller; see
   Apple's own privacy policy.
 - Hetzner Online GmbH hosts the relay on a dedicated cloud server in a data centre in Falkenstein, Germany.
   Hetzner sees network connections to the server, not their content.
@@ -173,6 +194,9 @@ There is no advertising, no profiling and no automated decision about you.
 
 - Delivering notifications to your device: your consent (Art. 6(1)(a) and Art. 9(2)(a) GDPR), given in the
   app, recorded with the version of the consent text and the day. You can withdraw it at any time.
+- Starting and updating Live Activities through the relay, with their content state in the clear: your
+  separate Live Activity consent (Art. 6(1)(a) and Art. 9(2)(a) GDPR), given in the app and recorded with
+  the version of its text and the day. You can withdraw it at any time.
 - Limits, abuse prevention, suspensions and blocks: the legitimate interest in keeping the service usable and safe
   for everyone (Art. 6(1)(f) GDPR).
 - Data about a HealthLog server (instance id, key, address in memory): the terms the server's operator
@@ -188,7 +212,11 @@ You have the right of access, rectification, erasure, restriction, data portabil
 - Access: in the app, under the relay settings, "My data at the relay". The app sends a request signed with
   its binding key (GET /v1/bindings/self). The relay answers with everything it holds about your binding:
   kind, instance id, state, environment, day of binding, week of last use, consent text version and day of
-  consent.
+  consent, and, if given, the version and day of the Live Activity consent.
+- Withdrawal of the Live Activity consent: switch Live Activities over the relay off in the app. The app
+  sends a signed request directly to the relay (DELETE /v1/bindings/self/liveactivity), and the relay
+  deletes the consent at once, without the cooperation of your HealthLog server. Your binding and the
+  relay notifications stay.
 - Erasure and withdrawal of consent: switch the relay off in the app, or leave the server. The app sends a
   signed request directly to the relay (DELETE /v1/bindings/self). The relay deletes the binding at once,
   without the cooperation of your HealthLog server, and blocks that server from binding your device again
@@ -206,7 +234,10 @@ Nordrhein-Westfalen), or the authority where you live.
 ## 11. What the relay operator could do
 
 Whoever holds the relay's Apple key (its operator, or someone who steals the key) can show notifications in
-the name of the app on a device whose token passed through the relay. They cannot read your data, and the
+the name of the app on a device whose token passed through the relay. With a Live Activity token that
+passed through the relay, they could also show a misleading state in your Live Activity, for example a dose
+as taken that was not; the app's Live Activity can display only the fixed fields described in section 4,
+never a free text. Reminders on your device stay authoritative. They cannot read your data, and the
 HealthLog app is built to take no action on a notification it cannot decrypt and verify.
 
 We cannot prove which code runs on the relay. That is why it is built so that it cannot read your content,

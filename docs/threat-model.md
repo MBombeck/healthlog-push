@@ -24,7 +24,8 @@ must follow are named where the relay depends on them; they are enforced in thos
 - **Instance operator.** Runs a HealthLog server, registers it, binds devices of its users and pushes to
   them. Usually benign; can be hostile towards one of its own users (for example a former partner).
 - **Device.** The HealthLog app. Holds the binding key and the device encryption key. Talks to the relay
-  directly only to opt out, to read its own binding and to answer a conflict challenge.
+  directly only to opt out, to read its own binding, to withdraw its Live Activity consent and to answer a
+  conflict challenge.
 - **Relay operator.** Holds the APNs key, the identity key and the admin socket.
 - **Network attacker.** Can observe or redirect traffic, including through DNS or a mis-issued certificate.
 - **Mass registrant.** Registers many instances or binds made-up tokens to exhaust limits or Apple's
@@ -42,10 +43,55 @@ host names of instances or the device encryption key. The full list with retenti
 
 Apple sees the device token, the time, the push type (`alert`, `background`, `liveactivity`), the priority,
 the topic and the payload size, and can link the token to an Apple account. The payload is a fixed
-template plus an opaque envelope (`internal/apns/apns.go`).
+template plus an opaque envelope (`internal/apns/apns.go`), or for a Live Activity a fixed template with a
+content state (`internal/apns/liveactivity.go`).
+
+## Live Activity start and update
+
+ActivityKit cannot decrypt, so a Live Activity start or update carries its content state in the clear.
+The relay sends them only for a binding whose device gave the second, separate Live Activity consent
+(`hl-la-consent-v1`, signed by the binding key, passed on by the instance). With that consent:
+
+- **The relay and Apple learn** when a dose is due and its state: `status` (`pending`, `due`, `overdue`,
+  `snoozed`, `taken`, `skipped`), `countdownTarget`, `isOverdue`, `confirmed`, `pendingConfirm` and
+  `timeFormatRaw`, at the moment of each start and update. They learn no medication name, no dose and no free
+  text. Apple can link this, like every push, to the Apple account of the token. The relay also sees the
+  app's push-to-start token on every start and the activity's update token on every update; it stores
+  neither, nor any state, and keeps only in-memory counters (starts per device, updates per activity keyed by
+  an HMAC of the update token, cleared daily).
+- **The template is the control.** The relay forwards exactly six keys with fixed types, closed enumerations
+  and a `countdownTarget` of `0` or within one day back to two days ahead of the relay clock; an unknown key
+  or a wrong type refuses the whole request, a value outside its range the item. The start attributes are
+  fixed (`HealthLogDoseAttributes`, `{"v":1}`) and the start alert is a fixed pair of localization keys, so
+  an instance cannot place text anywhere in a Live Activity.
+- **Statements are not interchangeable.** A start needs `hl-la-start-v1` over the push-to-start token (at
+  most 30 days old); an update or end needs `hl-activity-v1` over the update token (at most 12 hours old).
+  Neither starts what the other covers, and without the consent no start or update leaves the relay
+  (`403 liveactivity_consent_required`); the end needs no extra consent, as before.
+- **Withdrawal does not need the instance.** The device removes the consent at the relay directly
+  (`DELETE /v1/bindings/self/liveactivity`, `hl-la-withdraw-v1`); the instance can drop it too. It belongs to
+  the binding key and goes with the binding.
+- **A hostile instance** with the consent can start at most 12 activities per device and day and send at
+  most 12 updates per activity and hour and 48 per day, each inside the template. It can show a wrong state
+  (a dose as taken, a wrong countdown), not a word of its own.
+- **A compromised relay or an APNs key holder** can push a misleading content state to an activity token it
+  has seen, or start activities with a push-to-start token it has seen, without any consent check, because
+  that check runs in the relay. What the Live Activity can show is still bounded by the template, because the
+  app's attributes and content-state types hold only these fields (a rule of the app), so the worst is a misleading state of a known
+  activity (for example "taken" for a dose that was not), not free text in the activity. The alert of a
+  forged start is a different matter; like any alert from the key holder, it can carry arbitrary text (see
+  below). Local reminders stay authoritative.
+- **Push-to-start token exposure.** The push-to-start token is long-lived: it stays valid until the system
+  issues a new one, and the start statement over it may be up to 30 days old. With the consent it passes
+  through the relay on every start. Whoever captures it and holds the APNs key can start dose activities on
+  that device until the token changes; the relay can refuse starts of instances, not of an APNs key holder.
+  Withdrawing the consent stops the relay and the instances from using the token, not a key holder. An
+  intruder in the relay process collects the push-to-start tokens of the starts that pass while they are
+  there, as with device tokens.
 
 Metadata is the residual risk. The class and the timing of pushes can reveal behaviour: a Live Activity end
-says "a dose was recorded elsewhere, now". The relay keeps times only as day or week numbers in its store,
+says "a dose was recorded elsewhere, now". With the Live Activity consent, the content state of a start or
+update says more, by design (see "Live Activity start and update"). The relay keeps times only as day or week numbers in its store,
 keeps no class per instance at rest, writes logs and metrics without instance ids, and coarsens the summary
 log line and the metrics to hourly while fewer than 20 instances are active. Registrations, key rotations,
 instance deletions and resolved conflict challenges get no log line of their own; they are counted in the
@@ -69,9 +115,10 @@ They cannot:
 - **read any data.** There is no content at the relay, and the device keys never leave the device;
 - **make the app act.** The HealthLog app takes action only on notifications it decrypted with its own key
   and verified, ignores plaintext fields, registers its action categories under per-installation names and
-  accepts Live Activity updates only from local state. These are rules of the app; the relay's part is that
-  its own templates carry none of these fields and that it sees a Live Activity token only at the moment of
-  the end;
+  accepts remote Live Activity content only inside the closed template, and remote starts and updates only
+  after the person gave the Live Activity consent. These are rules of the app; the relay's part is that its
+  own templates carry none of these fields, that it forwards only a template-checked content state, and that
+  without that consent it sees a Live Activity token only at the moment of the end;
 - reach tokens that never passed through the relay. At rest the relay stores only token HMACs.
 
 The relay process never holds the APNs key. It reads a JWT that the signer writes; the relay uses it only
@@ -237,13 +284,13 @@ app does not depend on the relay for anything else. Protections against a self-i
   instance in the last three days. The `delivery` signal needs at least 20 accepted pushes and reports from at
   least three instances in 24 hours. Cooperating `standard` instances can still turn it to `degraded`; it is
   display only and changes neither the `/healthz` status nor the deploy gate.
-- **A restart forgets in-memory counters.** Per-device silent and Live Activity limits and the global
+- **A restart forgets in-memory counters.** Per-device silent and Live Activity start and end limits and the global
   registration caps are halved until midnight to compensate; the alert bucket starts full; the nonce cache
   is empty, which is why time stamps from before the start are refused. Only each binding's alert count of
   the day and each instance's push count of the day are restored (and the instance flag, which is stored as
   a day). The per-instance counts of new bindings and challenges of the day, the record of which token each
-  instance challenged that day, and the 24-hour block after an exceeded invalid-token budget start again
-  from zero, so each restart gives every instance these allowances afresh for the rest of the day.
+  instance challenged that day, the 24-hour block after an exceeded invalid-token budget and the
+  per-activity Live Activity update counts (not halved) start again from zero, so each restart gives every instance these allowances afresh for the rest of the day.
 - **Apple's timestamp on a `410` is not used.** Apple reports when it learned that a token became invalid;
   the relay deletes the binding on any `410`, even one created after that time. The device binds again
   through its server.
@@ -255,7 +302,7 @@ app does not depend on the relay for anything else. Protections against a self-i
   [SECURITY-INVARIANTS.md](../SECURITY-INVARIANTS.md).
 - **Failed app calls share one global bucket** of 100, refilling 20 per second. Only failed attempts are
   charged to it, so flooding it with junk refuses other failing calls (`429 global`) but never a correctly
-  signed opt-out, self-read or challenge answer. Verified calls are limited per device token (10, refilling
+  signed opt-out, self-read, Live Activity withdrawal or challenge answer. Verified calls are limited per device token (10, refilling
   10 per hour).
 - **Suspended and revoked instance records expire 365 days after their reason day**; after that the same key
   could register again as a new instance in probation.

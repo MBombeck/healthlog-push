@@ -26,8 +26,8 @@ So:
   Create it with the environment scope **"Sandbox & Production"**, so the same key serves development builds
   and TestFlight or App Store builds. A key limited to one environment fails on the other with
   `BadEnvironmentKeyInToken`.
-- The bundle id of your app build as the APNs topic. The relay sends Live Activity ends to
-  `<topic>.push-type.liveactivity`.
+- The bundle id of your app build as the APNs topic. The relay sends Live Activity starts, updates and
+  ends to `<topic>.push-type.liveactivity`.
 - A released image, pinned by digest and verified (README, "Verifying releases").
 
 The Ansible roles in [deploy/ansible/](../deploy/ansible/README.md) turn a fresh Ubuntu 24.04 host into a
