@@ -46,4 +46,3 @@
       healthlog_push_registration_mode must be open, invite or closed; the AppArmor
       profile names must be plain profile names.
     quiet: true
-
