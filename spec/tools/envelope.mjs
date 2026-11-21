@@ -69,9 +69,12 @@ export function aeadOpen(key, nonce, aad, ct) {
 export const INFO = Buffer.from("HealthLog push envelope v1");
 export const VERSION = 0x01;
 export const SUITE = 0x01;
-export const CLASS = { alert: 0x01, silent: 0x02, liveactivity: 0x03 };
-export const BUCKET = { alert: 1024, silent: 1024, liveactivity: 512 };
-export const MAX_TTL = { alert: 6 * 3600, silent: 3600, liveactivity: 4 * 3600 };
+export const CLASS = { alert: 0x01, silent: 0x02 };
+// 0x03 is reserved for sealed Live Activity content. Version 1 defines no bucket for it and never seals or
+// opens it: Live Activity ends travel as a fixed template without an envelope (spec/envelope.md, "Format").
+export const RESERVED_CLASS = { liveactivity: 0x03 };
+export const BUCKET = { alert: 1024, silent: 1024 };
+export const MAX_TTL = { alert: 6 * 3600, silent: 3600 };
 export const CLOCK_SKEW = 300;
 export const HEADER_LEN = 3, ENC_LEN = 32, TAG_LEN = 16;
 export const envelopeLength = (cls) => HEADER_LEN + ENC_LEN + BUCKET[cls] + TAG_LEN;

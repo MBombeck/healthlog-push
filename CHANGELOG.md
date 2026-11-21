@@ -20,7 +20,10 @@ First release.
   from before the relay started; every `/v1` response, `/healthz` and `/version` signed with the relay
   identity key (`hl-relay-resp-v2`) and bound to the request method, path and nonce.
 - Fixed APNs payload templates for alert, silent and Live Activity end; envelopes are checked for version,
-  suite, class and exact length and never opened.
+  suite, class and exact length and never opened. Envelopes exist for alert and silent only; the Live
+  Activity class byte `0x03` is reserved and the vectors carry no envelope of that class.
+- Direct opt-out with a device-only return: the pair stays blocked against the instance, and only a later
+  bind statement by the same binding key with a higher `seq` lifts the block.
 - Signer process without network access that holds the APNs key and writes an ES256 provider token to a
   shared tmpfs every 30 minutes, or on request at most every 20 minutes.
 - Per-instance, per-device, per-tier and relay-wide limits, registration limits by IPv4 address and IPv6

@@ -55,13 +55,13 @@ func (c Class) MaxTTL() int64 {
 	return 0
 }
 
-// EnvelopeLength is the exact wire length of an envelope of class c.
+// EnvelopeLength is the exact wire length of an envelope of class c, or 0 for a class that carries no
+// envelope. Version 1 seals alert and silent content only; the Live Activity class byte 0x03 is reserved and
+// a liveactivity item travels as a fixed template without an envelope.
 func (c Class) EnvelopeLength() int {
 	switch c {
 	case ClassAlert, ClassSilent:
 		return envHeader + envEnc + 1024 + envTag
-	case ClassLiveActivity:
-		return envHeader + envEnc + 512 + envTag
 	}
 	return 0
 }
@@ -69,7 +69,7 @@ func (c Class) EnvelopeLength() int {
 // CheckEnvelopeFrame validates the outer frame of an envelope for the class the push item claims:
 // version, suite, class byte and exact length. The content stays opaque; the relay never decrypts.
 func CheckEnvelopeFrame(c Class, env []byte) error {
-	if !c.Valid() || len(env) != c.EnvelopeLength() {
+	if !c.Valid() || c.EnvelopeLength() == 0 || len(env) != c.EnvelopeLength() {
 		return ErrInvalid
 	}
 	if env[0] != EnvelopeVersion || env[1] != EnvelopeSuite || env[2] != c.ClassByte() {

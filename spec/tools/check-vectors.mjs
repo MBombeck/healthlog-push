@@ -26,7 +26,7 @@ const alert = Buffer.from(v.envelopes.find((e) => e.name === "alert").envelope, 
 check("alert envelope sha256 equals reference", hex(sha(alert)) === summary.envelopeSha256);
 check("alert aad equals reference", v.aad.alert === summary.aad);
 check("alert length equals reference", alert.length === summary.envelopeLength);
-check("live activity length equals reference", Buffer.from(v.envelopes.find((e) => e.name === "liveActivity").envelope, "base64url").length === summary.liveActivityEnvelopeLength);
+check("no envelope vector uses the reserved live activity class", v.envelopes.every((e) => e.expectedClass !== "liveactivity"));
 check("sender public key equals reference", v.keys.senderPublicKey === summary.senderPublicKey);
 check("recipient public key equals reference", v.keys.recipientPublicKey === summary.recipientPublicKey);
 

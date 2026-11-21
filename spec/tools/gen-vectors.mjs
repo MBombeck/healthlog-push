@@ -7,7 +7,7 @@ import { writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
   hex, unhex, x25519Public, sealWithInjectedEphemeralForVectors as seal, open, buildPadded, tokenTagOf, keyIdOf,
-  BUCKET, MAX_TTL, CLOCK_SKEW, HEADER_LEN, CLASS, LOW_ORDER, envelopeLength, sha, edKeyFromSeed, edPublicRaw, edSign,
+  BUCKET, MAX_TTL, CLOCK_SKEW, HEADER_LEN, CLASS, RESERVED_CLASS, LOW_ORDER, envelopeLength, sha, edKeyFromSeed, edPublicRaw, edSign,
 } from "./envelope.mjs";
 
 const b64u = (b) => Buffer.from(b).toString("base64url");
@@ -27,12 +27,14 @@ export function build() {
 
   const alertJson = {
     v: 1, t: "MEDICATION_INTAKE_RECORDED", id: id(1), iat: NOW, exp: NOW + 7200,
-    d: { medicationId: "cm_test_med_1", slot: { id: "slot_test_1", scheduledAt: "2026-11-21T07:00:00Z" }, takenAt: "2026-11-21T07:12:00Z", source: "API" },
-    n: { title: "Test medication", body: "Recorded at 07:12" },
-    ui: { category: "MEDICATION_INTAKE_RECORDED", thread: "med-test", level: "passive" },
+    d: {
+      medicationId: "cm_test_med_1", intakeId: "cm_test_intake_1", slotInstant: "2026-11-21T07:00:00.000Z",
+      outcome: "taken", takenAt: "2026-11-21T07:12:00.000Z", takenVia: "IOS",
+    },
+    n: { title: "Dose recorded", body: "A dose was recorded as taken on another device." },
+    ui: { thread: "medication-cm_test_med_1", level: "passive" },
   };
-  const silentJson = { v: 1, t: "SYNC", id: id(2), iat: NOW, exp: NOW + 3600, d: { scope: ["medications", "schedule"], syncedAt: "2026-11-21T07:12:00Z" } };
-  const laJson = { v: 1, t: "LA_UPDATE", id: id(3), iat: NOW, exp: NOW + 7200, d: { status: "pending" } };
+  const silentJson = { v: 1, t: "MEDICATION_INTAKE_SYNC", id: id(2), iat: NOW, exp: NOW + 3600, d: { syncedAt: "2026-11-21T07:12:00.000Z" } };
   const maxBody = (() => {
     const base = { v: 1, t: "X", id: id(9), iat: NOW, exp: NOW + 60, n: { body: "" } };
     const fixed = Buffer.byteLength(JSON.stringify(base), "utf8");
@@ -43,7 +45,6 @@ export function build() {
   const S = (args) => seal({ pkR, skS, apnsToken, skE, ...args });
   const sAlert = S({ pushClass: "alert", json: alertJson });
   const sSilent = S({ pushClass: "silent", json: silentJson });
-  const sLa = S({ pushClass: "liveactivity", json: laJson });
   const craft = (padded, cls = "alert") => S({ pushClass: cls, padded }).envelope;
   const craftJson = (obj) => craft(buildPadded("alert", obj));
   const flip = (buf, i) => { const c = Buffer.from(buf); c[i] ^= 0x01; return c; };
@@ -53,19 +54,20 @@ export function build() {
   const badJson = (() => { const p = Buffer.alloc(BUCKET.alert); p.writeUInt16BE(3, 0); p.write("{x:", 2); return p; })();
   const badUtf8 = (() => { const p = Buffer.alloc(BUCKET.alert); p.writeUInt16BE(4, 0); Buffer.from([0x22, 0xff, 0xfe, 0x22]).copy(p, 2); return p; })();
   const classTampered = (() => { const c = Buffer.from(sSilent.envelope); c[2] = CLASS.alert; return c; })();
+  const reservedClass = (() => { const c = Buffer.from(sAlert.envelope); c[2] = RESERVED_CLASS.liveactivity; return c; })();
 
   const base = { recipientKeys: [hex(skR)], trustedSenders: [hex(pkS)], apnsToken: hex(apnsToken), expectedClass: "alert", now: NOW };
   const E = (name, envelope, expect, over = {}, plaintext) => ({ name, ...base, ...over, envelope: b64u(envelope), expect, ...(plaintext ? { plaintext } : {}) });
   const envelopes = [
     E("alert", sAlert.envelope, "ok", {}, alertJson),
     E("silent", sSilent.envelope, "ok", { expectedClass: "silent" }, silentJson),
-    E("liveActivity", sLa.envelope, "ok", { expectedClass: "liveactivity" }, laJson),
     E("previousSender", seal({ pkR, skS: skSprev, apnsToken, skE, pushClass: "alert", json: alertJson }).envelope, "ok", { trustedSenders: [hex(pkS), hex(pkSprev)] }, alertJson),
     E("previousRecipientKey", seal({ pkR: pkR2, skS, apnsToken, skE, pushClass: "alert", json: alertJson }).envelope, "ok", { recipientKeys: [hex(skR), hex(skR2)] }, alertJson),
     E("exactBucketMultibyteEnd", S({ pushClass: "alert", json: maxBody }).envelope, "ok", {}, maxBody),
     E("wrongToken", sAlert.envelope, "authFailure", { apnsToken: hex(otherToken) }),
     E("wrongClassPath", sAlert.envelope, "classMismatch", { expectedClass: "silent" }),
     E("classByteTamperedOnMatchingPath", classTampered, "authFailure"),
+    E("reservedLiveActivityClass", reservedClass, "classMismatch"),
     E("unknownVersion", flip(sAlert.envelope, 0), "unsupportedVersion"),
     E("unknownSuite", flip(sAlert.envelope, 1), "unsupportedVersion"),
     E("untrustedSender", sAlert.envelope, "authFailure", { trustedSenders: [hex(pkX)] }),
@@ -151,7 +153,8 @@ export function build() {
     note: "All key material is synthetic (repeated bytes) and must never be used outside tests.",
     constants: {
       host: HOST, now: NOW, info: "HealthLog push envelope v1", version: 1, suite: 1, classes: CLASS,
-      bucket: BUCKET, envelopeLength: { alert: envelopeLength("alert"), silent: envelopeLength("silent"), liveactivity: envelopeLength("liveactivity") },
+      reservedClasses: RESERVED_CLASS,
+      bucket: BUCKET, envelopeLength: { alert: envelopeLength("alert"), silent: envelopeLength("silent") },
       maxTtlSeconds: MAX_TTL, clockSkewSeconds: CLOCK_SKEW,
     },
     keys: {

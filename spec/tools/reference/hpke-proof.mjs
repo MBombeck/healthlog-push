@@ -273,11 +273,15 @@ const NOW = 1795000000;
 const id = (n) => "01JTESTVECT" + String(n).padStart(15, "0");
 const alertJson = {
   v: 1, t: "MEDICATION_INTAKE_RECORDED", id: id(1), iat: NOW, exp: NOW + 7200,
-  d: { medicationId: "cm_test_med_1", slot: { id: "slot_test_1", scheduledAt: "2026-11-21T07:00:00Z" }, takenAt: "2026-11-21T07:12:00Z", source: "API" },
-  n: { title: "Test medication", body: "Recorded at 07:12" },
-  ui: { category: "MEDICATION_INTAKE_RECORDED", thread: "med-test", level: "passive" },
+  d: {
+    medicationId: "cm_test_med_1", intakeId: "cm_test_intake_1", slotInstant: "2026-11-21T07:00:00.000Z",
+    outcome: "taken", takenAt: "2026-11-21T07:12:00.000Z", takenVia: "IOS",
+  },
+  n: { title: "Dose recorded", body: "A dose was recorded as taken on another device." },
+  ui: { thread: "medication-cm_test_med_1", level: "passive" },
 };
-const silentJson = { v: 1, t: "SYNC", id: id(2), iat: NOW, exp: NOW + 3600, d: { scope: ["medications", "schedule"], syncedAt: "2026-11-21T07:12:00Z" } };
+const silentJson = { v: 1, t: "MEDICATION_INTAKE_SYNC", id: id(2), iat: NOW, exp: NOW + 3600, d: { syncedAt: "2026-11-21T07:12:00.000Z" } };
+// Class 0x03 is reserved: this proves its layout only. Version 1 never seals it and the vectors carry none.
 const laJson = { v: 1, t: "LA_UPDATE", id: id(3), iat: NOW, exp: NOW + 7200, d: { status: "pending" } };
 
 const V = (args) => __sealWithEphemeralForVectorsOnly({ pkR, skS, apnsToken, skE, ...args });

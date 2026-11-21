@@ -68,7 +68,7 @@ func FuzzCheckEnvelopeFrame(f *testing.F) {
 	f.Add("alert", make([]byte, 1075))
 	f.Add("liveactivity", make([]byte, 563))
 	f.Fuzz(func(t *testing.T, c string, b []byte) {
-		if CheckEnvelopeFrame(Class(c), b) == nil && (len(b) != Class(c).EnvelopeLength() || b[2] != Class(c).ClassByte()) {
+		if CheckEnvelopeFrame(Class(c), b) == nil && (Class(c) == ClassLiveActivity || len(b) != Class(c).EnvelopeLength() || b[2] != Class(c).ClassByte()) {
 			t.Fatal("frame check accepted a mismatch")
 		}
 	})

@@ -54,7 +54,7 @@ unpadded base64url.
 |---|---|---|---|
 | 0 | 1 | version | `0x01` |
 | 1 | 1 | suite | `0x01`: HPKE `mode_auth`, DHKEM(X25519, HKDF-SHA256), HKDF-SHA256, ChaCha20-Poly1305 |
-| 2 | 1 | class | `0x01` alert, `0x02` silent, `0x03` live activity |
+| 2 | 1 | class | `0x01` alert, `0x02` silent; `0x03` is reserved (below) |
 | 3 | 32 | `enc` | the encapsulated ephemeral public key |
 | 35 | B + 16 | ciphertext | AEAD output over the padded plaintext of B bytes, followed by the 16-byte tag |
 
@@ -70,13 +70,15 @@ The plaintext is padded to a fixed bucket per class, so the envelope length depe
 |---|---|---|---|---|
 | `alert` | `0x01` | 1024 | 1075 | 1434 |
 | `silent` | `0x02` | 1024 | 1075 | 1434 |
-| `liveactivity` | `0x03` | 512 | 563 | 751 |
 
 Envelope length is `3 + 32 + B + 16`.
 
-The class byte `0x03` is reserved for sealed Live Activity content. Protocol version 1 sends Live Activity
-`end` events from a fixed template without an envelope (see `spec/protocol.md`, "What the relay sends to
-Apple"), so a v1 relay never forwards a `0x03` envelope.
+The class byte `0x03` is reserved for sealed Live Activity content in a later version and has no bucket in
+version 1. Protocol version 1 sends Live Activity `end` events from a fixed template without an envelope
+(see `spec/protocol.md`, "What the relay sends to Apple"): a v1 server never seals class `0x03`, a v1 relay
+refuses an envelope on a `liveactivity` item, and a v1 receiver has no arrival path for it. An envelope with
+class byte `0x03` that arrives on the alert or silent path fails with `classMismatch` (vector
+`reservedLiveActivityClass`).
 
 ### AAD
 
@@ -130,11 +132,15 @@ until it fits. The bucket never changes. The vector `exactBucketMultibyteEnd` fi
 | `exp` | integer | yes | expiry, unix seconds; `exp > iat` and `exp - iat` at most the class maximum |
 | `d` | object | no | data for the app |
 | `n` | object | no | visible text: `title`, `body`, `subtitle` |
-| `ui` | object | no | presentation set by the notification service extension: `category` (a logical name), `thread`, `level` (`passive`, `active`, `time-sensitive`), `sound`, `badge` |
+| `ui` | object | no | presentation set by the notification service extension: `category` (a logical name, absent when the notification has no actions), `thread`, `level` (exactly one of `passive`, `active`, `time-sensitive`), `sound`, `badge` |
 
 There is no URL or deep-link field. Deep-link targets are derived by the app from `t` and the identifiers in
 `d`. A receiver checks `ui.sound` and `ui.category` against fixed lists, bounds `badge` (0 to 999) and the
-length of every string, and accepts `level: time-sensitive` only for the types allowed to use it.
+length of every string, and accepts `level: time-sensitive` only for the types allowed to use it. A
+HealthLog server sends `time-sensitive` only with `t` = `MEDICATION_REMINDER`, `SYSTEM_ALERT` or
+`SECURITY_ALERT` (the urgent ones), and with `REMINDER`, the type every alert carries in discreet mode. Any
+other spelling of a level (for example `timeSensitive`) is not part of the schema; a receiver treats it as
+absent.
 
 Class maxima for `exp - iat` (the same values bound `ttlSeconds` at the relay):
 
@@ -142,7 +148,6 @@ Class maxima for `exp - iat` (the same values bound `ttlSeconds` at the relay):
 |---|---|
 | `alert` | 21600 s (6 h) |
 | `silent` | 3600 s (1 h) |
-| `liveactivity` | 14400 s (4 h) |
 
 ## Opening
 
@@ -243,7 +248,8 @@ ends in `authFailure` (vectors `lowOrderEncZero` and `lowOrderEncPoint`).
 
 The relay checks the outer frame only, against the class the push item claims:
 
-1. the `envelope` field decodes as unpadded base64url to exactly the envelope length of the class,
+1. the item's class is `alert` or `silent` (a `liveactivity` item carries no envelope), and the `envelope`
+   field decodes as unpadded base64url to exactly the envelope length of the class,
 2. byte 0 is `0x01`, byte 1 is `0x01`,
 3. byte 2 is the class byte of the item's `class`.
 

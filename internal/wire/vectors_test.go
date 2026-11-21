@@ -109,6 +109,15 @@ func TestVectorsEnvelopeFrame(t *testing.T) {
 			t.Errorf("class %s length %d, spec %d", c, Class(c).EnvelopeLength(), n)
 		}
 	}
+	// The Live Activity class byte is reserved in version 1: no envelope of that class passes the relay,
+	// whatever its length.
+	for _, n := range []int{563, 1075} {
+		env := make([]byte, n)
+		env[0], env[1], env[2] = EnvelopeVersion, EnvelopeSuite, 0x03
+		if CheckEnvelopeFrame(ClassLiveActivity, env) == nil {
+			t.Errorf("reserved liveactivity envelope of %d bytes accepted", n)
+		}
+	}
 }
 
 // TestVectorsStatements: the Go text builders produce byte-identical statements to the reference, and Go

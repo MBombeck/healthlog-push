@@ -74,7 +74,8 @@ flowchart LR
 - A device binding needs a statement signed by a key that only the app holds. A server that merely knows a
   device token cannot bind it.
 - The app can leave an instance directly (`DELETE /v1/bindings/self`) without the instance's cooperation.
-  The pair is then blocked for 12 months.
+  The pair is then blocked for 12 months; only the same device can lift the block, with a newly signed
+  binding statement.
 - The relay builds every APNs payload from constants. An instance chooses the class, the opaque envelope,
   the lifetime and a collapse id, never visible text, a category or `userInfo` keys.
 
@@ -235,6 +236,17 @@ sha256sum -c SHA256SUMS --ignore-missing
 
 The hosted relay reports its version, commit and image digest at `https://push.healthlog.dev/version`.
 That answer comes from the server being checked, so it is a statement, not proof.
+
+### Hosted relay identity keys
+
+The public identity keys of the hosted relay `push.healthlog.dev`, `current` and `next`, are published with
+the first release: in its release notes and as `keys/push.healthlog.dev.json` in the tagged tree, in the
+form `{"host": "push.healthlog.dev", "current": "<base64url 32>", "next": "<base64url 32>"}` (unpadded
+base64url Ed25519 public keys). Clients pin them at build time. The HealthLog server ships them as its hosted
+relay pins, the iOS app as its `HLPushRelayKeys` build setting. Neither fetches them from the relay at
+run time, because an answer from the relay cannot vouch for the key that signs it. A new `next` key is
+published in the release notes of the release that ships it, before the relay switches to it (see
+[docs/operations.md](docs/operations.md), "Relay identity key").
 
 ## Project layout
 
