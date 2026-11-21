@@ -1,0 +1,291 @@
+# healthlog-push
+
+[![CI](https://github.com/MBombeck/healthlog-push/actions/workflows/ci.yml/badge.svg)](https://github.com/MBombeck/healthlog-push/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/MBombeck/healthlog-push/actions/workflows/codeql.yml/badge.svg)](https://github.com/MBombeck/healthlog-push/actions/workflows/codeql.yml)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/MBombeck/healthlog-push/badge)](https://scorecard.dev/viewer/?uri=github.com/MBombeck/healthlog-push)
+[![Go Report Card](https://goreportcard.com/badge/github.com/MBombeck/healthlog-push)](https://goreportcard.com/report/github.com/MBombeck/healthlog-push)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+
+The push relay of the HealthLog project. Self-hosted HealthLog servers use it to send notifications to the
+HealthLog iOS app from the App Store. The relay holds the Apple Push Notification service (APNs) key for the
+app, so a self-hoster does not need an Apple developer account. Notification content is end-to-end
+encrypted on the HealthLog server for each device; the relay forwards an opaque envelope and cannot open it.
+
+The hosted relay runs at `https://push.healthlog.dev`. It is meant for households: one person or a family
+running their own HealthLog server. It is not a medical service. Local reminders on the device stay the
+authoritative reminder path; the relay only adds convenience.
+
+One Go binary, two processes: `relay` serves the API and talks to Apple, `signer` holds the APNs key without
+any network access and hands the relay a short-lived provider token through a shared tmpfs.
+
+## What the relay sees and what it never sees
+
+The relay sees:
+
+- the instance id and public key of each registered HealthLog server, and the server software version it
+  reports (`healthlog/1.49.0`, for example);
+- the IP address of a connecting server, in memory only (registration limiter, hashed with a daily salt;
+  connection limiter, while the connection is open);
+- APNs device tokens while a request is processed; at rest only an HMAC of the token is kept;
+- per push: the class (`alert`, `silent`, `liveactivity`), the lifetime, the fixed envelope size and the
+  time it was sent;
+- a SHA-256 hash of the device's binding key, the binding sequence number, the consent text version and
+  the day of consent;
+- the IP address of a device when the app calls the relay directly (opt-out, reading its own binding,
+  answering a conflict challenge), in memory only, never stored or logged;
+- a Live Activity token only at the moment the activity is ended.
+
+The relay never sees medication names, doses, readings, notes, user names, account data, the host name of
+a HealthLog server, the device's encryption key or any plaintext of a notification. The code contains no
+HPKE, X25519 or AEAD implementation; a structural test (`TestRelayCannotOpenEnvelopes`) fails if one is
+imported.
+
+Apple sees the device token, the time, the push type and the app topic, and Apple can link the token to an
+Apple account. That is true of every iOS push service.
+
+Details: [docs/privacy.md](docs/privacy.md) (the same text is served at `/privacy`).
+
+## Architecture
+
+```mermaid
+flowchart LR
+  subgraph home["Self-hosted HealthLog server"]
+    I["instance: encrypts one envelope per device, signs every request"]
+  end
+  subgraph host["Relay host"]
+    R["relay: public TLS 1.3 on 443 (redirected to 8443), bbolt store"]
+    S["signer: no network, holds the APNs .p8 key"]
+    S -- "provider JWT via tmpfs" --> R
+    R -- "empty refresh marker via tmpfs" --> S
+  end
+  D["iPhone: HealthLog app and notification service extension"]
+  A["Apple Push Notification service"]
+  D -- "device key, binding statement, consent" --> I
+  I -- "register, bind, push, receipts (signed)" --> R
+  R -- "signed responses" --> I
+  R -- "HTTP/2, fixed payload templates" --> A
+  A --> D
+  D -- "direct: opt-out, self-read, challenge answer" --> R
+```
+
+- Every request from an instance is signed with its Ed25519 key; every `/v1` response is signed with the
+  relay identity key, which instances and the app pin.
+- A device binding needs a statement signed by a key that only the app holds. A server that merely knows a
+  device token cannot bind it.
+- The app can leave an instance directly (`DELETE /v1/bindings/self`) without the instance's cooperation.
+  The pair is then blocked for 12 months.
+- The relay builds every APNs payload from constants. An instance chooses the class, the opaque envelope,
+  the lifetime and a collapse id, never visible text, a category or `userInfo` keys.
+
+## Threat model in short
+
+The relay cannot read content. It does see metadata, and time patterns can reveal health behaviour (for
+example when a dose was recorded on another device). Whoever holds the APNs key (the operator, or someone who
+compromises the signer or the host) can put a plaintext alert with arbitrary text on a device whose token
+they have seen. They cannot read any data, and the HealthLog app is built to take no action on a
+notification it could not decrypt and verify. A compromised relay process can forge relay responses; of the
+APNs credentials it only ever holds a provider token valid for at most one hour. DNS or TLS takeover turns into an outage rather than a
+takeover, because responses are signed. Nobody can prove which code runs on a server they do not control.
+The full analysis, including the known limitations, is in [docs/threat-model.md](docs/threat-model.md).
+
+## Self-hosting quick guide
+
+A self-hosted relay only works with an app you build yourself under your own Apple developer account. It
+cannot serve the App Store app. Read [docs/self-hosting.md](docs/self-hosting.md) first; this is the short
+version. Host provisioning with Ansible is described in [deploy/ansible/README.md](deploy/ansible/README.md).
+
+1. Pick a released image by digest and verify it (see [Verifying releases](#verifying-releases)):
+
+   ```sh
+   IMAGE=ghcr.io/mbombeck/healthlog-push@sha256:<digest>
+   ```
+
+2. Generate the keys:
+
+   ```sh
+   docker run --rm "$IMAGE" keygen relay-id      # JSON: relay_id_key (secret) and publicKey (pin this)
+   docker run --rm "$IMAGE" keygen token-mac     # base64url, 32 bytes
+   docker run --rm "$IMAGE" keygen acme-account  # PEM, EC P-256
+   ```
+
+   Keep all three in your secret store. The file `relay_id_key` holds only the value of the
+   `relay_id_key` field, not the whole JSON line.
+
+3. Lay out the secrets and state directories:
+
+   ```
+   /srv/healthlog-push/secrets/relay/relay_id_key            owner 65532, mode 0400
+   /srv/healthlog-push/secrets/relay/token_mac_key           owner 65532, mode 0400
+   /srv/healthlog-push/secrets/relay/token_mac_key_previous  optional, only during a rotation
+   /srv/healthlog-push/secrets/relay/acme_account_key        owner 65532, mode 0400
+   /srv/healthlog-push/secrets/signer/apns.p8                owner 65533, mode 0400
+   /srv/healthlog-push/data                                  65532:65530, 0700 (database, admin socket)
+   /srv/healthlog-push/export                                65532:65530, 0750 (daily registry.json)
+   /srv/healthlog-push/acme                                  65532:65530, 0700 (certificate cache)
+   ```
+
+4. Copy `deploy/compose/compose.yaml` and `deploy/compose/.env.example` (as `.env`) to
+   `/srv/healthlog-push/compose/`, fill in `HLP_IMAGE`, `HLP_IMAGE_DIGEST`, `HLP_PUBLIC_HOST`,
+   `HLP_APNS_TOPIC`, `HLP_APNS_KEY_ID` and `HLP_APNS_TEAM_ID`, then:
+
+   ```sh
+   cd /srv/healthlog-push/compose && docker compose up -d
+   docker compose exec relay /healthlog-push healthcheck && echo healthy
+   ```
+
+5. The relay listens on 8443 with host networking and no capabilities. Redirect 443 to it, for IPv4 and
+   IPv6, and accept 8443 only for redirected connections:
+
+   ```
+   table inet hlp {
+     chain prerouting { type nat hook prerouting priority dstnat; policy accept;
+       tcp dport 443 redirect to :8443 }
+     chain input { type filter hook input priority filter; policy drop;
+       iif "lo" accept
+       ct state established,related accept
+       tcp dport 8443 ct status dnat accept
+       # plus ICMP, ICMPv6 and your management access
+     }
+   }
+   ```
+
+   The certificate comes from Let's Encrypt over TLS-ALPN-01 on port 443 once DNS points at the host.
+   The complete rule set is `deploy/ansible/roles/firewall/templates/nftables.conf.j2`.
+
+## Limits
+
+Defaults of the hosted relay (`DefaultLimits` in `internal/relay/config.go`, `DefaultRegistrationLimits` in
+`internal/limits/limits.go`). Every `429` names its scope (`device`, `instance`, `tier` or `global`) and
+carries a retry hint spread by plus or minus 30 %: the `retryAfter` field, and on a refusal of the whole
+request also the `Retry-After` header. Request-rate and binding-quota refusals include the instance's limits.
+
+| Limit | probation | standard | Refusal |
+|---|---|---|---|
+| Active device bindings per instance | 20 | 50; 80 automatically after 30 quiet days above 80 % use; up to 150 by the operator | `429 binding_quota` |
+| Provisional bindings at the same time | 10 | 20 | `429 binding_quota` |
+| New device bindings per day | 20 | 100 | `429 binding_quota` |
+| Authenticated requests per minute | 20 | 60 | `429 instance_rate` |
+| Pushes per instance per day | 500 | 10,000 | `429 instance_quota` |
+| Pushes per instance per minute | 30 | 120 | `429 instance_rate` |
+| Invalid tokens per instance per day | 20 | 100 | above it: no new bindings for 24 h, pushes only to active bindings |
+| Conflict challenges per instance per day | 20 | 20 | `409 binding_conflict` with reason `challenge_quota` |
+| Bad signatures (token bucket, refills per minute) | 30 | 60 | `429 instance_rate` |
+
+| Per device (every tier) | Value | Refusal |
+|---|---|---|
+| All classes per day | 300 | `429 device_quota` |
+| Alerts | bucket of 20, refills 6 per hour, at most 100 per day | `429 device_quota` |
+| Silent pushes per hour | 6 | `429 device_quota` |
+| Live Activity ends per day | 12 | `429 device_quota` |
+| Challenges per token | 1 per day | `409 binding_conflict`, `challenge_quota` |
+
+| Relay-wide | Value |
+|---|---|
+| Global push limit per minute | 5 times the busiest minute of the last 7 days, at least 600, at most 6,000 |
+| Share of the global limit for standard instances | silent 70 %, Live Activity 85 %, alert 100 % |
+| Pool of all probation instances per minute | 10 % of the global limit, at least 60, at most 600 |
+| Registrations | 3 per day per IPv4 address or IPv6 /64, 10 per IPv6 /48, 30 per hour and 200 per day globally |
+| Unauthenticated app calls | token bucket of 100, refills 20 per second, shared by all devices |
+| Connections | 2,000 in total, 50 per IPv4 address or IPv6 /64 |
+| Push batch | at most 50 items, 128 KiB body; other bodies 4 KiB |
+| Send queue | 4,096 jobs, 256 per instance, refused when the estimated wait exceeds 2 s |
+| Signed time window | plus or minus 300 s |
+
+After a restart, counts held in memory are gone. Until the next UTC midnight the relay therefore halves the
+global registration caps and the per-device silent and Live Activity limits. The daily alert count of a
+device is stored with its binding and survives a restart.
+
+## Verifying releases
+
+Releases are built by `.github/workflows/release.yml` from a `vX.Y.Z` tag. The image is signed keyless
+with cosign, carries an SPDX SBOM attestation and SLSA provenance. Verify before you run it:
+
+```sh
+IMAGE=ghcr.io/mbombeck/healthlog-push@sha256:<digest>
+TAG=vX.Y.Z
+
+cosign verify "$IMAGE" \
+  --certificate-identity "https://github.com/MBombeck/healthlog-push/.github/workflows/release.yml@refs/tags/$TAG" \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+
+cosign verify-attestation "$IMAGE" --type slsaprovenance \
+  --certificate-identity-regexp '^https://github.com/slsa-framework/slsa-github-generator/.github/workflows/generator_container_slsa3.yml@refs/tags/v[0-9.]+$' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --certificate-github-workflow-repository MBombeck/healthlog-push
+
+cosign verify-attestation "$IMAGE" --type spdxjson \
+  --certificate-identity "https://github.com/MBombeck/healthlog-push/.github/workflows/release.yml@refs/tags/$TAG" \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com > /dev/null
+```
+
+The GitHub release also carries static Linux binaries for amd64 and arm64 with a signed checksum file:
+
+```sh
+cosign verify-blob SHA256SUMS --bundle SHA256SUMS.sigstore.json \
+  --certificate-identity "https://github.com/MBombeck/healthlog-push/.github/workflows/release.yml@refs/tags/$TAG" \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+sha256sum -c SHA256SUMS --ignore-missing
+```
+
+The hosted relay reports its version, commit and image digest at `https://push.healthlog.dev/version`.
+That answer comes from the server being checked, so it is a statement, not proof.
+
+## Project layout
+
+```
+cmd/healthlog-push/    entry point: relay, signer, admin, keygen, healthcheck, version
+internal/relay/        HTTP API, bindings, push path, limits, breaker, maintenance, admin socket
+internal/wire/         every parser and every signed text of the protocol (fuzzed)
+internal/apns/         APNs client and the fixed payload templates
+internal/signer/       the network-less signer that writes provider JWTs
+internal/store/        bbolt persistence, retention, registry export
+internal/limits/       token buckets, windows, registration and connection limiters
+internal/queue/        fair, bounded in-memory send queue
+internal/logx/         the only logger: JSON lines with a closed set of keys
+internal/metrics/      coarse Prometheus counters without instance labels
+internal/notice/       the texts served at /privacy, /terms and /
+internal/admin/        operator command line over the admin socket
+spec/                  protocol specification, test vectors and their tools
+deploy/compose/        compose file for relay and signer
+deploy/ansible/        host provisioning and verified deployment
+docs/                  operations, privacy, terms, threat model, self-hosting, API, dependencies, migration
+structure_test.go      structural rules about the code base itself
+```
+
+## Development
+
+You need the Go version named in `go.mod` and Node 22 for the vector check.
+
+```sh
+go build ./...
+go vet ./...
+go test -race ./...
+golangci-lint run                                        # v2, config in .golangci.yml
+go run golang.org/x/vuln/cmd/govulncheck@v1.10.0 ./...
+node spec/tools/check-vectors.mjs
+scripts/check-text.sh
+docker build -t healthlog-push:dev .
+```
+
+Fuzz targets run for 20 seconds each in CI; see [CONTRIBUTING.md](CONTRIBUTING.md) for running one
+locally. Dependencies and the policy for adding one: [docs/dependencies.md](docs/dependencies.md).
+
+## Documentation
+
+- [docs/operations.md](docs/operations.md): deploy, rollback, admin commands, key rotation, alerts, runbooks
+- [docs/self-hosting.md](docs/self-hosting.md): running your own relay for your own app build
+- [docs/api.md](docs/api.md): API reference with examples; the contract is `spec/protocol.md` and `spec/relay-api.yaml`
+- [docs/threat-model.md](docs/threat-model.md): assets, actors, limitations, tests
+- [docs/privacy.md](docs/privacy.md) and [docs/terms.md](docs/terms.md): the texts of the hosted relay
+- [docs/migration.md](docs/migration.md): moving the relay to a new host
+- [docs/dependencies.md](docs/dependencies.md): every module and why it is there
+
+Security reports: [SECURITY.md](SECURITY.md). Contact: relay@healthlog.dev (operation),
+abuse@healthlog.dev (abuse, suspension appeals), privacy@healthlog.dev (data protection).
+
+## License
+
+The code is licensed under the [Apache License 2.0](LICENSE). Everything under `spec/`, the specification,
+the test vectors in `spec/vectors/` and their tools, is dedicated to the public domain under CC0 1.0
+([spec/LICENSE](spec/LICENSE)), so that other implementations can copy it without conditions. The HealthLog server
+and apps are separate projects under their own licenses.

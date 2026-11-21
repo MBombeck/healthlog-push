@@ -1,0 +1,499 @@
+# Operations
+
+How to run the relay day to day: deploy and roll back, use the operator commands, rotate keys, react to
+alerts, handle abuse, prepare an absence, handle an incident, restore. Host provisioning is in
+[deploy/ansible/README.md](../deploy/ansible/README.md); moving to a new host is in
+[migration.md](migration.md).
+
+Commands below run on the relay host in the compose directory. The compose file sets the project name
+`healthlog-push`, so no `-p` is needed there:
+
+```sh
+cd /srv/healthlog-push/compose
+```
+
+## Deploy
+
+A deploy changes exactly one thing: the image digest. The Ansible role does every step below and refuses a
+tag without a digest; use it ([deploy/ansible/README.md](../deploy/ansible/README.md#deploying-a-release)).
+By hand, the order is the same:
+
+1. **Pin.** Take the digest from the GitHub release notes, never a tag alone:
+   `IMAGE=ghcr.io/mbombeck/healthlog-push@sha256:<digest>`, `TAG=vX.Y.Z`.
+2. **Verify** the signature and the provenance. Stop on any failure.
+
+   ```sh
+   cosign verify "$IMAGE" \
+     --certificate-identity "https://github.com/MBombeck/healthlog-push/.github/workflows/release.yml@refs/tags/$TAG" \
+     --certificate-oidc-issuer https://token.actions.githubusercontent.com
+   cosign verify-attestation "$IMAGE" --type slsaprovenance \
+     --certificate-identity-regexp '^https://github.com/slsa-framework/slsa-github-generator/.github/workflows/generator_container_slsa3.yml@refs/tags/v[0-9.]+$' \
+     --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+     --certificate-github-workflow-repository MBombeck/healthlog-push
+   ```
+
+3. **Note the running image** for the rollback: `cat /srv/healthlog-push/deployed-digest`.
+4. **Switch.** Set `HLP_IMAGE` to `$IMAGE` and `HLP_IMAGE_DIGEST` to its `sha256:<digest>` part in `.env`,
+   then `docker compose pull --quiet && docker compose up -d`. If a secret file changed, add
+   `--force-recreate`; the processes read secrets only at start.
+5. **Health gate.** `healthcheck` exits 0 only when the relay's local `/healthz` says `"status":"ok"`.
+
+   ```sh
+   for i in $(seq 30); do
+     docker compose exec -T relay /healthlog-push healthcheck && break
+     sleep 5
+   done
+   docker compose ps signer      # must show "healthy": a provider token younger than 60 minutes
+   ```
+
+6. **Record.** `echo "$IMAGE" > /srv/healthlog-push/deployed-digest`, and check from outside:
+   `curl -s https://push.example.org/version` shows the new `imageDigest`.
+
+If the gate fails, look at `/healthz` before rolling back. `status` is `down` when the relay has no fresh
+provider token from the signer or Apple rejected a renewed one; `degraded` when the breaker is not closed,
+the store is not writable, or `delivery` is `degraded`. The last one comes from receipt counts that at
+least three instances reported over the past 24 hours and is not caused by the new image; see
+[threat-model.md](threat-model.md#known-limitations).
+
+## Rollback
+
+The role rolls back by itself when the gate fails. By hand: put the previous image from `deployed-digest`
+back into `HLP_IMAGE` and `HLP_IMAGE_DIGEST`, `docker compose up -d`, and run the health gate again. A
+rollback does not touch `/data`, `/export` or `/acme`.
+
+## Health
+
+`GET /healthz` (public and signed, and on the local metrics listener) has five fields and no time stamps:
+
+| Field | Values | Meaning |
+|---|---|---|
+| `status` | `ok`, `degraded`, `down` | `down`: no provider token younger than 55 minutes, or the APNs key was rejected after a renewal. `degraded`: breaker not closed, store not writable, or delivery degraded. HTTP 503 unless `ok`. |
+| `db_writable` | `true`, `false` | `false` after a failed write; `true` again after the next successful write (the flush runs every minute). |
+| `apns_recent` | `true`, `false` | Apple accepted a push in the last 15 minutes. Expected to be `false` on a quiet relay; not part of `status`. |
+| `breaker` | `closed`, `open`, `half_open` | the token-failure breaker |
+| `delivery` | `ok`, `degraded`, `unknown` | from `POST /v1/receipts`: `degraded` when fewer than 80 % of at least 20 accepted pushes in the last 24 hours were confirmed by devices, counted over reports from at least three instances; `unknown` below either threshold |
+
+## Operator commands
+
+Every command goes over the admin unix socket (`/data/admin.sock`, mode 0600) and takes effect at once,
+without a restart. The answer is JSON; a refused command prints `{"error": "..."}` and exits with status 1.
+Use `exec -T` in scripts. Commands that change state write a log line (`admin.pause`, `admin.suspend`,
+`admin.block_token` and so on) without any id.
+
+### stats
+
+Service state and usage aggregates. Counts only; see [Usage statistics](#usage-statistics).
+
+```sh
+docker compose exec relay /healthlog-push admin stats
+```
+
+```json
+{
+  "service": {
+    "instances": { "probation": 3, "standard": 41, "suspended": 1 },
+    "bindings": { "active": 96, "provisional": 2, "soft_invalid": 1 },
+    "queue": 0,
+    "breaker": "closed",
+    "dbWritable": true,
+    "registration": "open",
+    "pauses": null,
+    "notice": null,
+    "globalLimitPerMinute": 600,
+    "apnsMisconfigured": false
+  },
+  "usage": { "...": "see Usage statistics" }
+}
+```
+
+`recoveryUntil` appears while a recovery window is open.
+
+### instance
+
+Tier, limit and binding counts of one instance. Instance ids reach you only from the instance's operator
+(for example in an abuse report or a limit request); the relay never lists them.
+
+```sh
+docker compose exec relay /healthlog-push admin instance 6f1c2a4e-8b3d-4c5e-9a7f-0d1e2f3a4b5c
+```
+
+```json
+{
+  "id": "6f1c2a4e-8b3d-4c5e-9a7f-0d1e2f3a4b5c",
+  "tier": "standard",
+  "created": "2026-11-02",
+  "deviceLimit": 50,
+  "active": 4,
+  "provisional": 0,
+  "delivered": true
+}
+```
+
+### pause and resume
+
+Stops a class (`all`, `alert`, `silent`, `liveactivity`) for a tier (`all`, `probation`) for a duration
+between 1 second and 7 days; default `all`, `all`, `30m`. A pause of class `all` refuses whole push
+requests with `503 maintenance`; a class pause refuses the matching items. Pauses expire by themselves.
+`/v1/status` shows `"state":"maintenance"` while an `all`/`all` pause is active.
+
+```sh
+docker compose exec relay /healthlog-push admin pause --tier probation --for 2h
+docker compose exec relay /healthlog-push admin pause --class silent --for 30m
+docker compose exec relay /healthlog-push admin resume          # removes every pause
+```
+
+### registration and invite
+
+`open` (default), `invite` or `closed`. `closed` answers new registrations with `503 registration_paused`;
+`invite` requires a one-time code in the registration body's `invite` field, otherwise `403
+invite_required`. A key that is already registered gets its existing id back in every mode.
+
+```sh
+docker compose exec relay /healthlog-push admin registration invite
+docker compose exec relay /healthlog-push admin invite
+```
+
+```json
+{ "invite": "<24 base64url characters>", "validDays": "7" }
+```
+
+The code is shown once and stored only as a hash. It is valid for 7 days and for one registration.
+
+### notice
+
+Sets the notice that every instance receives in `/v1/status`, in every `/v1/push` response and in the
+status file. A notice is an identifier (`[a-z0-9_]{1,40}`) and a level (`info`, `planned`,
+`action_required`); the text belongs to the HealthLog server, which maps known identifiers to its own
+messages. `--for` makes it expire.
+
+```sh
+docker compose exec relay /healthlog-push admin notice set planned_maintenance --level planned --for 72h
+docker compose exec relay /healthlog-push admin notice clear
+```
+
+### suspend, unsuspend and revoke
+
+`suspend <id> <reason>` keeps the bindings and refuses every request of the instance with `403
+instance_suspended` and the reason. Reasons are a closed set: `abuse`, `spam`, `invalid_tokens`,
+`harassment`, `legal`, `compromised`, `terms`, `operator_request`. A denylist entry is written (kept 365
+days, part of the export).
+
+`unsuspend <id>` returns the instance to `probation` (not to its previous tier) and removes the denylist
+entry.
+
+`revoke <id> [reason]` deletes every binding of the instance and keeps its record as `revoked`, so the key
+cannot register again; the reason defaults to `abuse`. There is no command to undo a revocation; the
+operator registers a new key.
+
+```sh
+docker compose exec relay /healthlog-push admin suspend 6f1c2a4e-8b3d-4c5e-9a7f-0d1e2f3a4b5c spam
+docker compose exec relay /healthlog-push admin unsuspend 6f1c2a4e-8b3d-4c5e-9a7f-0d1e2f3a4b5c
+docker compose exec relay /healthlog-push admin revoke 6f1c2a4e-8b3d-4c5e-9a7f-0d1e2f3a4b5c harassment
+```
+
+### block-token and unblock-token
+
+Blocks a device token for every instance except the one it is bound to now. Give the raw token in hex, or
+its HMAC under the current MAC key as 64 hex characters. Blocks are kept for 365 days.
+
+```sh
+docker compose exec relay /healthlog-push admin block-token --token <hex token>
+docker compose exec relay /healthlog-push admin unblock-token --token <hex token>
+```
+
+### limits
+
+Sets the active device limit of an instance, from 1 to 150. A probation instance stays capped at its tier
+limit of 20 until it is promoted.
+
+```sh
+docker compose exec relay /healthlog-push admin limits 6f1c2a4e-8b3d-4c5e-9a7f-0d1e2f3a4b5c devices=80
+```
+
+### recovery
+
+Opens the recovery window until a day (UTC), optionally importing an export first. During the window, a new
+registration ignores the global registration caps (the per-address caps still apply) and starts as
+`standard`. Instances whose key is in the imported export get their old id and tier back.
+
+```sh
+docker compose exec relay /healthlog-push admin recovery --until 2026-12-05 --from /export/registry.json
+```
+
+```json
+{ "imported": 44 }
+```
+
+The relay opens a 14-day window by itself when it starts from an empty or damaged database and finds an
+export ([Restore](#restore)).
+
+### export
+
+Writes `/export/registry.json` now: instances and the denylist, no bindings, no counters, no secrets. The
+relay also writes it at start and at every UTC day change.
+
+```sh
+docker compose exec relay /healthlog-push admin export
+```
+
+### breaker
+
+`open` forces the token-failure breaker open (no deletions, no marks, pushes refused with `503
+relay_misconfigured`), `close` closes it and clears its window, `reset-apns` clears the "APNs key rejected"
+stop and the 20-minute pause after `TooManyProviderTokenUpdates`. Use `close` and `reset-apns` only after the
+cause is fixed. `reset-apns` also sets the gauge `hlp_apns_misconfigured` back to 0.
+
+```sh
+docker compose exec relay /healthlog-push admin breaker open
+docker compose exec relay /healthlog-push admin breaker close
+docker compose exec relay /healthlog-push admin breaker reset-apns
+```
+
+### status-file
+
+Prints the signed status document for publishing at a location that does not depend on the relay host, so
+that instances can learn about an outage while the relay itself is unreachable. The signature is Ed25519 by
+the relay identity key over `hl-relay-status-v1`, the host and the SHA-256 of `body`.
+
+```sh
+docker compose exec relay /healthlog-push admin status-file > status.json
+```
+
+```json
+{
+  "body": { "host": "push.example.org", "issued": 1795000000, "notice": null, "state": "ok" },
+  "signature": "<base64url Ed25519 signature>"
+}
+```
+
+## Key rotation
+
+Generate keys with the same image you run: `docker run --rm "$IMAGE" keygen relay-id|token-mac|acme-account`.
+Every secret file is owned by the container user that reads it (relay 65532, signer 65533) with mode 0400.
+Keep every value in your secret store first, then write the file. With the Ansible role, change the
+variable and rerun the role; it recreates the containers when a secret changes.
+
+### APNs key
+
+1. Create a new APNs key in the Apple developer account and note its key id.
+2. Write it to `secrets/signer/apns.p8` and set `HLP_APNS_KEY_ID` (and `HLP_APNS_TEAM_ID` if it changed) in
+   `.env`.
+3. Restart both containers together, so that the shared tmpfs is emptied and the signer signs with the new
+   key at once (otherwise it keeps a still-valid token from the old key for up to 30 minutes):
+   `docker compose down && docker compose up -d`.
+4. Run the health gate, send one push to a test device, and check that `hlp_push_total{result="accepted"}`
+   rises and `relay_misconfigured` does not appear.
+5. Revoke the old key in the Apple developer account.
+
+If the old key is compromised, revoke it first. Sends then fail with `InvalidProviderToken`; after the next
+renewal the relay stops sending (`/healthz` `down`). Deploy the new key as above; the restart clears the
+stop.
+
+### Relay identity key
+
+The relay loads one identity key. HealthLog servers and the app pin two public keys, `current` and `next`,
+so the relay can switch to `next` without a client release.
+
+1. Make sure the `next` public key is already pinned in the released server and app builds you serve.
+2. Write the private seed of `next` to `secrets/relay/relay_id_key` (only the `relay_id_key` value of the
+   `keygen relay-id` output, or a PKCS#8 PEM Ed25519 key).
+3. `docker compose up -d --force-recreate relay`, then check that a pinned client accepts a signed
+   `GET /v1/status`.
+4. Generate a new `next` with `keygen relay-id`, keep the seed in the secret store, and ship its public key
+   as the new `next` in the following server and app releases. Drop the old `current` from the pins once no
+   supported client needs it.
+
+After a suspected compromise of the relay process, do this at once.
+
+### Token MAC key
+
+Bindings are stored under an HMAC of the device token. The relay reads `token_mac_key` (current) and, if
+present, `token_mac_key_previous`; a binding found under the previous key moves to the current key the next
+time it is used.
+
+1. `keygen token-mac` for the new value.
+2. Move the current value to `secrets/relay/token_mac_key_previous`, write the new one to `token_mac_key`.
+3. `docker compose up -d --force-recreate relay`.
+4. Keep the previous key for at least 14 weeks. Bindings without a push for about 13 weeks are deleted by
+   retention anyway, so after that no binding is left under the old key.
+5. Remove `token_mac_key_previous` and recreate the relay.
+
+Opt-out blocks and token blocks are keyed with the MAC and are not moved. After a rotation the relay no
+longer recognises them: re-apply the token blocks you still need with `admin block-token --token`; opt-out
+blocks cannot be restored, because the relay never knew the tokens. Rotate this key only when it is
+exposed.
+
+### ACME account key
+
+The ACME account key decides which account obtains the certificate. If your CAA record names the account
+(`accounturi=`), the new account must be allowed there before it is used.
+
+1. `keygen acme-account`. Register the key with the certificate authority using an ACME client of your
+   choice to learn its account URI, and add that URI to the CAA record next to the old one.
+2. Write the key to `secrets/relay/acme_account_key` and `docker compose up -d --force-recreate relay`.
+   The cached certificate stays in use; the next renewal uses the new account. To test now, move the
+   contents of `/srv/healthlog-push/acme` aside before the restart (mind the CA's rate limits).
+3. After a certificate was issued through the new account, remove the old account URI from the CAA record.
+
+## Alerts worth acting on
+
+While fewer than 20 instances are active, the metrics snapshot refreshes once an hour. Alert on the live
+`/healthz` from outside the host for anything that needs a quick reaction; use metrics for trends.
+Metrics are served on `127.0.0.1:9464/metrics` and carry no instance, device or address labels.
+
+| Signal | Means | Act |
+|---|---|---|
+| `/healthz` `status` `down` for more than a few minutes | no fresh provider token, or Apple rejected the key | check `docker compose ps signer` and the `signer.*` log lines; check key id, team id, topic and whether the key was revoked |
+| `hlp_apns_misconfigured == 1`, log `apns.provider_token_rejected` | a renewed provider token was rejected; the relay stopped sending | fix the key or the ids, then restart or `admin breaker reset-apns` |
+| `hlp_breaker_open == 1`, log `breaker.opened` | more than 30 % of device sends failed with token errors | look for a wrong topic, environment or key, or a bad image; roll back if a deploy preceded it; do not close by hand before the cause is fixed |
+| `hlp_db_writable == 0`, log `store.write_failed` or `store.check_failed` | the store cannot be written; pushes continue, bindings and registrations are refused | check disk space and the file; the flag clears on the next successful write; see [Restore](#restore) |
+| log `store.damaged_moved_aside`, `store.imported_export` | the relay started from a damaged database and restored the registry | expected after damage; watch registrations during the recovery window |
+| rising `hlp_push_total{result="apns_unavailable"}` or `{result="relay_misconfigured"}` | Apple unreachable, Apple throttling provider tokens, or the breaker | check the host's egress to Apple on 443 and the items above |
+| rising `hlp_push_total{result="apns_rejected"}` | Apple answers 4xx other than token errors: a request defect | check recent deploys; the reasons appear in the `errors` map of the `relay.summary` log line |
+| `increase(hlp_silent_paused_total) > 0`, log `apns.throttled` | Apple throttled more than 2 % of sends; silent pushes are off for 15 minutes | check for an instance flooding silent pushes; consider `admin pause --class silent` |
+| `increase(hlp_invalid_budget_exceeded_total) > 0` | an instance exceeded its invalid-token budget and lost new bindings for 24 hours | abuse runbook, step 1 |
+| rising `hlp_registrations_total{result="limited"}` | registrations hit the per-address or global caps | abuse runbook; consider `admin registration invite` |
+| rising `hlp_auth_failures_total{reason="bad_signature"}` | requests with wrong signatures | usually a misconfigured instance; sustained growth may be probing |
+| rising `hlp_queue_dropped_total` or `hlp_push_total{result="queue_full"}` | the send queue refuses work | capacity or a slow Apple connection |
+| rising `hlp_connections_rejected_total` | connection caps reached | connection flood; the cloud firewall is the next lever |
+| jump in `hlp_http_errors_total` | the HTTP server discarded error lines (often TLS scans) | informational |
+| log `export.failed` | the daily export was not written | check `/export` permissions and space; the export is your only backup |
+| certificate valid for less than 14 days (external check) | renewal over TLS-ALPN-01 failed | check DNS, port 443 reachability and the CAA record |
+
+Other metrics: `hlp_requests_total{status="2xx"|"4xx"|"5xx"}`, `hlp_bindings_total{result}` (`bound`,
+`conflict`, `challenge_resolved`, `unbound_instance`, `unbound_self`), `hlp_challenges_total{result}` and
+the usage gauges below. Log lines are JSON with the keys `ts` (to the second), `action` and a closed set of
+value keys; the summary line `relay.summary` carries `pushes`, `errors` by reason and `p95_ms`.
+
+## Usage statistics
+
+The relay keeps usage figures as counts only. There is no per-instance or per-device statistic.
+
+`admin stats` includes the `usage` block for the last 28 days:
+
+```json
+"usage": {
+  "granularity": "day",
+  "activeInstances": 44,
+  "instancesPushedLast7Days": 40,
+  "instancesPushedLast30Days": 43,
+  "activeBindings": 97,
+  "registrationsPerWeek": [ { "weekOf": "2026-10-26", "n": 3 }, { "weekOf": "2026-11-02", "n": 1 } ],
+  "optOutsPerWeek": [ { "weekOf": "2026-10-26", "n": 0 }, { "weekOf": "2026-11-02", "n": 1 } ],
+  "pushesPerDay": [
+    { "day": "2026-11-20", "total": 812, "byClass": { "alert": 301, "liveactivity": 12, "silent": 499 },
+      "accepted": 805, "softFailed": 5, "unregistered": 2 }
+  ]
+}
+```
+
+- `activeInstances` (probation and standard), `instancesPushedLast7Days` and `instancesPushedLast30Days`
+  (instances with an accepted push in that window) and `activeBindings` (active and soft-invalid) are current
+  counts at the time of the report.
+- `pushesPerDay` lists completed UTC days only, from 28 days ago to yesterday; the current day never
+  appears. `total` counts pushes that reached a final answer from Apple: `accepted`, `softFailed`
+  (`BadDeviceToken`, `DeviceTokenNotForTopic`, or a Live Activity that was already gone) and
+  `unregistered`. Refusals by the relay and transient failures are not in it.
+- `registrationsPerWeek` and `optOutsPerWeek` list completed weeks only (Monday to Sunday, UTC), keyed by
+  the Monday. Opt-outs are direct opt-outs by devices (`DELETE /v1/bindings/self`).
+
+The same figures as metrics, recomputed at every scrape and exposed through the snapshot, which refreshes
+every minute with at least 20 active instances and every hour below that:
+
+| Metric | Labels | Value |
+|---|---|---|
+| `hlp_usage_active_instances` | | probation and standard instances |
+| `hlp_usage_instances_pushed` | `window="7d"`, `window="30d"` | instances with an accepted push in the window |
+| `hlp_usage_active_bindings` | | active and soft-invalid bindings |
+| `hlp_usage_pushes_yesterday` | `class="alert"`, `"silent"`, `"liveactivity"` | pushes of the last completed day |
+| `hlp_usage_outcomes_yesterday` | `outcome="accepted"`, `"soft_failed"`, `"unregistered"` | outcomes of the last completed day |
+| `hlp_usage_registrations_last_week` | | registrations in the last completed week |
+| `hlp_usage_opt_outs_last_week` | | direct opt-outs in the last completed week |
+
+The underlying day counters (`counters_global`) are kept for 400 days.
+
+## Abuse runbook
+
+1. **Detect.** `hlp_invalid_budget_exceeded_total`, `hlp_registrations_total{result="limited"}`,
+   `hlp_auth_failures_total`, a rising share of `hlp_push_total{result="global"}`, `admin stats`, or a report
+   to abuse@healthlog.dev. Reports name the instance id that the app or the server shows.
+2. **Let the automatic limits work.** The invalid-token budget blocks new bindings for 24 hours, probation
+   instances share a small pool, provisional bindings expire after two days, per-device limits cap what one
+   device receives.
+3. **Look and suspend.** `admin instance <id>`, then `admin suspend <id> <reason>`. Reply to the reporter;
+   do not confirm details about other instances.
+4. **If the actor comes back** with new instances: `admin registration invite`; `admin block-token` for
+   tokens that are being targeted.
+5. **If others are affected:** `admin pause --tier probation`, then `admin pause --class silent`.
+6. **Last step:** revoke the APNs key in the Apple developer account and deploy a replacement
+   ([APNs key](#apns-key)). Confirm `/healthz` is `ok` and a test push arrives.
+7. **For every step:** write it in your change log, set a notice if instances are affected, and if data may
+   have been exposed, start the [incident procedure](#incident-and-breach) and its 72-hour clock.
+
+Appeals arrive at abuse@healthlog.dev with the instance id. Review the reason, answer, and use
+`admin unsuspend <id>` when the appeal is upheld. A suspension can remain unreviewed for up to 14 days; the
+terms say so.
+
+## Absence checklist
+
+Before an absence of more than a week:
+
+- [ ] Deploys frozen; the running digest noted.
+- [ ] `admin registration invite`.
+- [ ] A notice set if instances should know (`admin notice set <id> --level info`).
+- [ ] Apple Developer Program membership and the domain valid for more than 60 days.
+- [ ] TLS certificate valid for more than 30 days.
+- [ ] Last restore test from the export succeeded.
+- [ ] Secret store reachable by the person who would rebuild.
+- [ ] A delegate named in writing, with access to the host and the abuse mailbox, authorised for abuse
+      runbook steps 1 to 5 and for a rebuild from the export ([migration.md](migration.md),
+      [Restore](#restore)). The delegate does not hold and does not revoke the APNs key.
+- [ ] It is agreed who decides on a breach notification within 72 hours while you are away.
+
+## Incident and breach
+
+1. **Contain.** Depending on the case: `admin pause`, `admin breaker open`, `admin registration closed`,
+   stop the relay (`docker compose stop relay`), or revoke the APNs key. A suspected host compromise means:
+   revoke the APNs key, rotate the relay identity (switch to `next`), the token MAC key and the ACME account
+   key, and rebuild on a fresh host from the export ([migration.md](migration.md)). Do not reuse anything
+   from the old disk.
+2. **Preserve.** Note times, the running digest (`/version`), and which logs exist. The relay's logs contain
+   no ids or addresses, so they show what happened, not to whom.
+3. **Assess** which assets were reachable ([threat-model.md](threat-model.md#assets)): tokens in flight, the
+   token MAC key and database, the identity key, the APNs key.
+4. **Notify.** If personal data was affected and a risk to people cannot be ruled out, notify the
+   supervisory authority within 72 hours of becoming aware (Art. 33 GDPR). The relay cannot identify the
+   people concerned, so inform them through every instance with `admin notice set <id> --level
+   action_required` and a public statement on the project's pages (Art. 34(3)(c) GDPR). Tell instance
+   operators who reported issues directly.
+5. **Recover and record.** Restore service through a verified deploy, write down cause, timeline, effect and
+   the changes made, and update this document if a step was missing.
+
+Security reports from outside follow [SECURITY.md](../SECURITY.md).
+
+## Restore
+
+Only `/export/registry.json` is backed up. The database, the certificate cache and the secrets are not.
+
+- **Damaged database.** At start the relay runs a consistency check. If the file cannot be opened or fails
+  the check, it moves it aside as `relay.db.damaged-YYYYMMDD`, creates an empty store, imports
+  `/export/registry.json` and opens a 14-day recovery window. Log lines: `store.damaged_moved_aside`,
+  `store.imported_export`. Nothing needs to be done by hand.
+- **Lost database or new host.** An empty `/data` with an export present has the same effect: import and a
+  14-day recovery window. Copy the export from your backup to `/srv/healthlog-push/export/registry.json`
+  (owner 65532, group 65530, mode 0640) before the first start.
+- **On a running relay**, `admin recovery --until <day> --from /export/registry.json` imports instances that
+  are missing and opens the window.
+
+Device bindings are not restored. The first push for a device answers `404 binding_unknown`; the instance
+submits its stored device statement again, or gets a fresh one from the app. Bindings come back over a few
+hours. Opt-out blocks and token blocks live only in the database and are not restored either.
+
+Test a restore regularly: start a relay with an empty `/data` and a copy of the export on a test host, and
+check that `admin stats` shows the imported instances.
+
+## Hosting and certifications
+
+This section is a placeholder. The hosted relay runs on a dedicated Hetzner Cloud server operated by
+Hetzner Online GmbH in a data centre in Germany or Finland. The wording of this section, including any
+statement about certifications, is pending verification. No certification is claimed.
