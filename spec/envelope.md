@@ -142,6 +142,20 @@ HealthLog server sends `time-sensitive` only with `t` = `MEDICATION_REMINDER`, `
 other spelling of a level (for example `timeSensitive`) is not part of the schema; a receiver treats it as
 absent.
 
+### Types with a fixed shape
+
+The relay never sees `t`. These types have a shape fixed by this specification, which servers and apps
+follow exactly; vectors with the given names show each one.
+
+| `t` | Class | Lifetime (`exp - iat`) | `d` | `n` | `ui` | Vector |
+|---|---|---|---|---|---|---|
+| `DATA_CHANGED` | silent | 3600 s | `domains`: a sorted, non-empty subset of `"measurements"`, `"sleep"`, `"workouts"`, `"nutrition"`; `changedAt`: ISO 8601 time | absent | absent | `silentDataChanged` |
+| `HEALTHKIT_CATCH_UP` | silent | 3600 s | `requestedAt`: ISO 8601 time | absent | absent | `silentHealthKitCatchUp` |
+| `SECURITY_ALERT` | alert | 21600 s (6 h) | `securityKind`: one of `"new_device"`, `"passkey_added"`, `"passkey_removed"`, `"token_revoked"`, `"refresh_reuse"` | localized `title` and `body` | `category: "SECURITY_ALERT"`, `thread: "SECURITY_ALERT"`, `level: "time-sensitive"`, `sound: "default"` | `alertSecurity` |
+
+In discreet mode a server sends every alert, `SECURITY_ALERT` included, with `t` = `REMINDER` and neutral
+text; the class and the lifetime stay the same.
+
 Class maxima for `exp - iat` (the same values bound `ttlSeconds` at the relay):
 
 | Class | Maximum lifetime |

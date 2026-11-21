@@ -150,7 +150,7 @@
       "apnsToken": "0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f",
       "expectedClass": "silent",
       "now": 1795000000,
-      "envelope": "AQECMyAvh85P8gy80PLkjIx_Jj0Ro2CcZzuMfq5WZTdpwS8k5KuR0Ue1RNDc3IvsJveBmShLBz8DgThuQgEZ4zGw6n4wX8tygTcEDpDKWSAPklQdMh4gEoWGC9RHJFgqKlZMmteGJv-brDGRlmdRzaj-NcC1G26SvAPYep_L5qc_pjgo-N6weL4l0uNAl7jb1aT3_Qtp9id1UnzUHcxy3gcWoxRt4fZ8mNvOl9xL-Ysxuidf83i6fQ-oV7vK4OVaz6rZJPeUa5v01bceN7tB8Ypjb8wOg1rdlwBkXHp7RtGW7gV5KLKLZ6QIck2DbbrMuy8dsw3FinRM4Kde0YwR-xPFXHEQLPEdKviAgl2aOAjcH4SafpP956YKdEMo0zKpnZJBa3dMjKMedlxuo1FZmhThCvcIKWlNo5To1v9GJzk-PpsMAJrySGGzbkYXgq_lOngXVFkby64tarfxNB4WcS-b-f4WpaLs0zEGiN1tk2FD2nqWikFesnfyzFf75JFV-i9oCZPEhbMR-F0Z0DRRYxeJ6daN72tYxsJFLUBmw7Ofui9h6WAJtDlJMgyQPR_CffLHEx5kel5pjaHaqDNEcCJ7drv8IJ41XjucQ2y5Xh4xMgDLva9fkfHp-xw6a6WIh8hqxXTbnv3-4CPRG6U5mkwDrsk4v7yRGLnML4ezAe5bnQiOeeYTNQpwD55imi4u2rfzeBuhZ_oaMQ2x818zb0EX3QgXqGwtuTnlvcjGHzgLt-RP3WPx-PwijGSYru23JgfjSQqFEcbFtUS3XdpwyDzIy3cvwELCLuZrUVvo4yuXirP7FvC7NBvz7g5hGivrQz9WUumCtNVI5Xt8_vRpcTtfYXjU-PzI3r10qo4PhocGyWA1nxTTo-xCY4f0BKvok2RUqXA2MO35fZAqCgum1xQF5KdIo4AZv1dpOmxU5l2OgY1S_IP3V4ZA8ecgp1omeeoTTpGBaznVY84JjX8RkUFWf7IcMcyLsgF0KksWDgtVxJGHrTmCCi4xAOH--2ii2YLX8Ev4yo7HkvL5qYkR7Rg1BdW0Tw6l31cd4nXeTaFpkgG5RFK-O2E2Rasp20M5qzyE3C5gw5NI4V_yvWtX17N9vUDinpJ3CvDrciFsn-7sK79_aR9nben_unOZJLVhgSz3ByqNK5LSn4WjxQtQIOSvWz7gGaUWytM7Cmy8-ZFXu7mVy1ePGkG4dnIaMOcJ5xFXf2uzaqUZs3LocSgOGdw8Oghh9kqyJq19cCEJhC5p74yAqfUrJwT6GGygqPir_Bb4QrwJD_Hy3tyMz9QoKdUmi8xrkabqQ4g9Dmdl04RPrnvy6gR2crhN3nmf7AHYe9o7ZGEdBFUyiyKUOJooxWRuwKvKB42bXqKAZq7LgnbF0NSEzR30gG-Hvyl7tTOrkdQuz3DEficvSGpZu54Oh2PQOw",
+      "envelope": "AQECMyAvh85P8gy80PLkjIx_Jj0Ro2CcZzuMfq5WZTdpwS8k7quR0Ue1RNDc3IvsJveBmShLBz8DgThuQgEZ4zGw6n4wX8tygTcEDpDKWSAPklQdMh4gEoWGC9RHJFgqKlZMmteGJv-brDGRlmdRzaj-NcC1G26SvAPYep_L5qc_pjgo-N6weL4y3uFRm_SSrLzBugd_4iZlTXzXDNEk8AkY4g9g6vRp3seWl4UBqtVk6W4vtneybmmoUrfW4-5HzbW9JPD0eNSz5YcwB4txq6geEswOg1rdlwBkXHp7RtGW7gV5KLKLZ6QIck2DbbrMuy8dsw3FinRM4Kde0YwR-xPFXHEQLPEdKviAgl2aOAjcH4SafpP956YKdEMo0zKpnZJBa3dMjKMedlxuo1FZmhThCvcIKWlNo5To1v9GJzk-PpsMAJrySGGzbkYXgq_lOngXVFkby64tarfxNB4WcS-b-f4WpaLs0zEGiN1tk2FD2nqWikFesnfyzFf75JFV-i9oCZPEhbMR-F0Z0DRRYxeJ6daN72tYxsJFLUBmw7Ofui9h6WAJtDlJMgyQPR_CffLHEx5kel5pjaHaqDNEcCJ7drv8IJ41XjucQ2y5Xh4xMgDLva9fkfHp-xw6a6WIh8hqxXTbnv3-4CPRG6U5mkwDrsk4v7yRGLnML4ezAe5bnQiOeeYTNQpwD55imi4u2rfzeBuhZ_oaMQ2x818zb0EX3QgXqGwtuTnlvcjGHzgLt-RP3WPx-PwijGSYru23JgfjSQqFEcbFtUS3XdpwyDzIy3cvwELCLuZrUVvo4yuXirP7FvC7NBvz7g5hGivrQz9WUumCtNVI5Xt8_vRpcTtfYXjU-PzI3r10qo4PhocGyWA1nxTTo-xCY4f0BKvok2RUqXA2MO35fZAqCgum1xQF5KdIo4AZv1dpOmxU5l2OgY1S_IP3V4ZA8ecgp1omeeoTTpGBaznVY84JjX8RkUFWf7IcMcyLsgF0KksWDgtVxJGHrTmCCi4xAOH--2ii2YLX8Ev4yo7HkvL5qYkR7Rg1BdW0Tw6l31cd4nXeTaFpkgG5RFK-O2E2Rasp20M5qzyE3C5gw5NI4V_yvWtX17N9vUDinpJ3CvDrciFsn-7sK79_aR9nben_unOZJLVhgSz3ByqNK5LSn4WjxQtQIOSvWz7gGaUWytM7Cmy8-ZFXu7mVy1ePGkG4dnIaMOcJ5xFXf2uzaqUZs3LocSgOGdw8Oghh9kqyJq19cCEJhC5p74yAqfUrJwT6GGygqPir_Bb4QrwJD_Hy3tyMz9QoKdUmi8xrkabqQ4g9Dmdl04RPrnvy6gR2crhN3nmf7AHYe9o7ZGEdBFUyiyKUOJooxWRuwKvKB42bXqKAZq7LgnbF0NSEzR30gG-Hvyl7tTOrkdQugMSgO1Jch1WrxzY62Ukk-A",
       "expect": "ok",
       "plaintext": {
         "v": 1,
@@ -159,8 +159,9 @@
         "iat": 1795000000,
         "exp": 1795003600,
         "d": {
-          "scope": [
-            "measurements"
+          "domains": [
+            "measurements",
+            "sleep"
           ],
           "changedAt": "2026-11-21T07:12:00.000Z"
         }
@@ -178,7 +179,7 @@
       "apnsToken": "0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f",
       "expectedClass": "silent",
       "now": 1795000000,
-      "envelope": "AQECMyAvh85P8gy80PLkjIx_Jj0Ro2CcZzuMfq5WZTdpwS8kzauR0Ue1RNDc3IvsJvuFjCVADDwLmyBoR3d2iQeBmGY-TZNc90h1avfFTjFs9jJoQXogEoWGC9RHJFw4NkQVy5aGMOzF9HCDnGZWxK3iJ5X9W3yEr1GZP43B5KY2oyQ6r8q6M7B01a4KibiS5-j5_UggoWcgDS-XWI59sRtg8Es2vqMjzKqUhdZZkZl-8QpuwlWITFuYYIH70t9q_4TpFMfOSeaJ1bceN7tB8Ypjb8wOg1rdlwBkXHp7RtGW7gV5KLKLZ6QIck2DbbrMuy8dsw3FinRM4Kde0YwR-xPFXHEQLPEdKviAgl2aOAjcH4SafpP956YKdEMo0zKpnZJBa3dMjKMedlxuo1FZmhThCvcIKWlNo5To1v9GJzk-PpsMAJrySGGzbkYXgq_lOngXVFkby64tarfxNB4WcS-b-f4WpaLs0zEGiN1tk2FD2nqWikFesnfyzFf75JFV-i9oCZPEhbMR-F0Z0DRRYxeJ6daN72tYxsJFLUBmw7Ofui9h6WAJtDlJMgyQPR_CffLHEx5kel5pjaHaqDNEcCJ7drv8IJ41XjucQ2y5Xh4xMgDLva9fkfHp-xw6a6WIh8hqxXTbnv3-4CPRG6U5mkwDrsk4v7yRGLnML4ezAe5bnQiOeeYTNQpwD55imi4u2rfzeBuhZ_oaMQ2x818zb0EX3QgXqGwtuTnlvcjGHzgLt-RP3WPx-PwijGSYru23JgfjSQqFEcbFtUS3XdpwyDzIy3cvwELCLuZrUVvo4yuXirP7FvC7NBvz7g5hGivrQz9WUumCtNVI5Xt8_vRpcTtfYXjU-PzI3r10qo4PhocGyWA1nxTTo-xCY4f0BKvok2RUqXA2MO35fZAqCgum1xQF5KdIo4AZv1dpOmxU5l2OgY1S_IP3V4ZA8ecgp1omeeoTTpGBaznVY84JjX8RkUFWf7IcMcyLsgF0KksWDgtVxJGHrTmCCi4xAOH--2ii2YLX8Ev4yo7HkvL5qYkR7Rg1BdW0Tw6l31cd4nXeTaFpkgG5RFK-O2E2Rasp20M5qzyE3C5gw5NI4V_yvWtX17N9vUDinpJ3CvDrciFsn-7sK79_aR9nben_unOZJLVhgSz3ByqNK5LSn4WjxQtQIOSvWz7gGaUWytM7Cmy8-ZFXu7mVy1ePGkG4dnIaMOcJ5xFXf2uzaqUZs3LocSgOGdw8Oghh9kqyJq19cCEJhC5p74yAqfUrJwT6GGygqPir_Bb4QrwJD_Hy3tyMz9QoKdUmi8xrkabqQ4g9Dmdl04RPrnvy6gR2crhN3nmf7AHYe9o7ZGEdBFUyiyKUOJooxWRuwKvKB42bXqKAZq7LgnbF0NSEzR30gG-Hvyl7tTOrkdQuvDdmBn7nPbWjavNPDaKl2g",
+      "envelope": "AQECMyAvh85P8gy80PLkjIx_Jj0Ro2CcZzuMfq5WZTdpwS8k06uR0Ue1RNDc3IvsJvuFjCVADDwLmyBoR3d2iQeBmGY-TZNc90h1avfFTjFs9jJoQXogEoWGC9RHJFw4NkQVy5aGMOzF9HCDnGZWxK3iJ5X9W3yEr1GZP43B5KY2oyQ6r8q6M7B01a4KibiT6_fv_Rlu5jFRSzuAS41gsR0Z8U0hvaBNzK2AhNRT-4stvDpemHf1MVuYYIH70t9q_4TpFMfOSeaJ1bceN7tB8Ypjb8wOg1rdlwBkXHp7RtGW7gV5KLKLZ6QIck2DbbrMuy8dsw3FinRM4Kde0YwR-xPFXHEQLPEdKviAgl2aOAjcH4SafpP956YKdEMo0zKpnZJBa3dMjKMedlxuo1FZmhThCvcIKWlNo5To1v9GJzk-PpsMAJrySGGzbkYXgq_lOngXVFkby64tarfxNB4WcS-b-f4WpaLs0zEGiN1tk2FD2nqWikFesnfyzFf75JFV-i9oCZPEhbMR-F0Z0DRRYxeJ6daN72tYxsJFLUBmw7Ofui9h6WAJtDlJMgyQPR_CffLHEx5kel5pjaHaqDNEcCJ7drv8IJ41XjucQ2y5Xh4xMgDLva9fkfHp-xw6a6WIh8hqxXTbnv3-4CPRG6U5mkwDrsk4v7yRGLnML4ezAe5bnQiOeeYTNQpwD55imi4u2rfzeBuhZ_oaMQ2x818zb0EX3QgXqGwtuTnlvcjGHzgLt-RP3WPx-PwijGSYru23JgfjSQqFEcbFtUS3XdpwyDzIy3cvwELCLuZrUVvo4yuXirP7FvC7NBvz7g5hGivrQz9WUumCtNVI5Xt8_vRpcTtfYXjU-PzI3r10qo4PhocGyWA1nxTTo-xCY4f0BKvok2RUqXA2MO35fZAqCgum1xQF5KdIo4AZv1dpOmxU5l2OgY1S_IP3V4ZA8ecgp1omeeoTTpGBaznVY84JjX8RkUFWf7IcMcyLsgF0KksWDgtVxJGHrTmCCi4xAOH--2ii2YLX8Ev4yo7HkvL5qYkR7Rg1BdW0Tw6l31cd4nXeTaFpkgG5RFK-O2E2Rasp20M5qzyE3C5gw5NI4V_yvWtX17N9vUDinpJ3CvDrciFsn-7sK79_aR9nben_unOZJLVhgSz3ByqNK5LSn4WjxQtQIOSvWz7gGaUWytM7Cmy8-ZFXu7mVy1ePGkG4dnIaMOcJ5xFXf2uzaqUZs3LocSgOGdw8Oghh9kqyJq19cCEJhC5p74yAqfUrJwT6GGygqPir_Bb4QrwJD_Hy3tyMz9QoKdUmi8xrkabqQ4g9Dmdl04RPrnvy6gR2crhN3nmf7AHYe9o7ZGEdBFUyiyKUOJooxWRuwKvKB42bXqKAZq7LgnbF0NSEzR30gG-Hvyl7tTOrkdQucyTpeibzDBb55JYlqMHwxw",
       "expect": "ok",
       "plaintext": {
         "v": 1,
@@ -187,7 +188,7 @@
         "iat": 1795000000,
         "exp": 1795003600,
         "d": {
-          "since": "2026-11-20T07:12:00.000Z"
+          "requestedAt": "2026-11-21T07:12:00.000Z"
         }
       },
       "relay": "accept"
@@ -203,7 +204,7 @@
       "apnsToken": "0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f",
       "expectedClass": "alert",
       "now": 1795000000,
-      "envelope": "AQEBMyAvh85P8gy80PLkjIx_Jj0Ro2CcZzuMfq5WZTdpwS8lQKuR0Ue1RNDc3IvsJuCFjjxGDSMbkD5nQ3Fh43T2oSAwVdgI5DgDH5XbTDF89lQdMh4gEoWGC9RHJFw4MFYJ2crFaOyWpDOYk2dRzajiJ4nvDjTYrw7QeJbO5aM-oCQ6sN7uIaYtk-dZnP7DtKT0_R1F8Dx3UUbTB50trwla4kZ3reVwiPbfl9xLhd50rHkHpTulJTW6TKOZvbsT3b7LTai7O8bottRxQtU10f0CHOx96j2z8mRENRRbKb-2jyUXTcWrA8F-Gy7mQ5ixlw1o2i__8VY4iNU7sOgzwTG2ORJlXphpU9qsoDH_Tm2wPb64CvqQgot5ES1bukbA6_djFgpMjKMedlxuo1FZmhThCvcIKWlNo5To1v9GJzk-PpsMAJrySGGzbkYXgq_lOngXVFkby64tarfxNB4WcS-b-f4WpaLs0zEGiN1tk2FD2nqWikFesnfyzFf75JFV-i9oCZPEhbMR-F0Z0DRRYxeJ6daN72tYxsJFLUBmw7Ofui9h6WAJtDlJMgyQPR_CffLHEx5kel5pjaHaqDNEcCJ7drv8IJ41XjucQ2y5Xh4xMgDLva9fkfHp-xw6a6WIh8hqxXTbnv3-4CPRG6U5mkwDrsk4v7yRGLnML4ezAe5bnQiOeeYTNQpwD55imi4u2rfzeBuhZ_oaMQ2x818zb0EX3QgXqGwtuTnlvcjGHzgLt-RP3WPx-PwijGSYru23JgfjSQqFEcbFtUS3XdpwyDzIy3cvwELCLuZrUVvo4yuXirP7FvC7NBvz7g5hGivrQz9WUumCtNVI5Xt8_vRpcTtfYXjU-PzI3r10qo4PhocGyWA1nxTTo-xCY4f0BKvok2RUqXA2MO35fZAqCgum1xQF5KdIo4AZv1dpOmxU5l2OgY1S_IP3V4ZA8ecgp1omeeoTTpGBaznVY84JjX8RkUFWf7IcMcyLsgF0KksWDgtVxJGHrTmCCi4xAOH--2ii2YLX8Ev4yo7HkvL5qYkR7Rg1BdW0Tw6l31cd4nXeTaFpkgG5RFK-O2E2Rasp20M5qzyE3C5gw5NI4V_yvWtX17N9vUDinpJ3CvDrciFsn-7sK79_aR9nben_unOZJLVhgSz3ByqNK5LSn4WjxQtQIOSvWz7gGaUWytM7Cmy8-ZFXu7mVy1ePGkG4dnIaMOcJ5xFXf2uzaqUZs3LocSgOGdw8Oghh9kqyJq19cCEJhC5p74yAqfUrJwT6GGygqPir_Bb4QrwJD_Hy3tyMz9QoKdUmi8xrkabqQ4g9Dmdl04RPrnvy6gR2crhN3nmf7AHYe9o7ZGEdBFUyiyKUOJooxWRuwKvKB42bXqKAZq7LgnbF0NSEzR30gG-Hvyl7tTOrkdQuDL1IxnJW3P0TfxbbhZV_Aw",
+      "envelope": "AQEBMyAvh85P8gy80PLkjIx_Jj0Ro2CcZzuMfq5WZTdpwS8le6uR0Ue1RNDc3IvsJuCFjjxGDSMbkD5nQ3Fh43T2oSAwVdgI5DgDH5XbTDF89lQdMh4gEoWGC9RHJFw4MFYJ2crFaOyWpDOYk2dRzajiJ4nvDjTYrw7QeJbO5aM-oCQ6sN7uIaYtk_9Vke-T5_Lj0wN053cqHXffHuA05l1doxku8r07kriAzsQdos9v6ShU4BvtO3vrCeaV_7YE3ajLdqiqMMSz9-5xQslhkOkAALlg93qq9nNELxMcKLTyzmwXCN3lR8UoHCj0Td6pzUZ-1iPn91hulc586_czmHKxORZ_Xog_ENrTxx7PakGIRtvbMtavs4QmVjdAoVfI-bB7SSQJz_ZMPwg3_BAV30a1KNsqRQw7xvjK7N0yTlRbE-hpbumbPAjFC2Q7oNyKTxZzdmM5r8tLC8KdQDxrDC-b-f4WpaLs0zEGiN1tk2FD2nqWikFesnfyzFf75JFV-i9oCZPEhbMR-F0Z0DRRYxeJ6daN72tYxsJFLUBmw7Ofui9h6WAJtDlJMgyQPR_CffLHEx5kel5pjaHaqDNEcCJ7drv8IJ41XjucQ2y5Xh4xMgDLva9fkfHp-xw6a6WIh8hqxXTbnv3-4CPRG6U5mkwDrsk4v7yRGLnML4ezAe5bnQiOeeYTNQpwD55imi4u2rfzeBuhZ_oaMQ2x818zb0EX3QgXqGwtuTnlvcjGHzgLt-RP3WPx-PwijGSYru23JgfjSQqFEcbFtUS3XdpwyDzIy3cvwELCLuZrUVvo4yuXirP7FvC7NBvz7g5hGivrQz9WUumCtNVI5Xt8_vRpcTtfYXjU-PzI3r10qo4PhocGyWA1nxTTo-xCY4f0BKvok2RUqXA2MO35fZAqCgum1xQF5KdIo4AZv1dpOmxU5l2OgY1S_IP3V4ZA8ecgp1omeeoTTpGBaznVY84JjX8RkUFWf7IcMcyLsgF0KksWDgtVxJGHrTmCCi4xAOH--2ii2YLX8Ev4yo7HkvL5qYkR7Rg1BdW0Tw6l31cd4nXeTaFpkgG5RFK-O2E2Rasp20M5qzyE3C5gw5NI4V_yvWtX17N9vUDinpJ3CvDrciFsn-7sK79_aR9nben_unOZJLVhgSz3ByqNK5LSn4WjxQtQIOSvWz7gGaUWytM7Cmy8-ZFXu7mVy1ePGkG4dnIaMOcJ5xFXf2uzaqUZs3LocSgOGdw8Oghh9kqyJq19cCEJhC5p74yAqfUrJwT6GGygqPir_Bb4QrwJD_Hy3tyMz9QoKdUmi8xrkabqQ4g9Dmdl04RPrnvy6gR2crhN3nmf7AHYe9o7ZGEdBFUyiyKUOJooxWRuwKvKB42bXqKAZq7LgnbF0NSEzR30gG-Hvyl7tTOrkdQufVxN2ZKUGMIhdBR05o18qA",
       "expect": "ok",
       "plaintext": {
         "v": 1,
@@ -212,15 +213,17 @@
         "iat": 1795000000,
         "exp": 1795021600,
         "d": {
-          "kind": "new_sign_in"
+          "securityKind": "new_device"
         },
         "n": {
           "title": "New sign-in",
           "body": "Your account was signed in on a new device."
         },
         "ui": {
-          "thread": "security",
-          "level": "time-sensitive"
+          "category": "SECURITY_ALERT",
+          "thread": "SECURITY_ALERT",
+          "level": "time-sensitive",
+          "sound": "default"
         }
       },
       "relay": "accept"

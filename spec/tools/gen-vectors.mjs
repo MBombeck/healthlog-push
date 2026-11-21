@@ -35,14 +35,16 @@ export function build() {
     ui: { thread: "medication-cm_test_med_1", level: "passive" },
   };
   const silentJson = { v: 1, t: "MEDICATION_INTAKE_SYNC", id: id(2), iat: NOW, exp: NOW + 3600, d: { syncedAt: "2026-11-21T07:12:00.000Z" } };
-  // DATA_CHANGED and HEALTHKIT_CATCH_UP are silent with a lifetime of 1 h; SECURITY_ALERT is an alert with
-  // a lifetime of 6 h and may be time-sensitive.
-  const dataChangedJson = { v: 1, t: "DATA_CHANGED", id: id(4), iat: NOW, exp: NOW + 3600, d: { scope: ["measurements"], changedAt: "2026-11-21T07:12:00.000Z" } };
-  const catchUpJson = { v: 1, t: "HEALTHKIT_CATCH_UP", id: id(5), iat: NOW, exp: NOW + 3600, d: { since: "2026-11-20T07:12:00.000Z" } };
+  // DATA_CHANGED and HEALTHKIT_CATCH_UP are silent with a lifetime of 3600 s; SECURITY_ALERT is an alert
+  // with a lifetime of 6 h, time-sensitive, with a fixed category, thread and sound.
+  const dataChangedJson = { v: 1, t: "DATA_CHANGED", id: id(4), iat: NOW, exp: NOW + 3600,
+    d: { domains: ["measurements", "sleep"], changedAt: "2026-11-21T07:12:00.000Z" } };
+  const catchUpJson = { v: 1, t: "HEALTHKIT_CATCH_UP", id: id(5), iat: NOW, exp: NOW + 3600,
+    d: { requestedAt: "2026-11-21T07:12:00.000Z" } };
   const securityJson = {
-    v: 1, t: "SECURITY_ALERT", id: id(6), iat: NOW, exp: NOW + 21600, d: { kind: "new_sign_in" },
+    v: 1, t: "SECURITY_ALERT", id: id(6), iat: NOW, exp: NOW + 21600, d: { securityKind: "new_device" },
     n: { title: "New sign-in", body: "Your account was signed in on a new device." },
-    ui: { thread: "security", level: "time-sensitive" },
+    ui: { category: "SECURITY_ALERT", thread: "SECURITY_ALERT", level: "time-sensitive", sound: "default" },
   };
   const maxBody = (() => {
     const base = { v: 1, t: "X", id: id(9), iat: NOW, exp: NOW + 60, n: { body: "" } };
