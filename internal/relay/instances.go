@@ -50,29 +50,10 @@ func (r *Relay) handleRegister(w http.ResponseWriter, req *http.Request) {
 		}
 		return
 	}
-	if !r.dbWritable {
-		r.fail(w, req, http.StatusServiceUnavailable, errBody{Error: "storage_unavailable", RetryAfter: jitter(r5m)})
-		return
-	}
 	recovery := r.inRecovery(today)
-	switch r.control.Registration {
-	case RegClosed:
-		r.fail(w, req, http.StatusServiceUnavailable, errBody{Error: "registration_paused", RetryAfter: jitter(hour)})
+	if status, e := r.registrationGateLocked(req, reg, recovery, now); e != nil {
+		r.fail(w, req, status, *e)
 		return
-	case RegInvite:
-		if !r.inviteValid(reg.Invite, today) {
-			r.fail(w, req, http.StatusForbidden, errBody{Error: "invite_required"})
-			return
-		}
-	}
-	if !r.regs.Allow(remoteAddr(req), now, recovery) {
-		r.M.Inc("hlp_registrations_total", "result", "limited")
-		r.fail(w, req, http.StatusServiceUnavailable, errBody{Error: "registration_paused", RetryAfter: jitter(hour)})
-		return
-	}
-	// The invite is spent only once the registration passed every limit (N4).
-	if r.control.Registration == RegInvite {
-		r.consumeInvite(reg.Invite, today)
 	}
 	in := &store.Instance{
 		ID: newID(), PublicKey: reg.PublicKey, Tier: store.TierProbation, CreatedDay: today,
@@ -82,14 +63,41 @@ func (r *Relay) handleRegister(w http.ResponseWriter, req *http.Request) {
 		in.Tier, in.QuietSinceDay = store.TierStandard, today
 	}
 	if !r.persist(r.st.PutInstance(in)) {
-		r.fail(w, req, http.StatusServiceUnavailable, errBody{Error: "storage_unavailable", RetryAfter: jitter(r5m)})
+		r.fail(w, req, http.StatusServiceUnavailable, errStorage(storageRetry))
 		return
 	}
 	r.addInstance(in)
-	r.M.Inc("hlp_registrations_total", "result", "created")
+	r.Metrics.Inc("hlp_registrations_total", "result", "created")
 	r.countGlobalLocked(today, "instance", "registered")
 	r.summary.events["registered"]++
 	r.reply(w, req, http.StatusCreated, registerResp{InstanceID: in.ID, Tier: in.Tier, Limits: r.tierLimits(in)})
+}
+
+// registrationGateLocked applies, in order, the store state, the registration mode, the invite and the
+// address limiter to a new key. An invite is spent only once the registration passed every limit, so a
+// refused attempt cannot burn it.
+func (r *Relay) registrationGateLocked(req *http.Request, reg *wire.Registration, recovery bool, now time.Time) (int, *errBody) {
+	today := store.Day(now)
+	if !r.dbWritable {
+		e := errStorage(storageRetry)
+		return http.StatusServiceUnavailable, &e
+	}
+	switch r.control.Registration {
+	case RegClosed:
+		return http.StatusServiceUnavailable, &errBody{Error: "registration_paused", RetryAfter: jitter(time.Hour)}
+	case RegInvite:
+		if r.inviteIndex(reg.Invite, today) < 0 {
+			return http.StatusForbidden, &errBody{Error: "invite_required"}
+		}
+	}
+	if !r.regs.Allow(remoteAddr(req), now, recovery) {
+		r.Metrics.Inc("hlp_registrations_total", "result", "limited")
+		return http.StatusServiceUnavailable, &errBody{Error: "registration_paused", RetryAfter: jitter(time.Hour)}
+	}
+	if r.control.Registration == RegInvite {
+		r.consumeInvite(reg.Invite, today)
+	}
+	return 0, nil
 }
 
 func (r *Relay) handleRotate(w http.ResponseWriter, req *http.Request) {
@@ -107,7 +115,7 @@ func (r *Relay) handleRotate(w http.ResponseWriter, req *http.Request) {
 	defer r.mu.Unlock()
 	today := store.Day(now)
 	if s.rec.RotatedDay == today {
-		r.fail(w, req, http.StatusTooManyRequests, errBody{Error: "instance_rate", Scope: "instance", RetryAfter: jitter(hour)})
+		r.fail(w, req, http.StatusTooManyRequests, errBody{Error: "instance_rate", Scope: "instance", RetryAfter: jitter(time.Hour)})
 		return
 	}
 	if _, used := r.byKey[string(reg.PublicKey)]; used {
@@ -118,7 +126,7 @@ func (r *Relay) handleRotate(w http.ResponseWriter, req *http.Request) {
 	s.rec.PublicKey, s.rec.RotatedDay = reg.PublicKey, today
 	if !r.persist(r.st.ReplaceInstanceKey(s.rec, old)) {
 		s.rec.PublicKey, s.rec.RotatedDay = old, 0
-		r.fail(w, req, http.StatusServiceUnavailable, errBody{Error: "storage_unavailable"})
+		r.fail(w, req, http.StatusServiceUnavailable, errStorage(0))
 		return
 	}
 	delete(r.byKey, string(old))
@@ -136,7 +144,7 @@ func (r *Relay) handleDeleteInstance(w http.ResponseWriter, req *http.Request) {
 	defer r.mu.Unlock()
 	id := s.rec.ID
 	if !r.persist(r.st.DeleteInstance(id)) {
-		r.fail(w, req, http.StatusServiceUnavailable, errBody{Error: "storage_unavailable"})
+		r.fail(w, req, http.StatusServiceUnavailable, errStorage(0))
 		return
 	}
 	r.dropInstanceLocked(id)

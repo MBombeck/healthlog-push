@@ -1,5 +1,6 @@
 // Package notice embeds the privacy notice and the short terms that the relay serves at /privacy and
-// /terms. The files next to this one are the authoritative texts; docs/privacy.md points here.
+// /terms. The files next to this one are the authoritative texts; docs/privacy.md and docs/terms.md are
+// copies, kept in sync with them by a test.
 package notice
 
 import _ "embed"

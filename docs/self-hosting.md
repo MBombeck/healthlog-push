@@ -88,13 +88,11 @@ ones in `cmd/healthlog-push/main.go`.
 | `HLP_SECRETS_DIR` | `/run/secrets/relay` | directory with `relay_id_key`, `token_mac_key` and `token_mac_key_previous` |
 | `HLP_DATA_DIR` | `/data` | bbolt database `relay.db` |
 | `HLP_EXPORT_DIR` | `/export` | daily `registry.json` |
-| `HLP_ADMIN_SOCKET` | `<HLP_DATA_DIR>/admin.sock` | operator socket; the `admin` subcommand defaults to `/data/admin.sock` |
+| `HLP_ADMIN_SOCKET` | `<HLP_DATA_DIR>/admin.sock` | operator socket; the `admin` subcommand uses the same default |
 | `HLP_METRICS_LISTEN` | `127.0.0.1:9464` | `/metrics` and a local `/healthz`; keep it on loopback |
 | `HLP_JWT_DIR` | `/run/jwt` | where the signer writes the provider token |
 | `HLP_JWT_REFRESH_DIR` | `/run/jwt-refresh` | where the relay touches the refresh marker |
-| `HLP_APNS_URL` | `https://api.push.apple.com` | APNs production endpoint |
-| `HLP_APNS_SANDBOX_URL` | `https://api.sandbox.push.apple.com` | APNs sandbox endpoint (not passed by the compose file; the default applies) |
-| `HLP_APNS_TOPIC` | `dev.healthlog.app` | your app's bundle id; the compose file requires it |
+| `HLP_APNS_TOPIC` | required | your app's bundle id |
 | `HLP_APNS_ENVIRONMENT` | `production` | comma-separated list of served environments: `production`, `sandbox` |
 | `HLP_MIN_CLIENT_VERSION` | none | refuse instance requests whose `HL-Client` version is lower, for example `1.49.0` (`426 min_server_version`) |
 | `HLP_IMAGE_DIGEST` | empty | shown at `/version`; the compose file requires it |
@@ -109,7 +107,8 @@ ones in `cmd/healthlog-push/main.go`.
 | `HLP_JWT_DIR`, `HLP_JWT_REFRESH_DIR` | as above | the shared tmpfs volumes (1 MB each, mounted `noexec`, `nosuid`, `nodev`) |
 
 The limits (`DefaultLimits`, `DefaultRegistrationLimits`) are compiled in; there is no variable for them in
-this version. Per-instance device limits can be raised with `admin limits`.
+this version. So are Apple's endpoints (`api.push.apple.com` and `api.sandbox.push.apple.com`): no setting
+can send the provider token or device tokens to another host. Per-instance device limits can be raised with `admin limits`.
 
 ### Serving development builds (sandbox)
 

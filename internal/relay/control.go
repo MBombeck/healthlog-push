@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/MBombeck/healthlog-push/internal/logx"
@@ -129,34 +128,21 @@ func hashInvite(code string) string {
 	return hex.EncodeToString(s[:])
 }
 
-// inviteValid reports whether a matching, unexpired invite exists. Caller holds r.mu.
-func (r *Relay) inviteValid(code string, today int) bool {
+// inviteIndex is the index of a matching, unexpired invite, or -1. Caller holds r.mu.
+func (r *Relay) inviteIndex(code string, today int) int {
 	if code == "" {
-		return false
+		return -1
 	}
 	h := hashInvite(code)
-	for _, inv := range r.control.Invites {
-		if inv.Hash == h && inv.ExpiresDay >= today {
-			return true
-		}
-	}
-	return false
+	return slices.IndexFunc(r.control.Invites, func(inv Invite) bool { return inv.Hash == h && inv.ExpiresDay >= today })
 }
 
 // consumeInvite removes a matching, unexpired invite. Caller holds r.mu.
-func (r *Relay) consumeInvite(code string, today int) bool {
-	if code == "" {
-		return false
+func (r *Relay) consumeInvite(code string, today int) {
+	if i := r.inviteIndex(code, today); i >= 0 {
+		r.control.Invites = slices.Delete(r.control.Invites, i, i+1)
+		_ = r.saveControl()
 	}
-	h := hashInvite(code)
-	for i, inv := range r.control.Invites {
-		if inv.Hash == h && inv.ExpiresDay >= today {
-			r.control.Invites = slices.Delete(r.control.Invites, i, i+1)
-			_ = r.saveControl()
-			return true
-		}
-	}
-	return false
 }
 
 // SetNotice sets or clears (empty id) the notice.
@@ -215,277 +201,3 @@ func (r *Relay) SetRecovery(untilDay int, ex *store.Export) (int, error) {
 }
 
 func (r *Relay) inRecovery(today int) bool { return r.control.RecoveryUntil >= today }
-
-// Suspend sets an instance to suspended with a reason from the closed set. Bindings stay.
-func (r *Relay) Suspend(id, reason string) error {
-	if !store.Reasons[reason] {
-		return errors.New("unknown reason")
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	s := r.instances[id]
-	if s == nil {
-		return errors.New("unknown instance")
-	}
-	s.rec.Tier, s.rec.Reason, s.rec.ReasonDay = store.TierSuspended, reason, store.Day(r.cfg.Now())
-	logx.Event("admin.suspend", logx.Str(logx.KReason, reason))
-	if err := r.st.PutInstance(s.rec); err != nil {
-		return err
-	}
-	return r.st.PutDeny(&store.DenyEntry{InstanceID: id, Reason: reason, Day: store.Day(r.cfg.Now())})
-}
-
-// Unsuspend returns a suspended instance to probation.
-func (r *Relay) Unsuspend(id string) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	s := r.instances[id]
-	if s == nil || s.rec.Tier != store.TierSuspended {
-		return errors.New("instance not suspended")
-	}
-	s.rec.Tier, s.rec.Reason = store.TierProbation, ""
-	logx.Event("admin.unsuspend")
-	if err := r.st.PutInstance(s.rec); err != nil {
-		return err
-	}
-	return r.st.DeleteDeny(id)
-}
-
-// Revoke revokes an instance and deletes its bindings. The instance record stays as revoked so that its key
-// cannot register again.
-func (r *Relay) Revoke(id, reason string) error {
-	if reason == "" {
-		reason = "abuse"
-	}
-	if !store.Reasons[reason] {
-		return errors.New("unknown reason")
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	s := r.instances[id]
-	if s == nil {
-		return errors.New("unknown instance")
-	}
-	s.rec.Tier, s.rec.Reason, s.rec.ReasonDay = store.TierRevoked, reason, store.Day(r.cfg.Now())
-	for m, b := range r.bindings {
-		if b.InstanceID == id {
-			r.dropBindingLocked(m)
-		}
-	}
-	logx.Event("admin.revoke", logx.Str(logx.KReason, reason))
-	if err := r.st.DeleteBindingsOf(id); err != nil {
-		return err
-	}
-	if err := r.st.PutInstance(s.rec); err != nil {
-		return err
-	}
-	return r.st.PutDeny(&store.DenyEntry{InstanceID: id, Reason: reason, Day: store.Day(r.cfg.Now())})
-}
-
-// BlockToken blocks a token for every instance except its current holder. Either the raw token (hex) or the
-// MAC (hex, as shown by the admin tools) may be given.
-func (r *Relay) BlockToken(tokenHex, macHex string, unblock bool) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	var m string
-	switch {
-	case tokenHex != "":
-		tok, err := wire.ParseToken(tokenHex)
-		if err != nil {
-			return errors.New("token must be hex")
-		}
-		m = r.tokenMAC(tok)
-	case macHex != "":
-		b, err := hex.DecodeString(macHex)
-		if err != nil || len(b) != 32 {
-			return errors.New("mac must be 64 hex characters")
-		}
-		m = string(b)
-	default:
-		return errors.New("give --token or --mac")
-	}
-	logx.Event("admin.block_token", logx.Str(logx.KState, map[bool]string{true: "unblocked", false: "blocked"}[unblock]))
-	if unblock {
-		return r.st.UnblockToken([]byte(m))
-	}
-	return r.st.BlockToken([]byte(m), store.Day(r.cfg.Now()))
-}
-
-// SetDeviceLimit sets the active device limit of an instance, up to the configured maximum.
-func (r *Relay) SetDeviceLimit(id string, n int) error {
-	if n < 1 || n > r.cfg.Limits.StandardDevicesMx {
-		return errors.New("device limit out of range")
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	s := r.instances[id]
-	if s == nil {
-		return errors.New("unknown instance")
-	}
-	s.rec.DeviceLimit = n
-	logx.Event("admin.limits", logx.Int(logx.KValue, int64(n)))
-	return r.st.PutInstance(s.rec)
-}
-
-// BreakerCommand opens or closes the breaker by hand.
-func (r *Relay) BreakerCommand(cmd string) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	switch cmd {
-	case "open":
-		r.breaker.Open(r.cfg.Now())
-	case "close":
-		r.breaker.Close()
-	case "reset-apns":
-		r.misconfigured, r.providerBadIat, r.tooManyUntil = false, 0, time.Time{}
-		r.M.Set("hlp_apns_misconfigured", 0)
-	default:
-		return errors.New("use open|close|reset-apns")
-	}
-	logx.Event("admin.breaker", logx.Str(logx.KState, cmd))
-	return nil
-}
-
-// Stats is the operator overview: sums only.
-type Stats struct {
-	Instances    map[string]int `json:"instances"`
-	Bindings     map[string]int `json:"bindings"`
-	Queue        int            `json:"queue"`
-	Breaker      string         `json:"breaker"`
-	DBWritable   bool           `json:"dbWritable"`
-	Registration string         `json:"registration"`
-	Pauses       []Pause        `json:"pauses"`
-	Notice       *Notice        `json:"notice"`
-	Recovery     string         `json:"recoveryUntil,omitempty"`
-	GlobalLimit  int64          `json:"globalLimitPerMinute"`
-	Misconfig    bool           `json:"apnsMisconfigured"`
-}
-
-// Stats returns the overview.
-func (r *Relay) Stats() Stats {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	now := r.cfg.Now()
-	s := Stats{Instances: map[string]int{}, Bindings: map[string]int{}, Queue: r.q.Len(), Breaker: r.breaker.State(now),
-		DBWritable: r.dbWritable, Registration: r.control.Registration, Pauses: r.control.Pauses, Notice: r.currentNotice(now),
-		GlobalLimit: r.globalLimit(), Misconfig: r.misconfigured}
-	for _, in := range r.instances {
-		s.Instances[in.rec.Tier]++
-	}
-	for _, b := range r.bindings {
-		s.Bindings[b.State]++
-	}
-	if r.inRecovery(store.Day(now)) {
-		s.Recovery = store.DayString(r.control.RecoveryUntil)
-	}
-	return s
-}
-
-// InstanceInfo is what the operator sees about one instance.
-type InstanceInfo struct {
-	ID          string `json:"id"`
-	Tier        string `json:"tier"`
-	Reason      string `json:"reason,omitempty"`
-	Created     string `json:"created"`
-	DeviceLimit int    `json:"deviceLimit"`
-	Active      int    `json:"active"`
-	Provisional int    `json:"provisional"`
-	Delivered   bool   `json:"delivered"`
-}
-
-// Instance returns operator information about one instance.
-func (r *Relay) Instance(id string) (*InstanceInfo, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	s := r.instances[id]
-	if s == nil {
-		return nil, errors.New("unknown instance")
-	}
-	a, p := r.counts(id)
-	return &InstanceInfo{ID: id, Tier: s.rec.Tier, Reason: s.rec.Reason, Created: store.DayString(s.rec.CreatedDay),
-		DeviceLimit: r.tierLimits(s.rec).Devices, Active: a, Provisional: p, Delivered: s.rec.FirstDeliveryDay != 0}, nil
-}
-
-// ExportNow writes the registry export immediately.
-func (r *Relay) ExportNow() error {
-	if r.cfg.ExportDir == "" {
-		return errors.New("no export directory configured")
-	}
-	ex, err := r.st.BuildExport(store.Day(r.cfg.Now()))
-	if err != nil {
-		return err
-	}
-	return store.WriteExport(r.cfg.ExportDir, ex)
-}
-
-// Suspect is one row of the abuse overview: what an instance did today and in the last seven days.
-type Suspect struct {
-	ID              string `json:"id"`
-	Tier            string `json:"tier"`
-	Created         string `json:"created"`
-	InvalidToday    int64  `json:"invalidToday"`
-	Invalid7d       int64  `json:"invalid7d"`
-	Sent7d          int64  `json:"sent7d"`
-	Rebinds7d       int64  `json:"rebinds7d"`
-	ChallengesToday int64  `json:"challengesToday"`
-	BlockedNewUntil string `json:"blockedNewBindingsUntil,omitempty"`
-	Active          int    `json:"active"`
-	Provisional     int    `json:"provisional"`
-	SoftInvalid     int    `json:"softInvalid"`
-}
-
-// Suspects lists instances with any invalid token, rebind or challenge in the last seven days, worst first
-// (by invalid tokens today, then over seven days, then rebinds). This is the operator's way to find an
-// instance that floods the relay with invented tokens; it lives only on the admin socket.
-func (r *Relay) Suspects(limit int) []Suspect {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	now := r.cfg.Now()
-	today := store.Day(now)
-	out := []Suspect{}
-	for id, s := range r.instances {
-		r.rollInstanceDay(s, now)
-		sp := Suspect{ID: id, Tier: s.rec.Tier, Created: store.DayString(s.rec.CreatedDay), InvalidToday: s.invalid,
-			ChallengesToday: s.challenges}
-		for d := today - 6; d <= today; d++ {
-			c := r.st.Counters(d, id)
-			sp.Invalid7d += c.Invalid
-			sp.Sent7d += c.Sent
-			sp.Rebinds7d += c.Rebinds
-		}
-		sp.Invalid7d += s.pending.Invalid
-		sp.Sent7d += s.pending.Sent
-		sp.Rebinds7d += s.pending.Rebinds
-		if now.Before(s.blockNewUntil) {
-			sp.BlockedNewUntil = s.blockNewUntil.UTC().Format(time.RFC3339)
-		}
-		for m := range r.byInst[id] {
-			switch r.bindings[m].State {
-			case store.StateActive:
-				sp.Active++
-			case store.StateProvisional:
-				sp.Provisional++
-			case store.StateSoftInvalid:
-				sp.SoftInvalid++
-			}
-		}
-		if sp.InvalidToday+sp.Invalid7d+sp.Rebinds7d+sp.ChallengesToday > 0 {
-			out = append(out, sp)
-		}
-	}
-	slices.SortFunc(out, func(a, b Suspect) int {
-		for _, d := range []int64{b.InvalidToday - a.InvalidToday, b.Invalid7d - a.Invalid7d, b.Rebinds7d - a.Rebinds7d} {
-			if d != 0 {
-				if d > 0 {
-					return 1
-				}
-				return -1
-			}
-		}
-		return strings.Compare(a.ID, b.ID)
-	})
-	if len(out) > limit {
-		out = out[:limit]
-	}
-	return out
-}

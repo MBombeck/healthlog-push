@@ -7,6 +7,7 @@ import (
 	"math/rand/v2"
 	"net/http"
 	"net/netip"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -78,7 +79,7 @@ func (r *Relay) Handler() http.Handler {
 				return
 			}
 			if !r.reserveBody(req.ContentLength) {
-				r.M.Inc("hlp_body_budget_refused_total")
+				r.Metrics.Inc("hlp_body_budget_refused_total")
 				r.fail(w, req, http.StatusServiceUnavailable, errBody{Error: "overloaded", RetryAfter: jitter(2 * time.Second)})
 				return
 			}
@@ -132,7 +133,16 @@ func (r *Relay) reply(w http.ResponseWriter, req *http.Request, status int, v an
 	h.Set("Content-Length", strconv.Itoa(len(body)))
 	w.WriteHeader(status)
 	_, _ = w.Write(body)
-	r.M.Inc("hlp_requests_total", "status", strconv.Itoa(status/100)+"xx")
+	r.Metrics.Inc("hlp_requests_total", "status", strconv.Itoa(status/100)+"xx")
+}
+
+// errStorage is the refusal while the store does not accept writes; a positive retry adds a retry hint.
+func errStorage(retry time.Duration) errBody {
+	e := errBody{Error: "storage_unavailable"}
+	if retry > 0 {
+		e.RetryAfter = jitter(retry)
+	}
+	return e
 }
 
 func (r *Relay) fail(w http.ResponseWriter, req *http.Request, status int, e errBody) {
@@ -219,41 +229,18 @@ func (r *Relay) auth(w http.ResponseWriter, req *http.Request, limit int64) (*in
 	if nerr != nil || serr != nil || !wire.Verify(s.rec.PublicKey, wire.RequestText(r.cfg.Host, id, req.Method, req.RequestURI, ts, nonce, body), sig) {
 		// The bucket only limits how often failures are counted; it never refuses anyone.
 		if s.badSig.Allow(now) {
-			r.M.Inc("hlp_auth_failures_total", "reason", "bad_signature")
+			r.Metrics.Inc("hlp_auth_failures_total", "reason", "bad_signature")
 		}
 		r.fail(w, req, http.StatusUnauthorized, errBody{Error: "bad_signature"})
 		return nil, nil, false
 	}
-	switch s.rec.Tier {
-	case store.TierRevoked:
-		r.fail(w, req, http.StatusForbidden, errBody{Error: "instance_revoked"})
-		return nil, nil, false
-	case store.TierSuspended:
-		r.fail(w, req, http.StatusForbidden, errBody{Error: "instance_suspended", Reason: s.rec.Reason})
+	if status, e := r.admitRequestLocked(s, nonce, now); e != nil {
+		r.fail(w, req, status, *e)
 		return nil, nil, false
 	}
-	tl := r.tierLimits(s.rec)
-	if !s.reqMin.Allow(now, tl.RequestsMinute) {
-		r.fail(w, req, http.StatusTooManyRequests, errBody{Error: "instance_rate", Scope: "instance", RetryAfter: jitter(s.reqMin.RetryAfter(now)), Limits: &tl})
+	if r.clientTooOld(req) {
+		r.fail(w, req, http.StatusUpgradeRequired, errBody{Error: "min_server_version"})
 		return nil, nil, false
-	}
-	if _, seen := s.nonces[nonce]; seen {
-		r.fail(w, req, http.StatusUnauthorized, errBody{Error: "replayed"})
-		return nil, nil, false
-	}
-	r.pruneNonces(s, now)
-	if len(s.nonces) >= noncePerInst || r.nonceTotal >= nonceTotalMax {
-		r.fail(w, req, http.StatusServiceUnavailable, errBody{Error: "overloaded", RetryAfter: jitter(5 * time.Second)})
-		return nil, nil, false
-	}
-	s.nonces[nonce] = now.Unix() + 2*wire.ClockSkew
-	r.nonceTotal++
-	if minVer := r.cfg.MinClient; minVer != [3]int{} {
-		_, ver, err := wire.ParseClient(req.Header.Get("HL-Client"))
-		if err != nil || less(ver, minVer) {
-			r.fail(w, req, http.StatusUpgradeRequired, errBody{Error: "min_server_version"})
-			return nil, nil, false
-		}
 	}
 	if wk := store.Week(store.Day(now)); s.rec.LastSeenWeek != wk {
 		s.rec.LastSeenWeek = wk
@@ -263,13 +250,40 @@ func (r *Relay) auth(w http.ResponseWriter, req *http.Request, limit int64) (*in
 	return s, body, true
 }
 
-func less(a, b [3]int) bool {
-	for i := range a {
-		if a[i] != b[i] {
-			return a[i] < b[i]
-		}
+// admitRequestLocked applies, to a verified request of instance s, the tier, the request rate and the
+// nonce rules, and records the nonce.
+func (r *Relay) admitRequestLocked(s *instState, nonce string, now time.Time) (int, *errBody) {
+	switch s.rec.Tier {
+	case store.TierRevoked:
+		return http.StatusForbidden, &errBody{Error: "instance_revoked"}
+	case store.TierSuspended:
+		return http.StatusForbidden, &errBody{Error: "instance_suspended", Reason: s.rec.Reason}
 	}
-	return false
+	tl := r.tierLimits(s.rec)
+	if !s.reqMin.Allow(now, tl.RequestsMinute) {
+		return http.StatusTooManyRequests, &errBody{Error: "instance_rate", Scope: "instance", RetryAfter: jitter(s.reqMin.RetryAfter(now)), Limits: &tl}
+	}
+	if _, seen := s.nonces[nonce]; seen {
+		return http.StatusUnauthorized, &errBody{Error: "replayed"}
+	}
+	r.pruneNonces(s, now)
+	if len(s.nonces) >= noncePerInst || r.nonceTotal >= nonceTotalMax {
+		return http.StatusServiceUnavailable, &errBody{Error: "overloaded", RetryAfter: jitter(5 * time.Second)}
+	}
+	s.nonces[nonce] = now.Unix() + 2*wire.ClockSkew
+	r.nonceTotal++
+	return 0, nil
+}
+
+// clientTooOld reports whether a minimum server version is configured and the HL-Client header does not
+// meet it.
+func (r *Relay) clientTooOld(req *http.Request) bool {
+	minVer := r.cfg.MinClient
+	if minVer == [3]int{} {
+		return false
+	}
+	_, ver, err := wire.ParseClient(req.Header.Get("HL-Client"))
+	return err != nil || slices.Compare(ver[:], minVer[:]) < 0
 }
 
 func (r *Relay) pruneNonces(s *instState, now time.Time) {
@@ -292,7 +306,7 @@ func (r *Relay) rollInstanceDay(s *instState, now time.Time) {
 
 // appFailLocked answers a failed app-direct request. Failures are charged to one global bucket; when it is
 // empty the answer becomes 429 global. A request that verifies is never charged here, so junk traffic cannot
-// block a device's opt-out, self-read or challenge answer (H5). Caller holds r.mu.
+// block a device's opt-out, self-read or challenge answer. Caller holds r.mu.
 func (r *Relay) appFailLocked(w http.ResponseWriter, req *http.Request, status int, e errBody) {
 	if !r.appDirect.Allow(r.cfg.Now()) {
 		r.fail(w, req, http.StatusTooManyRequests, errBody{Error: "global", Scope: "global", RetryAfter: jitter(2 * time.Second)})

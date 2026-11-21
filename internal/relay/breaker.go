@@ -6,25 +6,24 @@ import "time"
 //
 // It only counts sends to established bindings, those that have had at least one push accepted by Apple: a
 // misconfiguration hits exactly those, while tokens an instance invented never reach that state and so
-// cannot move the breaker (K1). It opens when, within five minutes, at least 20 such sends happened, more
+// cannot move the breaker. It opens when, within five minutes, at least 20 such sends happened, more
 // than 30 % of them ended with Unregistered, BadDeviceToken or DeviceTokenNotForTopic, and the failures came
 // from at least three different instances. While open, the relay deletes and marks nothing and answers
 // 503 relay_misconfigured. After a cool-down it lets traffic through in half-open mode, still without
 // deleting or marking anything, and closes when Apple accepts again: at least 20 established sends with at
 // most 10 % token failures and at least one accepted push.
 type Breaker struct {
-	Window       time.Duration
-	MinSends     int
-	MinInstances int
-	OpenRatio    float64
-	CloseMax     float64
-	Cooldown     time.Duration
+	window       time.Duration // the sliding window the opening rule looks at
+	minSends     int           // established sends needed before the breaker may open or close
+	minInstances int           // distinct failing instances needed to open
+	openRatio    float64       // token-failure share above which it opens
+	closeMax     float64       // token-failure share at or below which half-open closes
+	cooldown     time.Duration // time open before half-open
 
 	state    string // closed, open, half_open
 	openedAt time.Time
 	slots    [10]breakerSlot
 	half     breakerSlot
-	opened   int64
 }
 
 type breakerSlot struct {
@@ -57,12 +56,12 @@ const (
 
 // NewBreaker returns a closed breaker with the hosted-relay thresholds.
 func NewBreaker() *Breaker {
-	return &Breaker{Window: 5 * time.Minute, MinSends: 20, MinInstances: 3, OpenRatio: 0.30, CloseMax: 0.10,
-		Cooldown: 10 * time.Minute, state: BreakerClosed}
+	return &Breaker{window: 5 * time.Minute, minSends: 20, minInstances: 3, openRatio: 0.30, closeMax: 0.10,
+		cooldown: 10 * time.Minute, state: BreakerClosed}
 }
 
 func (b *Breaker) slot(now time.Time) *breakerSlot {
-	size := b.Window / time.Duration(len(b.slots))
+	size := b.window / time.Duration(len(b.slots))
 	start := now.Truncate(size)
 	i := int(start.UnixNano()/int64(size)) % len(b.slots)
 	s := &b.slots[i]
@@ -76,7 +75,7 @@ func (b *Breaker) totals(now time.Time) (sends, fails, instances int) {
 	seen := map[string]struct{}{}
 	for i := range b.slots {
 		s := &b.slots[i]
-		if now.Sub(s.start) < b.Window {
+		if now.Sub(s.start) < b.window {
 			sends += s.sends
 			fails += s.fails
 			for i := range s.failInst {
@@ -89,7 +88,7 @@ func (b *Breaker) totals(now time.Time) (sends, fails, instances int) {
 
 // State returns the current state, moving from open to half-open after the cool-down.
 func (b *Breaker) State(now time.Time) string {
-	if b.state == BreakerOpen && now.Sub(b.openedAt) >= b.Cooldown {
+	if b.state == BreakerOpen && now.Sub(b.openedAt) >= b.cooldown {
 		b.state = BreakerHalfOpen
 		b.half = breakerSlot{start: now}
 	}
@@ -107,13 +106,13 @@ func (b *Breaker) Record(now time.Time, inst string, accepted, tokenFailure bool
 		return false
 	case BreakerHalfOpen:
 		b.half.record(inst, accepted, tokenFailure)
-		if b.half.sends >= b.MinSends {
+		if b.half.sends >= b.minSends {
 			ratio := float64(b.half.fails) / float64(b.half.sends)
 			switch {
-			case ratio > b.OpenRatio && len(b.half.failInst) >= b.MinInstances:
+			case ratio > b.openRatio && len(b.half.failInst) >= b.minInstances:
 				b.open(now)
 				return true
-			case ratio <= b.CloseMax && b.half.accepted > 0:
+			case ratio <= b.closeMax && b.half.accepted > 0:
 				b.Close()
 			}
 		}
@@ -121,7 +120,7 @@ func (b *Breaker) Record(now time.Time, inst string, accepted, tokenFailure bool
 	}
 	b.slot(now).record(inst, accepted, tokenFailure)
 	sends, fails, instances := b.totals(now)
-	if sends >= b.MinSends && float64(fails)/float64(sends) > b.OpenRatio && instances >= b.MinInstances {
+	if sends >= b.minSends && float64(fails)/float64(sends) > b.openRatio && instances >= b.minInstances {
 		b.open(now)
 		return true
 	}
@@ -130,7 +129,6 @@ func (b *Breaker) Record(now time.Time, inst string, accepted, tokenFailure bool
 
 func (b *Breaker) open(now time.Time) {
 	b.state, b.openedAt = BreakerOpen, now
-	b.opened++
 	for i := range b.slots {
 		b.slots[i] = breakerSlot{}
 	}
@@ -147,6 +145,3 @@ func (b *Breaker) Close() {
 	}
 	b.half = breakerSlot{}
 }
-
-// Opened returns how often the breaker opened since start.
-func (b *Breaker) Opened() int64 { return b.opened }

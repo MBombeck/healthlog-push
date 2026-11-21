@@ -2,9 +2,7 @@ package relay
 
 import (
 	"context"
-	"net/http"
 	"slices"
-	"strconv"
 	"time"
 
 	"github.com/MBombeck/healthlog-push/internal/logx"
@@ -16,14 +14,15 @@ import (
 const fewInstances = 20
 
 func (r *Relay) countGlobalLocked(today int, class, result string) {
-	r.global[[3]string{strconv.Itoa(today), class, result}]++
+	r.global[store.GlobalKey{Day: today, Class: class, Result: result}]++
 }
 
 // flushLocked writes dirty bindings, changed instance records, per-instance counters and pending global
-// counters in one write transaction. Instances that did not change are not written (M3).
+// counters in one write transaction. Instances that did not change are not written, so the cost of a flush
+// follows the traffic, not the number of instances.
 func (r *Relay) flushLocked() {
 	today := store.Day(r.cfg.Now())
-	f := store.Flush{Bindings: map[string]*store.Binding{}, Counters: map[string]store.DayCounters{}, Global: map[[3]string]int64{},
+	f := store.Flush{Bindings: map[string]*store.Binding{}, Counters: map[string]store.DayCounters{}, Global: map[store.GlobalKey]int64{},
 		Day: today, Peak: r.peakToday}
 	for k := range r.dirty {
 		if b := r.bindings[k]; b != nil {
@@ -47,7 +46,7 @@ func (r *Relay) flushLocked() {
 		r.setDBError(err)
 		return
 	}
-	r.dirty, r.dirtyInst, r.global = map[string]bool{}, map[string]bool{}, map[[3]string]int64{}
+	r.dirty, r.dirtyInst, r.global = map[string]bool{}, map[string]bool{}, map[store.GlobalKey]int64{}
 	for id := range f.Counters {
 		r.instances[id].pending = store.DayCounters{}
 	}
@@ -56,7 +55,7 @@ func (r *Relay) flushLocked() {
 		logx.Event("store.writable_again")
 	}
 	r.dbWritable = true
-	r.M.Set("hlp_db_writable", 1)
+	r.Metrics.Set("hlp_db_writable", 1)
 }
 
 // Run drives the periodic work until ctx ends: every minute a flush and the summary log line, at every
@@ -99,8 +98,8 @@ func (r *Relay) Tick() {
 		}
 		r.idemOrder = keep
 	}
-	r.M.Set("hlp_breaker_open", boolf(r.breaker.State(now) != BreakerClosed))
-	r.M.Set("hlp_http_errors_total", float64(r.ErrLog.Count()))
+	r.Metrics.Set("hlp_breaker_open", boolf(r.breaker.State(now) != BreakerClosed))
+	r.Metrics.Set("hlp_http_errors_total", float64(r.ErrLog.Count()))
 	r.logSummaryLocked(now)
 	newDay := store.Day(now) != r.lastDay
 	r.mu.Unlock()
@@ -144,15 +143,14 @@ func (r *Relay) logSummaryLocked(now time.Time) {
 	}
 	logx.Event("relay.summary", logx.Str(logx.KPeriod, name), logx.Int(logx.KPushes, r.summary.pushes),
 		logx.Counts(logx.KErrors, r.summary.errors), logx.Counts(logx.KEvents, r.summary.events), logx.Int(logx.KP95, p95))
-	r.summary = summary{errors: map[string]int64{}, events: map[string]int64{}, start: now}
+	r.summary = newSummary(now)
 }
 
 // Daily runs retention, tier promotion, the automatic device-limit raise, the consistency check and the
 // registry export. It is safe to call more than once a day.
 func (r *Relay) Daily() {
 	r.mu.Lock()
-	now := r.cfg.Now()
-	today := store.Day(now)
+	today := store.Day(r.cfg.Now())
 	if today != r.lastDay {
 		r.peaks7 = append(r.peaks7, r.peakToday)
 		if len(r.peaks7) > 7 {
@@ -162,6 +160,30 @@ func (r *Relay) Daily() {
 		r.lastDay = today
 	}
 	r.flushLocked()
+	removed := r.pruneBindingsLocked(today)
+	r.pruneInstancesLocked(today)
+	if err := r.st.Prune(today); err != nil {
+		r.setDBError(err)
+	}
+	if err := r.st.Check(); err != nil {
+		r.setDBError(err)
+		logx.Event("store.check_failed")
+	}
+	r.pruneMemoryLocked(today)
+	r.mu.Unlock()
+	if r.cfg.ExportDir != "" {
+		if err := r.ExportNow(); err != nil {
+			logx.Event("export.failed")
+		} else {
+			logx.Event("export.written")
+		}
+	}
+	logx.Event("relay.daily", logx.Int(logx.KCount, int64(removed)))
+}
+
+// pruneBindingsLocked removes bindings without a push for BindingIdleWeeks and provisional bindings older
+// than ProvisionalDays, and returns how many it removed.
+func (r *Relay) pruneBindingsLocked(today int) int {
 	thisWeek := store.Week(today)
 	removed := 0
 	for m, b := range r.bindings {
@@ -174,6 +196,13 @@ func (r *Relay) Daily() {
 			removed++
 		}
 	}
+	return removed
+}
+
+// pruneInstancesLocked removes suspended and revoked records after the denylist period, idle instances and
+// instances that never delivered, and runs the promotion rules for the rest.
+func (r *Relay) pruneInstancesLocked(today int) {
+	thisWeek := store.Week(today)
 	for id, s := range r.instances {
 		in := s.rec
 		if in.Tier == store.TierRevoked || in.Tier == store.TierSuspended {
@@ -193,14 +222,11 @@ func (r *Relay) Daily() {
 		}
 		r.promoteLocked(s, today)
 	}
-	if err := r.st.Prune(today); err != nil {
-		r.setDBError(err)
-	}
-	if err := r.st.Check(); err != nil {
-		r.setDBError(err)
-		logx.Event("store.check_failed")
-	}
-	// Per-device quota state of tokens without a binding is dropped once a day (N6).
+}
+
+// pruneMemoryLocked drops the per-device quota state of tokens without a binding and the challenge days
+// of earlier days, so that memory does not grow with tokens that come and go.
+func (r *Relay) pruneMemoryLocked(today int) {
 	for m := range r.devs {
 		if _, ok := r.bindings[m]; !ok {
 			delete(r.devs, m)
@@ -211,15 +237,6 @@ func (r *Relay) Daily() {
 			delete(r.challengeDay, m)
 		}
 	}
-	r.mu.Unlock()
-	if r.cfg.ExportDir != "" {
-		if err := r.ExportNow(); err != nil {
-			logx.Event("export.failed")
-		} else {
-			logx.Event("export.written")
-		}
-	}
-	logx.Event("relay.daily", logx.Int(logx.KCount, int64(removed)))
 }
 
 // promoteLocked moves a probation instance to standard after seven days with at least one delivered push
@@ -261,169 +278,4 @@ func (r *Relay) suspiciousLocked(id string, today int) bool {
 		return true
 	}
 	return sum.Sent+sum.Invalid >= 10 && float64(sum.Invalid)/float64(sum.Sent+sum.Invalid) > 0.2
-}
-
-// Usage is the aggregate usage report: counts only, no instance ids, no per-instance values.
-type Usage struct {
-	Granularity      string      `json:"granularity"` // "day" below 20 active instances, else "day" plus live gauges
-	ActiveInstances  int         `json:"activeInstances"`
-	PushedLast7Days  int         `json:"instancesPushedLast7Days"`
-	PushedLast30Days int         `json:"instancesPushedLast30Days"`
-	ActiveBindings   int         `json:"activeBindings"`
-	RegistrationsWk  []WeekCount `json:"registrationsPerWeek"`
-	OptOutsWk        []WeekCount `json:"optOutsPerWeek"`
-	PushesPerDay     []DayPushes `json:"pushesPerDay"`
-}
-
-// WeekCount is a count for the week starting on the given day.
-type WeekCount struct {
-	WeekOf string `json:"weekOf"`
-	N      int64  `json:"n"`
-}
-
-// DayPushes are the pushes of one completed day by class and outcome.
-type DayPushes struct {
-	Day          string           `json:"day"`
-	Total        int64            `json:"total"`
-	ByClass      map[string]int64 `json:"byClass"`
-	Accepted     int64            `json:"accepted"`
-	SoftFailed   int64            `json:"softFailed"`
-	Unregistered int64            `json:"unregistered"`
-}
-
-var usageClasses = []string{"alert", "silent", "liveactivity"}
-
-// UsageReport builds the usage report for the last weeks. Days are completed days only (yesterday back),
-// so no partial day of a small population is ever shown.
-func (r *Relay) UsageReport(days int) Usage {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.flushLocked()
-	now := r.cfg.Now()
-	today := store.Day(now)
-	u := Usage{Granularity: "day", ActiveInstances: r.activeInstancesLocked()}
-	for _, s := range r.instances {
-		if s.rec.LastPushDay != 0 && today-s.rec.LastPushDay < 7 {
-			u.PushedLast7Days++
-		}
-		if s.rec.LastPushDay != 0 && today-s.rec.LastPushDay < 30 {
-			u.PushedLast30Days++
-		}
-	}
-	for _, b := range r.bindings {
-		if b.State == store.StateActive || b.State == store.StateSoftInvalid {
-			u.ActiveBindings++
-		}
-	}
-	for d := today - days; d < today; d++ {
-		dp := DayPushes{Day: store.DayString(d), ByClass: map[string]int64{}}
-		for _, c := range usageClasses {
-			acc := r.st.Global(d, c, "accepted")
-			soft := r.st.Global(d, c, "soft_invalid")
-			unreg := r.st.Global(d, c, "unregistered")
-			gone := r.st.Global(d, c, "activity_gone")
-			n := acc + soft + unreg + gone
-			dp.ByClass[c] = n
-			dp.Total += n
-			dp.Accepted += acc
-			dp.SoftFailed += soft + gone
-			dp.Unregistered += unreg
-		}
-		u.PushesPerDay = append(u.PushesPerDay, dp)
-	}
-	for w := store.Week(today - days); w < store.Week(today); w++ {
-		var reg, opt int64
-		for d := store.WeekStart(w); d < store.WeekStart(w)+7; d++ {
-			reg += r.st.Global(d, "instance", "registered")
-			opt += r.st.Global(d, "binding", "opt_out")
-		}
-		u.RegistrationsWk = append(u.RegistrationsWk, WeekCount{WeekOf: store.DayString(store.WeekStart(w)), N: reg})
-		u.OptOutsWk = append(u.OptOutsWk, WeekCount{WeekOf: store.DayString(store.WeekStart(w)), N: opt})
-	}
-	return u
-}
-
-// usageGauges publishes the usage counts as metrics. Gauges for completed days only; the snapshot itself
-// refreshes hourly below 20 active instances.
-func (r *Relay) usageGauges() {
-	u := r.UsageReport(7)
-	r.M.Set("hlp_usage_active_instances", float64(u.ActiveInstances))
-	r.M.Set("hlp_usage_instances_pushed", float64(u.PushedLast7Days), "window", "7d")
-	r.M.Set("hlp_usage_instances_pushed", float64(u.PushedLast30Days), "window", "30d")
-	r.M.Set("hlp_usage_active_bindings", float64(u.ActiveBindings))
-	if n := len(u.PushesPerDay); n > 0 {
-		y := u.PushesPerDay[n-1]
-		for c, v := range y.ByClass {
-			r.M.Set("hlp_usage_pushes_yesterday", float64(v), "class", c)
-		}
-		r.M.Set("hlp_usage_outcomes_yesterday", float64(y.Accepted), "outcome", "accepted")
-		r.M.Set("hlp_usage_outcomes_yesterday", float64(y.SoftFailed), "outcome", "soft_failed")
-		r.M.Set("hlp_usage_outcomes_yesterday", float64(y.Unregistered), "outcome", "unregistered")
-	}
-	if n := len(u.RegistrationsWk); n > 0 {
-		r.M.Set("hlp_usage_registrations_last_week", float64(u.RegistrationsWk[n-1].N))
-		r.M.Set("hlp_usage_opt_outs_last_week", float64(u.OptOutsWk[n-1].N))
-	}
-}
-
-// MetricsHandler serves /metrics (127.0.0.1 only) and a local /healthz for the container health check.
-func (r *Relay) MetricsHandler() http.Handler {
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /metrics", func(w http.ResponseWriter, _ *http.Request) {
-		r.mu.Lock()
-		interval := time.Hour
-		if r.activeInstancesLocked() >= fewInstances {
-			interval = time.Minute
-		}
-		r.mu.Unlock()
-		r.usageGauges()
-		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
-		_ = r.M.WriteSnapshot(w, r.cfg.Now(), interval)
-	})
-	mux.HandleFunc("GET /healthz", r.handleHealthz)
-	return mux
-}
-
-// HealthStatus is the public /healthz body.
-type HealthStatus struct {
-	Status     string `json:"status"`
-	DBWritable bool   `json:"db_writable"`
-	APNsRecent bool   `json:"apns_recent"`
-	Breaker    string `json:"breaker"`
-	Delivery   string `json:"delivery"`
-}
-
-// Health returns the coarse public health. There is no time stamp in it.
-func (r *Relay) Health() (HealthStatus, bool) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	now := r.cfg.Now()
-	h := HealthStatus{DBWritable: r.dbWritable, APNsRecent: !r.apnsLastOK.IsZero() && now.Sub(r.apnsLastOK) < 15*time.Minute,
-		Breaker: r.breaker.State(now), Delivery: r.deliveryLocked(now)}
-	// The status, its HTTP code and the deploy gate depend only on the relay's own facts: a provider token
-	// that Apple accepts and a writable store. The breaker and the delivery signal can be influenced by
-	// third parties (instances sending traffic or reporting receipts), so they are shown but never turn the
-	// status (M1).
-	switch {
-	case r.misconfigured || (r.cfg.ProviderTokenOK != nil && !r.cfg.ProviderTokenOK()):
-		h.Status = "down"
-	case !h.DBWritable:
-		h.Status = "degraded"
-	default:
-		h.Status = "ok"
-	}
-	return h, h.Status == "ok"
-}
-
-func (r *Relay) handleHealthz(w http.ResponseWriter, req *http.Request) {
-	h, ok := r.Health()
-	status := http.StatusOK
-	if !ok {
-		status = http.StatusServiceUnavailable
-	}
-	r.reply(w, req, status, h)
-}
-
-func (r *Relay) handleVersion(w http.ResponseWriter, req *http.Request) {
-	r.reply(w, req, http.StatusOK, map[string]string{"version": r.cfg.Version, "commit": r.cfg.Commit, "imageDigest": r.cfg.ImageDigest})
 }

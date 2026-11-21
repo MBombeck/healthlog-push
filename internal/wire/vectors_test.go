@@ -113,7 +113,7 @@ func TestVectorsEnvelopeFrame(t *testing.T) {
 	// whatever its length.
 	for _, n := range []int{563, 1075} {
 		env := make([]byte, n)
-		env[0], env[1], env[2] = EnvelopeVersion, EnvelopeSuite, 0x03
+		env[0], env[1], env[2] = envelopeVersion, envelopeSuite, 0x03
 		if CheckEnvelopeFrame(ClassLiveActivity, env) == nil {
 			t.Errorf("reserved liveactivity envelope of %d bytes accepted", n)
 		}

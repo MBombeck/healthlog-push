@@ -128,3 +128,13 @@ func FuzzParseReceipts(f *testing.F) {
 		}
 	})
 }
+
+func FuzzJWTIssuedAt(f *testing.F) {
+	f.Add("e30.eyJpYXQiOjEyM30.x")
+	f.Add("a.b")
+	f.Fuzz(func(t *testing.T, jwt string) {
+		if n, err := JWTIssuedAt(jwt); err == nil && (n == 0 || strings.Count(jwt, ".") != 2) {
+			t.Fatal("accepted a token without three parts or without iat")
+		}
+	})
+}

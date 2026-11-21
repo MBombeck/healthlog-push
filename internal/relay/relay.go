@@ -2,11 +2,9 @@ package relay
 
 import (
 	"context"
-	"crypto/hmac"
 	"crypto/rand"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -57,27 +55,18 @@ type idemEntry struct {
 	exp  time.Time
 }
 
-type pendingConflict struct {
-	mac        string
-	token      []byte // in memory for at most challengeTTL
-	tokenTag   []byte
-	instanceID string
-	keyHash    []byte
-	seq        int64
-	env        string
-	consent    wire.Consent
-	expires    time.Time
-}
-
 // Relay is the service state.
 type Relay struct {
 	cfg     Config
 	st      *store.Store
 	sender  Sender
 	q       *queue.Queue
-	M       *metrics.Registry
-	ErrLog  *logx.CountingWriter
 	started time.Time
+
+	// Metrics is the coarse metrics registry served on the metrics listener.
+	Metrics *metrics.Registry
+	// ErrLog is the http.Server error log: it counts lines and discards them, because they carry addresses.
+	ErrLog *logx.CountingWriter
 
 	mu           sync.Mutex
 	instances    map[string]*instState
@@ -99,28 +88,32 @@ type Relay struct {
 	appDirect    *limits.Bucket
 	halfUntil    time.Time
 	dbWritable   bool
+	lastDay      int
+	summary      summary
+	global       map[store.GlobalKey]int64 // pending for counters_global
 
+	apnsState
+	pools
+	receiptsRing
+}
+
+// apnsState is what the relay has learned about Apple's answers.
+type apnsState struct {
 	apnsLastOK     time.Time
-	providerBadIat int64
-	misconfigured  bool
+	providerBadIat int64 // iat of the first provider token Apple called invalid
+	misconfigured  bool  // a newer provider token was refused too: sending stops until an operator resets
 	tooManyUntil   time.Time
 	silentOffUntil time.Time
-	apple429       [10]struct {
-		start            time.Time
-		sends, throttled int
-	}
+	apple429       [10]apple429Slot // 30-second slots over five minutes
+}
+
+// pools are the relay-wide minute windows and the peaks the global limit is derived from.
+type pools struct {
 	probationMin limits.Window
 	standardMin  limits.Window
 	minuteAll    limits.Window
 	peakToday    int64
 	peaks7       []int64
-	receipts     [24]struct {
-		hour                           int64
-		accepted, confirmed, reporters int64
-	}
-	lastDay int
-	summary summary
-	global  map[[3]string]int64 // (day, class, result) pending for counters_global
 }
 
 type summary struct {
@@ -133,13 +126,22 @@ type summary struct {
 
 // Idempotency and nonce bounds (spec/protocol.md).
 const (
-	idemTTL         = 10 * time.Minute
-	idemMax         = 200000
-	noncePerInst    = 2000
-	nonceTotalMax   = 200000
-	challengeTTL    = 30 * time.Minute
-	conflictStaleDy = 7
+	idemTTL           = 10 * time.Minute
+	idemMax           = 200000
+	noncePerInst      = 2000
+	nonceTotalMax     = 200000
+	challengeTTL      = 30 * time.Minute
+	conflictStaleDays = 7
 )
+
+// Durations used in refusals.
+const (
+	storageRetry = 5 * time.Minute // retry hint while the store refuses writes
+	fullDay      = 24 * time.Hour
+)
+
+// untilMidnight is the time from now to the next UTC midnight.
+func untilMidnight(now time.Time) time.Duration { return now.Truncate(fullDay).Add(fullDay).Sub(now) }
 
 // New builds a relay over an open store. It loads instances and bindings into memory.
 func New(cfg Config, st *store.Store, sender Sender) (*Relay, error) {
@@ -152,18 +154,16 @@ func New(cfg Config, st *store.Store, sender Sender) (*Relay, error) {
 	}
 	now := cfg.Now()
 	r := &Relay{
-		cfg: cfg, st: st, sender: sender, M: metrics.New(), ErrLog: &logx.CountingWriter{}, started: now,
+		cfg: cfg, st: st, sender: sender, started: now, Metrics: metrics.New(), ErrLog: &logx.CountingWriter{},
 		instances: map[string]*instState{}, byKey: map[string]string{}, bindings: map[string]*store.Binding{},
-		dirty: map[string]bool{}, devs: map[string]*devQuota{}, idem: map[string]*idemEntry{},
-		conflicts: map[string]*pendingConflict{}, challengeDay: map[string]int{},
-		breaker: NewBreaker(), regs: limits.NewRegistrations(cfg.Registrations, now),
-		appDirect: limits.NewBucket(100, 20, now), halfUntil: now.Truncate(24 * time.Hour).Add(24 * time.Hour),
-		dbWritable: true, probationMin: limits.Window{Size: time.Minute}, standardMin: limits.Window{Size: time.Minute},
-		minuteAll: limits.Window{Size: time.Minute}, lastDay: store.Day(now),
+		byInst: map[string]map[string]struct{}{}, dirtyInst: map[string]bool{}, dirty: map[string]bool{},
+		devs: map[string]*devQuota{}, idem: map[string]*idemEntry{}, conflicts: map[string]*pendingConflict{},
+		challengeDay: map[string]int{}, breaker: NewBreaker(), regs: limits.NewRegistrations(cfg.Registrations, now),
+		appDirect: limits.NewBucket(100, 20, now), halfUntil: now.Truncate(fullDay).Add(fullDay), dbWritable: true,
+		lastDay: store.Day(now), summary: newSummary(now), global: map[store.GlobalKey]int64{},
+		pools: pools{probationMin: limits.Window{Size: time.Minute}, standardMin: limits.Window{Size: time.Minute},
+			minuteAll: limits.Window{Size: time.Minute}},
 	}
-	r.summary = summary{errors: map[string]int64{}, events: map[string]int64{}, start: now}
-	r.byInst, r.dirtyInst = map[string]map[string]struct{}{}, map[string]bool{}
-	r.global = map[[3]string]int64{}
 	if err := st.GetControl(&r.control); err != nil && !errors.Is(err, store.ErrNotFound) {
 		return nil, err
 	}
@@ -190,16 +190,20 @@ func New(cfg Config, st *store.Store, sender Sender) (*Relay, error) {
 	}
 	r.peakToday = st.Global(today, "all", "peak_minute")
 	r.q = queue.New(cfg.Workers, queue.DefaultCapacity, queue.DefaultPerInstance, queue.DefaultMaxWait)
-	r.q.OnDrop = func() { r.M.Inc("hlp_queue_dropped_total") }
+	r.q.OnDrop = func() { r.Metrics.Inc("hlp_queue_dropped_total") }
 	r.describeMetrics()
 	return r, nil
+}
+
+func newSummary(now time.Time) summary {
+	return summary{errors: map[string]int64{}, events: map[string]int64{}, start: now}
 }
 
 func (r *Relay) addInstance(in *store.Instance) *instState {
 	now := r.cfg.Now()
 	s := &instState{
 		rec: in, reqMin: limits.Window{Size: time.Minute}, pushMin: limits.Window{Size: time.Minute},
-		pushDay: limits.Window{Size: 24 * time.Hour}, nonces: map[string]int64{}, day: store.Day(now),
+		pushDay: limits.Window{Size: fullDay}, nonces: map[string]int64{}, day: store.Day(now),
 	}
 	tl := r.tierLimits(in)
 	s.badSig = limits.NewBucket(float64(tl.BadSignatureBurst), float64(tl.BadSignatureBurst)/60, now)
@@ -226,76 +230,12 @@ func (r *Relay) tierLimits(in *store.Instance) TierLimits {
 	return tl
 }
 
-// tokenMAC returns the MAC under the current key and, when the binding exists only under a previous key,
-// moves it to the current key (MAC key rotation).
-func (r *Relay) tokenMAC(token []byte) string {
-	cur := mac(r.cfg.MACKeys[0], token)
-	if _, ok := r.bindings[cur]; ok {
-		return cur
-	}
-	for _, k := range r.cfg.MACKeys[1:] {
-		old := mac(k, token)
-		if b, ok := r.bindings[old]; ok {
-			if err := r.st.RenameBinding([]byte(old), []byte(cur), b); err == nil {
-				r.dropBindingLocked(old)
-				r.setBindingLocked(cur, b)
-				if d, ok := r.devs[old]; ok {
-					r.devs[cur] = d
-					delete(r.devs, old)
-				}
-			}
-			return cur
-		}
-	}
-	return cur
-}
-
-// pairBlocked and tokenBlocked look the token up under every configured MAC key, so a device opt-out or an
-// operator block survives a MAC key rotation.
-func (r *Relay) pairBlocked(token []byte, instanceID string) bool {
-	for _, k := range r.cfg.MACKeys {
-		if r.st.PairBlocked([]byte(mac(k, token)), instanceID) {
-			return true
-		}
-	}
-	return false
-}
-
-// pairBlock returns the device opt-out of the pair and the token MAC it is stored under.
-func (r *Relay) pairBlock(token []byte, instanceID string) (string, store.PairBlock, bool) {
-	for _, k := range r.cfg.MACKeys {
-		m := mac(k, token)
-		if b, ok := r.st.GetPairBlock([]byte(m), instanceID); ok {
-			return m, b, true
-		}
-	}
-	return "", store.PairBlock{}, false
-}
-
-func (r *Relay) tokenBlocked(token []byte) bool {
-	for _, k := range r.cfg.MACKeys {
-		if r.st.TokenBlocked([]byte(mac(k, token))) {
-			return true
-		}
-	}
-	return false
-}
-
-func mac(key, token []byte) string {
-	m := hmac.New(sha256.New, key)
-	m.Write(token)
-	return string(m.Sum(nil))
-}
-
-func keyHash(pk []byte) []byte { s := sha256.Sum256(pk); return s[:] }
-
 func newID() string {
 	var b [16]byte
 	_, _ = rand.Read(b[:])
 	b[6] = (b[6] & 0x0f) | 0x40
 	b[8] = (b[8] & 0x3f) | 0x80
-	h := hex.EncodeToString(b[:])
-	return h[0:8] + "-" + h[8:12] + "-" + h[12:16] + "-" + h[16:20] + "-" + h[20:32]
+	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:])
 }
 
 func newChallenge() string {
@@ -353,8 +293,8 @@ func (r *Relay) dev(m string) *devQuota {
 		now := r.cfg.Now()
 		dl := r.cfg.Limits.Device
 		d = &devQuota{
-			all: limits.Window{Size: 24 * time.Hour}, alerts: limits.NewBucket(dl.AlertBurst, dl.AlertPerHour/3600, now),
-			silentHour: limits.Window{Size: time.Hour}, laDay: limits.Window{Size: 24 * time.Hour}, throttled: map[wire.Class]time.Time{},
+			all: limits.Window{Size: fullDay}, alerts: limits.NewBucket(dl.AlertBurst, dl.AlertPerHour/3600, now),
+			silentHour: limits.Window{Size: time.Hour}, laDay: limits.Window{Size: fullDay}, throttled: map[wire.Class]time.Time{},
 			app: limits.NewBucket(10, 10.0/3600, now),
 		}
 		r.devs[m] = d
@@ -365,7 +305,7 @@ func (r *Relay) dev(m string) *devQuota {
 func (r *Relay) setDBError(err error) {
 	if err != nil && r.dbWritable {
 		r.dbWritable = false
-		r.M.Set("hlp_db_writable", 0)
+		r.Metrics.Set("hlp_db_writable", 0)
 		logx.Event("store.write_failed", logx.Str(logx.KState, "read_only"))
 	}
 }
@@ -379,13 +319,13 @@ func (r *Relay) persist(err error) bool {
 }
 
 func (r *Relay) describeMetrics() {
-	r.M.Help("hlp_push_total", "Push items by class and result, without any instance label.")
-	r.M.Help("hlp_requests_total", "HTTP responses by status class.")
-	r.M.Help("hlp_breaker_open", "1 while the token-failure circuit breaker is open or half-open.")
-	r.M.Help("hlp_db_writable", "1 while the store accepts writes.")
-	r.M.Help("hlp_http_errors_total", "Lines the HTTP server wanted to log; discarded because they carry addresses.")
-	r.M.Set("hlp_db_writable", 1)
-	r.M.Set("hlp_breaker_open", 0)
+	r.Metrics.Help("hlp_push_total", "Push items by class and result, without any instance label.")
+	r.Metrics.Help("hlp_requests_total", "HTTP responses by status class.")
+	r.Metrics.Help("hlp_breaker_open", "1 while the token-failure circuit breaker is open or half-open.")
+	r.Metrics.Help("hlp_db_writable", "1 while the store accepts writes.")
+	r.Metrics.Help("hlp_http_errors_total", "Lines the HTTP server wanted to log; discarded because they carry addresses.")
+	r.Metrics.Set("hlp_db_writable", 1)
+	r.Metrics.Set("hlp_breaker_open", 0)
 }
 
 // Close stops the queue, flushes counters and bindings and closes nothing else; the caller closes the store.

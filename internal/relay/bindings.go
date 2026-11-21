@@ -2,21 +2,12 @@ package relay
 
 import (
 	"bytes"
-	"context"
 	"errors"
 	"net/http"
 	"time"
 
-	"github.com/MBombeck/healthlog-push/internal/apns"
-	"github.com/MBombeck/healthlog-push/internal/queue"
 	"github.com/MBombeck/healthlog-push/internal/store"
 	"github.com/MBombeck/healthlog-push/internal/wire"
-)
-
-const (
-	hour = time.Hour
-	r5m  = 5 * time.Minute
-	day  = 24 * time.Hour
 )
 
 type bindResp struct {
@@ -56,23 +47,61 @@ func (r *Relay) handleBind(w http.ResponseWriter, req *http.Request) {
 func (r *Relay) bindLocked(s *instState, b *wire.Bind, now time.Time) (int, *bindResp, *errBody) {
 	id := s.rec.ID
 	today := store.Day(now)
-	if r.instances[id] == nil { // deleted between authentication and this call (N2)
+	if r.instances[id] == nil { // deleted between authentication and this call
 		return http.StatusUnauthorized, nil, &errBody{Error: "unknown_instance"}
 	}
 	if !r.cfg.Environments[b.Env] {
 		return http.StatusUnprocessableEntity, nil, &errBody{Error: "env_unsupported"}
 	}
 	if !r.dbWritable {
-		return http.StatusServiceUnavailable, nil, &errBody{Error: "storage_unavailable", RetryAfter: jitter(r5m)}
+		e := errStorage(storageRetry)
+		return http.StatusServiceUnavailable, nil, &e
 	}
 	m := r.tokenMAC(b.Token)
 	kh := keyHash(b.BindingKey)
 	cur := r.bindings[m]
-	// A device opt-out holds against the instance. Only the device can undo it: a statement by the same
-	// binding key, with a higher seq than the binding it left and made after its opt-out statement. The
-	// instance has no such statement unless the device signed one after leaving.
 	blockMAC, block, blocked := r.pairBlock(b.Token, id)
-	if blocked && !optOutReturn(block, kh, b) {
+	if status, resp, e := r.bindPrecheckLocked(s, b, m, kh, cur, blocked && !optOutReturn(block, kh, b), now); status != 0 {
+		return status, resp, e
+	}
+	if code, e := r.admitNewBinding(s, cur, now); e != nil {
+		return code, nil, e
+	}
+	if blocked {
+		if !r.persist(r.st.UnblockPair([]byte(blockMAC), id)) {
+			e := errStorage(storageRetry)
+			return http.StatusServiceUnavailable, nil, &e
+		}
+		r.Metrics.Inc("hlp_bindings_total", "result", "opt_out_lifted")
+	}
+	same := cur != nil && cur.InstanceID == id
+	nb := newBinding(id, kh, b.Seq, b.Env, b.Consent, today)
+	if same {
+		nb.State, nb.LastSuccessDay, nb.AlertsToday, nb.AlertsDay = cur.State, cur.LastSuccessDay, cur.AlertsToday, cur.AlertsDay
+	}
+	if !r.storeBindingLocked(s, m, cur, nb) {
+		e := errStorage(storageRetry)
+		return http.StatusServiceUnavailable, nil, &e
+	}
+	if !same {
+		s.newBindings++
+	}
+	r.Metrics.Inc("hlp_bindings_total", "result", "bound")
+	if same {
+		return http.StatusOK, &bindResp{State: nb.State}, nil
+	}
+	return http.StatusCreated, &bindResp{State: nb.State}, nil
+}
+
+// bindPrecheckLocked decides a binding request before any quota: refused (opt-out or operator block,
+// a reused seq), answered (an idempotent repeat) or turned into a conflict challenge. A zero status means
+// the request goes on.
+func (r *Relay) bindPrecheckLocked(s *instState, b *wire.Bind, m string, kh []byte, cur *store.Binding, optedOut bool, now time.Time) (int, *bindResp, *errBody) {
+	id := s.rec.ID
+	// A device opt-out holds against the instance. Only the device can undo it: a statement by the same
+	// binding key with a higher seq than the binding it left. The instance has no such statement unless the
+	// device signed one after leaving.
+	if optedOut {
 		return http.StatusForbidden, nil, &errBody{Error: "binding_refused"}
 	}
 	if r.tokenBlocked(b.Token) && (cur == nil || cur.InstanceID != id) {
@@ -91,49 +120,39 @@ func (r *Relay) bindLocked(s *instState, b *wire.Bind, now time.Time) (int, *bin
 	// last-writer-wins. Only a binding without an accepted push for seven days may be replaced directly.
 	if cur != nil && !bytes.Equal(cur.KeyHash, kh) {
 		lastGood := max(cur.LastSuccessDay, cur.BoundDay)
-		if today-lastGood < conflictStaleDy {
+		if store.Day(now)-lastGood < conflictStaleDays {
 			return http.StatusConflict, nil, r.startChallenge(s, m, b, kh, now)
 		}
 	}
-	if code, e := r.admitNewBinding(s, cur, now); e != nil {
-		return code, nil, e
-	}
-	if blocked {
-		if !r.persist(r.st.UnblockPair([]byte(blockMAC), id)) {
-			return http.StatusServiceUnavailable, nil, &errBody{Error: "storage_unavailable", RetryAfter: jitter(r5m)}
-		}
-		r.M.Inc("hlp_bindings_total", "result", "opt_out_lifted")
-	}
-	nb := &store.Binding{
-		InstanceID: id, KeyHash: kh, Seq: b.Seq, Env: b.Env, State: store.StateProvisional, BoundDay: today,
-		LastUsedWeek: store.Week(today), ConsentVersion: b.Consent.TextVersion, ConsentDay: b.Consent.Day,
-	}
-	if cur != nil && cur.InstanceID == id {
-		nb.State, nb.LastSuccessDay, nb.AlertsToday, nb.AlertsDay = cur.State, cur.LastSuccessDay, cur.AlertsToday, cur.AlertsDay
-	}
-	if !r.persist(r.st.PutBinding([]byte(m), nb)) {
-		return http.StatusServiceUnavailable, nil, &errBody{Error: "storage_unavailable", RetryAfter: jitter(r5m)}
-	}
-	if cur != nil && cur.InstanceID != id {
-		s.pending.Rebinds++
-	}
-	if cur == nil || cur.InstanceID != id {
-		s.newBindings++
-	}
-	r.setBindingLocked(m, nb)
-	r.M.Inc("hlp_bindings_total", "result", "bound")
-	status := http.StatusCreated
-	if cur != nil && cur.InstanceID == id {
-		status = http.StatusOK
-	}
-	return status, &bindResp{State: nb.State}, nil
+	return 0, nil, nil
 }
 
-// optOutReturn reports whether b undoes the opt-out recorded in block: same binding key, a higher seq than
-// the binding that left, and made after the opt-out statement. A block without a key (restored from an
-// export) is never undone this way.
+// newBinding is a fresh provisional binding of instID to the binding key hashed in kh.
+func newBinding(instID string, kh []byte, seq int64, env string, c wire.Consent, today int) *store.Binding {
+	return &store.Binding{
+		InstanceID: instID, KeyHash: kh, Seq: seq, Env: env, State: store.StateProvisional, BoundDay: today,
+		LastUsedWeek: store.Week(today), ConsentVersion: c.TextVersion, ConsentDay: c.Day,
+	}
+}
+
+// storeBindingLocked writes nb under the token MAC m, replacing cur, and keeps memory in step. A binding
+// taken over from another instance counts as a rebind of instance s. It reports whether the write succeeded.
+func (r *Relay) storeBindingLocked(s *instState, m string, cur, nb *store.Binding) bool {
+	if !r.persist(r.st.PutBinding([]byte(m), nb)) {
+		return false
+	}
+	if cur != nil && cur.InstanceID != nb.InstanceID {
+		s.pending.Rebinds++
+	}
+	r.setBindingLocked(m, nb)
+	return true
+}
+
+// optOutReturn reports whether b undoes the opt-out recorded in block: same binding key and a higher seq
+// than the binding that left. The seq of a binding key only ever grows, so no statement made before the
+// opt-out can lift it. A block without a key (restored from an export) is never undone this way.
 func optOutReturn(block store.PairBlock, kh []byte, b *wire.Bind) bool {
-	return len(block.KeyHash) > 0 && bytes.Equal(block.KeyHash, kh) && b.Seq > block.Seq && b.Iat > block.Iat
+	return len(block.KeyHash) > 0 && bytes.Equal(block.KeyHash, kh) && b.Seq > block.Seq
 }
 
 // admitNewBinding checks the binding quotas for a binding that is new to this instance.
@@ -149,95 +168,13 @@ func (r *Relay) admitNewBinding(s *instState, cur *store.Binding, now time.Time)
 		return http.StatusTooManyRequests, quota(s.blockNewUntil.Sub(now))
 	}
 	if s.newBindings >= tl.NewBindingsDay {
-		return http.StatusTooManyRequests, quota(day)
+		return http.StatusTooManyRequests, quota(fullDay)
 	}
 	active, prov := r.counts(s.rec.ID)
 	if prov >= tl.Provisional || active >= tl.Devices {
-		return http.StatusTooManyRequests, quota(hour)
+		return http.StatusTooManyRequests, quota(time.Hour)
 	}
 	return 0, nil
-}
-
-func (r *Relay) startChallenge(s *instState, m string, b *wire.Bind, kh []byte, now time.Time) *errBody {
-	today := store.Day(now)
-	tl := r.tierLimits(s.rec)
-	r.M.Inc("hlp_bindings_total", "result", "conflict")
-	if r.challengeDay[m] == today || s.challenges >= tl.ChallengesDay {
-		return &errBody{Error: "binding_conflict", Reason: "challenge_quota"}
-	}
-	r.challengeDay[m] = today
-	s.challenges++
-	s.flaggedToday = true
-	ch := newChallenge()
-	r.conflicts[ch] = &pendingConflict{
-		mac: m, token: b.Token, tokenTag: wire.TokenTag(b.Token), instanceID: s.rec.ID, keyHash: kh, seq: b.Seq, env: b.Env,
-		consent: b.Consent, expires: now.Add(challengeTTL),
-	}
-	p := &apns.Push{Token: b.Token, Challenge: true, Payload: apns.ChallengePayload(ch), Expiration: now.Add(challengeTTL), Sandbox: b.Env == "sandbox"}
-	err := r.q.Push(&queue.Job{Instance: s.rec.ID, Run: func() {
-		res := r.sender.Send(context.Background(), p)
-		r.M.Inc("hlp_challenges_total", "result", string(res.Outcome))
-	}, Drop: func() {}})
-	if err != nil {
-		// Not sent: give the quota back so the token can be challenged again today (N5).
-		delete(r.conflicts, ch)
-		delete(r.challengeDay, m)
-		s.challenges--
-		return &errBody{Error: "binding_conflict", Reason: "challenge_unsent", RetryAfter: jitter(time.Minute)}
-	}
-	return &errBody{Error: "binding_conflict", Reason: "challenge_sent"}
-}
-
-// handleChallenge implements POST /v1/bindings/challenge, called by the app with its binding key.
-func (r *Relay) handleChallenge(w http.ResponseWriter, req *http.Request) {
-	body, ok := readBody(w, req, maxOtherBody)
-	if !ok {
-		r.appFail(w, req, http.StatusRequestEntityTooLarge, errBody{Error: "too_large"})
-		return
-	}
-	ans, err := wire.ParseChallenge(body)
-	if err != nil {
-		r.appFail(w, req, http.StatusUnprocessableEntity, errBody{Error: "invalid_item"})
-		return
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	now := r.cfg.Now()
-	pc := r.conflicts[ans.Challenge]
-	if pc == nil || now.After(pc.expires) || !bytes.Equal(pc.tokenTag, ans.TokenTag) ||
-		!bytes.Equal(pc.keyHash, keyHash(ans.BindingKey)) || !ans.Verify(r.cfg.Host) {
-		r.appFailLocked(w, req, http.StatusForbidden, errBody{Error: "challenge_refused"})
-		return
-	}
-	if !r.appAllowedLocked(w, req, pc.mac) {
-		return
-	}
-	delete(r.conflicts, ans.Challenge)
-	s := r.instances[pc.instanceID]
-	if s == nil || s.rec.Tier == store.TierRevoked || s.rec.Tier == store.TierSuspended || r.pairBlocked(pc.token, pc.instanceID) {
-		r.fail(w, req, http.StatusForbidden, errBody{Error: "challenge_refused"})
-		return
-	}
-	cur := r.bindings[pc.mac]
-	if code, e := r.admitNewBinding(s, cur, now); e != nil {
-		r.fail(w, req, code, *e)
-		return
-	}
-	today := store.Day(now)
-	nb := &store.Binding{InstanceID: pc.instanceID, KeyHash: pc.keyHash, Seq: pc.seq, Env: pc.env, State: store.StateProvisional,
-		BoundDay: today, LastUsedWeek: store.Week(today), ConsentVersion: pc.consent.TextVersion, ConsentDay: pc.consent.Day}
-	if !r.persist(r.st.PutBinding([]byte(pc.mac), nb)) {
-		r.fail(w, req, http.StatusServiceUnavailable, errBody{Error: "storage_unavailable"})
-		return
-	}
-	if cur != nil && cur.InstanceID != pc.instanceID {
-		s.pending.Rebinds++
-		r.dirtyInst[s.rec.ID] = true
-	}
-	r.setBindingLocked(pc.mac, nb)
-	r.M.Inc("hlp_bindings_total", "result", "challenge_resolved")
-	r.summary.events["challenge_resolved"]++
-	r.reply(w, req, http.StatusOK, bindResp{State: nb.State})
 }
 
 // handleUnbindByInstance implements DELETE /v1/bindings. It answers 204 whether or not the token was bound
@@ -257,11 +194,11 @@ func (r *Relay) handleUnbindByInstance(w http.ResponseWriter, req *http.Request)
 	m := r.tokenMAC(tok)
 	if b := r.bindings[m]; b != nil && b.InstanceID == s.rec.ID {
 		if !r.persist(r.st.DeleteBinding([]byte(m))) {
-			r.fail(w, req, http.StatusServiceUnavailable, errBody{Error: "storage_unavailable"})
+			r.fail(w, req, http.StatusServiceUnavailable, errStorage(0))
 			return
 		}
 		r.dropBindingLocked(m)
-		r.M.Inc("hlp_bindings_total", "result", "unbound_instance")
+		r.Metrics.Inc("hlp_bindings_total", "result", "unbound_instance")
 	}
 	r.reply(w, req, http.StatusNoContent, nil)
 }
@@ -295,9 +232,9 @@ func (r *Relay) handleUnbindSelf(w http.ResponseWriter, req *http.Request) {
 	if !r.appAllowedLocked(w, req, m) {
 		return
 	}
-	block := store.PairBlock{Day: store.Day(now), KeyHash: b.KeyHash, Seq: b.Seq, Iat: u.Iat}
+	block := store.PairBlock{Day: store.Day(now), KeyHash: b.KeyHash, Seq: b.Seq}
 	if !r.persist(r.st.BlockPair([]byte(m), u.InstanceID, block)) || !r.persist(r.st.DeleteBinding([]byte(m))) {
-		r.fail(w, req, http.StatusServiceUnavailable, errBody{Error: "storage_unavailable"})
+		r.fail(w, req, http.StatusServiceUnavailable, errStorage(0))
 		return
 	}
 	r.dropBindingLocked(m)
@@ -306,7 +243,7 @@ func (r *Relay) handleUnbindSelf(w http.ResponseWriter, req *http.Request) {
 			delete(r.conflicts, ch)
 		}
 	}
-	r.M.Inc("hlp_bindings_total", "result", "unbound_self")
+	r.Metrics.Inc("hlp_bindings_total", "result", "unbound_self")
 	r.countGlobalLocked(store.Day(now), "binding", "opt_out")
 	r.reply(w, req, http.StatusNoContent, nil)
 }

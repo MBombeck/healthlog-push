@@ -104,7 +104,6 @@ services:
       HLP_SECRETS_DIR: /run/secrets/relay
       HLP_JWT_DIR: /run/jwt
       HLP_JWT_REFRESH_DIR: /run/jwt-refresh
-      HLP_APNS_URL: ${HLP_APNS_URL:-https://api.push.apple.com}
       HLP_APNS_TOPIC: ${HLP_APNS_TOPIC:?HLP_APNS_TOPIC must be set}
       HLP_APNS_ENVIRONMENT: production
       HLP_METRICS_LISTEN: 127.0.0.1:9464

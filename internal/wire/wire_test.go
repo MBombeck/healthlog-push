@@ -168,3 +168,14 @@ func TestParseClient(t *testing.T) {
 		}
 	}
 }
+
+func TestJWTIssuedAt(t *testing.T) {
+	for _, bad := range []string{"a.b", "a.b.c.d", "e30.e30.x", "e30.eyJpYXQiOjB9.x", "e30.!!.x"} {
+		if _, err := JWTIssuedAt(bad); err == nil {
+			t.Errorf("%q accepted", bad)
+		}
+	}
+	if n, err := JWTIssuedAt("e30.eyJpYXQiOjEyM30.x"); err != nil || n != 123 {
+		t.Fatal(n, err)
+	}
+}

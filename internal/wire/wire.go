@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"regexp"
 	"strconv"
@@ -17,8 +18,15 @@ import (
 // ClockSkew is the accepted difference between a signed time and the relay clock, in seconds.
 const ClockSkew = 300
 
-// ErrInvalid is returned by every parser for any malformed input. Callers map it to a fixed reason.
-var ErrInvalid = errors.New("invalid")
+// Parser errors. Callers map each to a fixed reason.
+var (
+	// ErrInvalid is returned by every parser for any malformed input.
+	ErrInvalid = errors.New("invalid")
+	// ErrStale marks a well-formed statement whose time is outside the accepted window.
+	ErrStale = errors.New("stale")
+	// ErrSignature marks a well-formed statement whose signature does not verify.
+	ErrSignature = errors.New("signature")
+)
 
 var b64 = base64.RawURLEncoding
 
@@ -166,10 +174,30 @@ func ParseNonce(s string) (string, error) {
 	return s, nil
 }
 
-// HexSHA256 is the lowercase hex SHA-256 of b.
-func HexSHA256(b []byte) string {
+// hexSHA256 is the lowercase hex SHA-256 of b.
+func hexSHA256(b []byte) string {
 	s := sha256.Sum256(b)
 	return hex.EncodeToString(s[:])
+}
+
+// JWTIssuedAt extracts the iat claim of a provider JWT without verifying it. It is the one JWT parser of the
+// relay and the signer; a token without three parts or without a non-zero iat is invalid.
+func JWTIssuedAt(jwt string) (int64, error) {
+	parts := strings.Split(jwt, ".")
+	if len(parts) != 3 {
+		return 0, ErrInvalid
+	}
+	b, err := DecodeB64(parts[1], 0)
+	if err != nil {
+		return 0, err
+	}
+	var c struct {
+		Iat int64 `json:"iat"`
+	}
+	if err := json.Unmarshal(b, &c); err != nil || c.Iat == 0 {
+		return 0, ErrInvalid
+	}
+	return c.Iat, nil
 }
 
 func join(fields ...string) string { return strings.Join(fields, "\n") }
@@ -183,7 +211,7 @@ func RegisterText(host string, pub ed25519.PublicKey, t int64) string {
 
 // RequestText is signed by the instance for every authenticated request.
 func RequestText(host, instanceID, method, pathQuery string, t int64, nonce string, body []byte) string {
-	return join("hl-relay-v1", host, instanceID, method, pathQuery, itoa(t), nonce, HexSHA256(body))
+	return join("hl-relay-v1", host, instanceID, method, pathQuery, itoa(t), nonce, hexSHA256(body))
 }
 
 // ResponseText is signed by the relay identity key for every response. It binds the response to the request
@@ -191,12 +219,12 @@ func RequestText(host, instanceID, method, pathQuery string, t int64, nonce stri
 // endpoints (/healthz, /version) and for the refusal of a request that carried no valid nonce; a client must
 // treat a response bound to "-" as untrusted.
 func ResponseText(host, method, pathQuery, nonce string, status int, body []byte) string {
-	return join("hl-relay-resp-v2", host, method, pathQuery, nonce, strconv.Itoa(status), HexSHA256(body))
+	return join("hl-relay-resp-v2", host, method, pathQuery, nonce, strconv.Itoa(status), hexSHA256(body))
 }
 
 // StatusFileText is signed by the relay identity key for the out-of-band status file.
 func StatusFileText(host string, body []byte) string {
-	return join("hl-relay-status-v1", host, HexSHA256(body))
+	return join("hl-relay-status-v1", host, hexSHA256(body))
 }
 
 // BindText is signed by the device binding key.

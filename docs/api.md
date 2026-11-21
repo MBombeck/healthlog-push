@@ -291,7 +291,7 @@ instance's binding quotas (see `POST /v1/bindings`) do not allow the new binding
 
 The direct opt-out. Deletes the binding without the instance and blocks the pair of token and instance for
 365 days. Only the device lifts the block again: a later `POST /v1/bindings` through that instance whose
-statement is signed by the same binding key, with a higher `seq` and an `iat` after the opt-out (see
+statement is signed by the same binding key, with a `seq` higher than that of the binding that left (see
 `spec/protocol.md`, "Returning"). A block restored from the registry export cannot be lifted.
 
 Signed text: `hl-unbind-v1\n<host>\n<instance id>\n<hex token tag>\n<iat>`.

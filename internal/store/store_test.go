@@ -39,23 +39,28 @@ func TestRetention(t *testing.T) {
 	_ = s.BlockPair([]byte("m1"), "i", PairBlock{Day: today - 366})
 	_ = s.BlockPair([]byte("m2"), "i", PairBlock{Day: today - 10})
 	kh := sha256.Sum256([]byte("key"))
-	_ = s.BlockPair([]byte("m3"), "i", PairBlock{Day: today - 366, KeyHash: kh[:], Seq: 4, Iat: 1795000000})
-	_ = s.BlockPair([]byte("m4"), "i", PairBlock{Day: today - 10, KeyHash: kh[:], Seq: 4, Iat: 1795000000})
-	_ = s.AddCounters(today-8, "i", DayCounters{Sent: 1})
-	_ = s.AddCounters(today-6, "i", DayCounters{Sent: 1})
-	_ = s.AddGlobal(today-401, "alert", "accepted", 1)
-	_ = s.AddGlobal(today-399, "alert", "accepted", 1)
+	_ = s.BlockPair([]byte("m3"), "i", PairBlock{Day: today - 366, KeyHash: kh[:], Seq: 4})
+	_ = s.BlockPair([]byte("m4"), "i", PairBlock{Day: today - 10, KeyHash: kh[:], Seq: 4})
+	// Counters are seeded the way the relay writes them: through a flush.
+	for _, f := range []*Flush{
+		{Day: today - 8, Counters: map[string]DayCounters{"i": {Sent: 1}}, Global: map[GlobalKey]int64{{today - 401, "alert", "accepted"}: 1}},
+		{Day: today - 6, Counters: map[string]DayCounters{"i": {Sent: 1}}, Global: map[GlobalKey]int64{{today - 399, "alert", "accepted"}: 1}},
+	} {
+		if err := s.ApplyFlush(f); err != nil {
+			t.Fatal(err)
+		}
+	}
 	_ = s.PutDeny(&DenyEntry{InstanceID: "old", Reason: "abuse", Day: today - 400})
 	if err := s.Prune(today); err != nil {
 		t.Fatal(err)
 	}
-	if s.PairBlocked([]byte("m1"), "i") || !s.PairBlocked([]byte("m2"), "i") {
+	if pairBlocked(s, "m1") || !pairBlocked(s, "m2") {
 		t.Error("blocked pairs: 12 months")
 	}
-	if s.PairBlocked([]byte("m3"), "i") || !s.PairBlocked([]byte("m4"), "i") {
+	if pairBlocked(s, "m3") || !pairBlocked(s, "m4") {
 		t.Error("blocked pairs with a key: 12 months")
 	}
-	if b, _ := s.GetPairBlock([]byte("m4"), "i"); !bytes.Equal(b.KeyHash, kh[:]) || b.Seq != 4 || b.Iat != 1795000000 || b.Day != today-10 {
+	if b, _ := s.GetPairBlock([]byte("m4"), "i"); !bytes.Equal(b.KeyHash, kh[:]) || b.Seq != 4 || b.Day != today-10 {
 		t.Errorf("stored opt-out: %+v", b)
 	}
 	if s.Counters(today-8, "i").Sent != 0 || s.Counters(today-6, "i").Sent != 1 {
@@ -67,6 +72,11 @@ func TestRetention(t *testing.T) {
 	if d, _ := s.Denylist(); len(d) != 0 {
 		t.Error("denylist: 12 months")
 	}
+}
+
+func pairBlocked(s *Store, mac string) bool {
+	_, ok := s.GetPairBlock([]byte(mac), "i")
+	return ok
 }
 
 func TestExportRoundTrip(t *testing.T) {
@@ -132,7 +142,7 @@ func TestExportBlocksRetention(t *testing.T) {
 	if _, err := s2.Import(ex, today); err != nil {
 		t.Fatal(err)
 	}
-	if !s2.PairBlocked([]byte("new-mac"), "i") || !s2.TokenBlocked([]byte("new-token-mac")) || s2.TokenBlocked([]byte("old-token-mac")) {
+	if _, ok := s2.GetPairBlock([]byte("new-mac"), "i"); !ok || !s2.TokenBlocked([]byte("new-token-mac")) || s2.TokenBlocked([]byte("old-token-mac")) {
 		t.Fatal("blocks not restored exactly")
 	}
 	ex2, _ := s2.BuildExport(today)

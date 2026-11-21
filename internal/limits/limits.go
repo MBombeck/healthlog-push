@@ -111,29 +111,6 @@ func Prefixes(a netip.Addr) (narrow, wide netip.Prefix) {
 	return n, w
 }
 
-// Salter hashes prefixes with a salt that changes every day, so that the in-memory keys cannot be
-// reversed into addresses after the day ends.
-type Salter struct {
-	mu   sync.Mutex
-	day  int64
-	salt [32]byte
-}
-
-// Key returns the salted hash of a prefix for the day of now.
-func (s *Salter) Key(p netip.Prefix, now time.Time) string {
-	s.mu.Lock()
-	d := now.Unix() / 86400
-	if d != s.day {
-		s.day = d
-		_, _ = rand.Read(s.salt[:])
-	}
-	m := hmac.New(sha256.New, s.salt[:])
-	s.mu.Unlock()
-	b, _ := p.MarshalBinary()
-	m.Write(b)
-	return string(m.Sum(nil)[:16])
-}
-
 // Registration limits (spec/protocol.md, "Limits").
 type RegistrationLimits struct {
 	PerNarrowDay int64 // per IPv4 address or IPv6 /64
@@ -145,11 +122,13 @@ type RegistrationLimits struct {
 // DefaultRegistrationLimits are the hosted-relay values.
 var DefaultRegistrationLimits = RegistrationLimits{PerNarrowDay: 3, PerWideDay: 10, GlobalHour: 30, GlobalDay: 200}
 
-// Registrations limits new instance registrations by source prefix and globally.
+// Registrations limits new instance registrations by source prefix and globally. The per-prefix counts are
+// keyed by a salted hash of the prefix; the salt is drawn again every day together with the counts, and is
+// only ever held in memory, so the keys cannot be reversed into addresses after the day ends.
 type Registrations struct {
 	mu        sync.Mutex
 	L         RegistrationLimits
-	salt      Salter
+	salt      [32]byte
 	day       int64
 	narrow    map[string]int64
 	wide      map[string]int64
@@ -178,9 +157,10 @@ func (r *Registrations) Allow(addr netip.Addr, now time.Time, recovery bool) boo
 	defer r.mu.Unlock()
 	if d := now.Unix() / 86400; d != r.day {
 		r.day, r.narrow, r.wide = d, map[string]int64{}, map[string]int64{}
+		_, _ = rand.Read(r.salt[:])
 	}
 	n, w := Prefixes(addr)
-	kn, kw := r.salt.Key(n, now), r.salt.Key(w, now)
+	kn, kw := r.key(n), r.key(w)
 	if r.narrow[kn] >= r.L.PerNarrowDay {
 		return false
 	}
@@ -204,6 +184,14 @@ func (r *Registrations) Allow(addr netip.Addr, now time.Time, recovery bool) boo
 	r.hour.Add(now, 1)
 	r.globalDay.Add(now, 1)
 	return true
+}
+
+// key is the salted hash of a prefix for the current day. Caller holds r.mu.
+func (r *Registrations) key(p netip.Prefix) string {
+	m := hmac.New(sha256.New, r.salt[:])
+	b, _ := p.MarshalBinary()
+	m.Write(b)
+	return string(m.Sum(nil)[:16])
 }
 
 // ConnLimiter wraps a listener and limits concurrent connections in total and per IPv4 address or IPv6 /64.
@@ -273,6 +261,3 @@ func (c *limitedConn) Close() error {
 	})
 	return c.Conn.Close()
 }
-
-// Open returns the number of open connections.
-func (c *ConnLimiter) Open() int { c.mu.Lock(); defer c.mu.Unlock(); return c.open }

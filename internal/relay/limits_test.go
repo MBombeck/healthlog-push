@@ -40,7 +40,7 @@ func TestAlertDayCapSurvivesRestart(t *testing.T) {
 	if res := i.push1(alertItem("a3", d)); res.Error != "device_quota" {
 		t.Fatalf("alert day cap: %+v", res)
 	}
-	// alerts_today is written to the binding, so a restart does not hand out fresh alerts (A4).
+	// alerts_today is written to the binding, so a restart does not hand out fresh alerts.
 	h.r.Tick()
 	b, _ := h.st.Bindings()
 	for _, bd := range b {
@@ -58,7 +58,7 @@ func TestLiveActivityEndsPerDay(t *testing.T) {
 	la := bytes.Repeat([]byte{0x2f}, 32)
 	n := 0
 	for ; n < 10; n++ {
-		if res := i.push1(activityItem("la"+strconv.Itoa(n), d, i.id, la, d.key, h.clk.Now().Unix())); res.Status == 429 {
+		if res := i.push1(d.activity("la"+strconv.Itoa(n), i.id, la, h.clk.Now().Unix())); res.Status == 429 {
 			break
 		}
 	}
@@ -181,7 +181,7 @@ func TestRequestLevelRefusals(t *testing.T) {
 	_ = time.Second
 }
 
-// TestDeviceLimitRaisedAfterQuietMonth covers L4: 50 becomes 80 by itself after 30 quiet days above 80 %.
+// TestDeviceLimitRaisedAfterQuietMonth: 50 becomes 80 by itself after 30 quiet days above 80 %.
 func TestDeviceLimitRaisedAfterQuietMonth(t *testing.T) {
 	h := newHarness(t, func(c *Config) { c.Limits.Standard.Devices = 5; c.Limits.StandardDevicesUp = 8 })
 	_, _ = h.r.SetRecovery(99999, nil) // registrations start as standard

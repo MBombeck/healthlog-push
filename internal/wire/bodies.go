@@ -7,76 +7,8 @@ import (
 	"io"
 )
 
-// Class is a push class. The relay knows exactly three.
-type Class string
-
-// The push classes and their envelope class bytes (spec/envelope.md).
-const (
-	ClassAlert        Class = "alert"
-	ClassSilent       Class = "silent"
-	ClassLiveActivity Class = "liveactivity"
-)
-
-// Envelope frame constants (spec/envelope.md, section "Format").
-const (
-	EnvelopeVersion = 0x01
-	EnvelopeSuite   = 0x01
-	envHeader       = 3
-	envEnc          = 32
-	envTag          = 16
-)
-
-// ClassByte returns the envelope class byte of c.
-func (c Class) ClassByte() byte {
-	switch c {
-	case ClassAlert:
-		return 0x01
-	case ClassSilent:
-		return 0x02
-	case ClassLiveActivity:
-		return 0x03
-	}
-	return 0
-}
-
-// Valid reports whether c is one of the three classes.
-func (c Class) Valid() bool { return c.ClassByte() != 0 }
-
-// MaxTTL is the longest lifetime the relay accepts for a class, in seconds.
-func (c Class) MaxTTL() int64 {
-	switch c {
-	case ClassAlert:
-		return 6 * 3600
-	case ClassSilent:
-		return 3600
-	case ClassLiveActivity:
-		return 4 * 3600
-	}
-	return 0
-}
-
-// EnvelopeLength is the exact wire length of an envelope of class c, or 0 for a class that carries no
-// envelope. Version 1 seals alert and silent content only; the Live Activity class byte 0x03 is reserved and
-// a liveactivity item travels as a fixed template without an envelope.
-func (c Class) EnvelopeLength() int {
-	switch c {
-	case ClassAlert, ClassSilent:
-		return envHeader + envEnc + 1024 + envTag
-	}
-	return 0
-}
-
-// CheckEnvelopeFrame validates the outer frame of an envelope for the class the push item claims:
-// version, suite, class byte and exact length. The content stays opaque; the relay never decrypts.
-func CheckEnvelopeFrame(c Class, env []byte) error {
-	if !c.Valid() || c.EnvelopeLength() == 0 || len(env) != c.EnvelopeLength() {
-		return ErrInvalid
-	}
-	if env[0] != EnvelopeVersion || env[1] != EnvelopeSuite || env[2] != c.ClassByte() {
-		return ErrInvalid
-	}
-	return nil
-}
+// validEnv reports whether env names an APNs environment.
+func validEnv(env string) bool { return env == "production" || env == "sandbox" }
 
 // DecodeStrict decodes exactly one JSON value into v, refusing unknown fields and trailing data.
 func DecodeStrict(b []byte, v any) error {
@@ -108,7 +40,7 @@ type Registration struct {
 }
 
 // ParseRegistration parses and verifies a registration body against the relay host and clock.
-// It returns errStale for a valid body whose time is outside the skew.
+// It returns ErrStale for a valid body whose time is outside the skew.
 func ParseRegistration(b []byte, host string, now int64) (*Registration, error) {
 	var rb RegisterBody
 	if err := DecodeStrict(b, &rb); err != nil {
@@ -138,16 +70,6 @@ func ParseRegistration(b []byte, host string, now int64) (*Registration, error) 
 	}
 	return &Registration{PublicKey: pk, Client: rb.Client, Invite: rb.Invite}, nil
 }
-
-// ErrStale marks a well-formed statement whose time is outside the accepted window.
-var ErrStale = errorString("stale")
-
-// ErrSignature marks a well-formed statement whose signature does not verify.
-var ErrSignature = errorString("signature")
-
-type errorString string
-
-func (e errorString) Error() string { return string(e) }
 
 // Statement is the device binding statement as sent on the wire.
 type Statement struct {
@@ -195,7 +117,7 @@ func ParseBind(b []byte, host, instanceID string, now int64) (*Bind, error) {
 	if err != nil {
 		return nil, err
 	}
-	if bb.Env != "production" && bb.Env != "sandbox" {
+	if !validEnv(bb.Env) {
 		return nil, ErrInvalid
 	}
 	pk, err := ParsePublicKey(bb.BindingKey)
@@ -255,8 +177,8 @@ type UnbindBody struct {
 	Signature string `json:"signature"`
 }
 
-// Unbind is a parsed direct opt-out. The signature is checked by the caller against the stored key hash
-// first, then with VerifyUnbind.
+// Unbind is a parsed direct opt-out. The caller first compares the binding key with the stored key hash,
+// then checks the signature with Verify.
 type Unbind struct {
 	Token      []byte
 	BindingKey ed25519.PublicKey
@@ -375,166 +297,4 @@ func ParseSelfRead(token, key, iat, sig string, now int64) (*SelfRead, error) {
 // Verify checks the self-read signature.
 func (s *SelfRead) Verify(host string) bool {
 	return Verify(s.BindingKey, SelfReadText(host, TokenTag(s.Token), s.Iat), s.sig)
-}
-
-// Activity is the Live Activity part of a liveactivity push item.
-type Activity struct {
-	Token      string `json:"token"`
-	BindingKey string `json:"bindingKey"`
-	Statement  struct {
-		InstanceID string `json:"instanceId"`
-		TokenTag   string `json:"tokenTag"`
-		LATokenTag string `json:"laTokenTag"`
-		Iat        int64  `json:"iat"`
-	} `json:"statement"`
-	Signature string `json:"signature"`
-}
-
-// PushItem is one entry of POST /v1/push.
-type PushItem struct {
-	Ref        string    `json:"ref"`
-	Token      string    `json:"token"`
-	Env        string    `json:"env"`
-	Class      Class     `json:"class"`
-	TTLSeconds int64     `json:"ttlSeconds"`
-	Envelope   string    `json:"envelope,omitempty"`
-	Collapse   string    `json:"collapse,omitempty"`
-	Activity   *Activity `json:"activity,omitempty"`
-}
-
-// PushBody is the body of POST /v1/push.
-type PushBody struct {
-	Items []PushItem `json:"items"`
-}
-
-// MaxPushItems is the largest batch the relay accepts.
-const MaxPushItems = 50
-
-// ParsePushBody decodes the batch. Unknown fields anywhere make the whole request invalid; per-item
-// checks happen in ValidateItem.
-func ParsePushBody(b []byte) (*PushBody, error) {
-	var pb PushBody
-	if err := DecodeStrict(b, &pb); err != nil {
-		return nil, err
-	}
-	if len(pb.Items) == 0 {
-		return nil, ErrInvalid
-	}
-	return &pb, nil
-}
-
-// Item is a validated push item.
-type Item struct {
-	Ref        string
-	Token      []byte
-	Env        string
-	Class      Class
-	TTL        int64
-	Envelope   []byte
-	Collapse   string
-	LAToken    []byte
-	BindingKey ed25519.PublicKey
-	actIat     int64
-	actSig     []byte
-	actTag     []byte
-}
-
-// ValidateItem checks one push item without touching any state: formats, envelope frame, collapse rules,
-// and the shape of the activity statement. ttl above the class maximum is clamped.
-func ValidateItem(p *PushItem) (*Item, error) {
-	if !ValidRef(p.Ref) || !p.Class.Valid() {
-		return nil, ErrInvalid
-	}
-	tok, err := ParseToken(p.Token)
-	if err != nil {
-		return nil, err
-	}
-	if p.Env != "production" && p.Env != "sandbox" {
-		return nil, ErrInvalid
-	}
-	if p.TTLSeconds <= 0 {
-		return nil, ErrInvalid
-	}
-	it := &Item{Ref: p.Ref, Token: tok, Env: p.Env, Class: p.Class, TTL: min(p.TTLSeconds, p.Class.MaxTTL())}
-	switch p.Class {
-	case ClassAlert, ClassSilent:
-		if p.Activity != nil {
-			return nil, ErrInvalid
-		}
-		env, err := DecodeB64(p.Envelope, p.Class.EnvelopeLength())
-		if err != nil {
-			return nil, err
-		}
-		if err := CheckEnvelopeFrame(p.Class, env); err != nil {
-			return nil, err
-		}
-		it.Envelope = env
-		if p.Class == ClassAlert && !ValidCollapse(p.Collapse) {
-			return nil, ErrInvalid
-		}
-		if p.Class == ClassSilent && p.Collapse != "" && !ValidCollapse(p.Collapse) {
-			return nil, ErrInvalid
-		}
-		it.Collapse = p.Collapse
-	case ClassLiveActivity:
-		if p.Envelope != "" || p.Collapse != "" || p.Activity == nil {
-			return nil, ErrInvalid
-		}
-		a := p.Activity
-		la, err := ParseToken(a.Token)
-		if err != nil {
-			return nil, err
-		}
-		pk, err := ParsePublicKey(a.BindingKey)
-		if err != nil {
-			return nil, err
-		}
-		sig, err := ParseSignature(a.Signature)
-		if err != nil {
-			return nil, err
-		}
-		tag, err := ParseTokenTag(a.Statement.TokenTag)
-		if err != nil || !bytes.Equal(tag, TokenTag(tok)) {
-			return nil, ErrInvalid
-		}
-		laTag, err := ParseTokenTag(a.Statement.LATokenTag)
-		if err != nil || !bytes.Equal(laTag, TokenTag(la)) {
-			return nil, ErrInvalid
-		}
-		if !ValidInstanceID(a.Statement.InstanceID) {
-			return nil, ErrInvalid
-		}
-		it.LAToken, it.BindingKey, it.actIat, it.actSig, it.actTag = la, pk, a.Statement.Iat, sig, tag
-	}
-	return it, nil
-}
-
-// ActivityMaxAge bounds how old an activity statement may be when the end is sent: the activity lifetime
-// (8 h) plus the class deadline (4 h).
-const ActivityMaxAge = 12 * 3600
-
-// VerifyActivity checks the activity statement for instanceID: signature, age and not in the future.
-func (it *Item) VerifyActivity(host, instanceID string, now int64) bool {
-	if it.Class != ClassLiveActivity || it.actIat > now+ClockSkew || now-it.actIat > ActivityMaxAge {
-		return false
-	}
-	return Verify(it.BindingKey, ActivityText(host, instanceID, it.actTag, TokenTag(it.LAToken), it.actIat), it.actSig)
-}
-
-// ReceiptsBody is the body of POST /v1/receipts: counts only, no ids.
-type ReceiptsBody struct {
-	Accepted  int64 `json:"accepted"`
-	Confirmed int64 `json:"confirmed"`
-}
-
-// ParseReceipts parses POST /v1/receipts.
-func ParseReceipts(b []byte) (*ReceiptsBody, error) {
-	var rb ReceiptsBody
-	if err := DecodeStrict(b, &rb); err != nil {
-		return nil, err
-	}
-	if rb.Accepted < 0 || rb.Confirmed < 0 || rb.Confirmed > rb.Accepted || rb.Accepted > 100000 {
-		return nil, ErrInvalid
-	}
-	return &rb, nil
 }

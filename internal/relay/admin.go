@@ -56,63 +56,33 @@ func arg(a []string, i int) string {
 	return ""
 }
 
+// admin runs one operator command.
 func (r *Relay) admin(ar *AdminRequest) (any, error) {
-	p := ar.Params
-	dur := func(k string, def time.Duration) (time.Duration, error) {
-		if p[k] == "" {
-			return def, nil
-		}
-		return time.ParseDuration(p[k])
-	}
+	p, a := ar.Params, ar.Args
 	switch ar.Cmd {
 	case "stats":
 		return map[string]any{"service": r.Stats(), "usage": r.UsageReport(28)}, nil
 	case "instance":
-		return r.Instance(arg(ar.Args, 0))
+		return r.Instance(arg(a, 0))
 	case "suspects":
 		return r.Suspects(50), nil
 	case "pause":
-		d, err := dur("for", 30*time.Minute)
-		if err != nil {
-			return nil, err
-		}
-		cl, tier := p["class"], p["tier"]
-		if cl == "" {
-			cl = "all"
-		}
-		if tier == "" {
-			tier = "all"
-		}
-		return nil, r.SetPause(cl, tier, d)
+		return nil, r.adminPause(p)
 	case "resume":
 		return nil, r.Resume()
 	case "registration":
-		return nil, r.SetRegistration(arg(ar.Args, 0))
+		return nil, r.SetRegistration(arg(a, 0))
 	case "invite":
 		code, err := r.NewInvite()
 		return map[string]string{"invite": code, "validDays": "7"}, err
 	case "notice":
-		switch arg(ar.Args, 0) {
-		case "set":
-			d, err := dur("for", 0)
-			if err != nil {
-				return nil, err
-			}
-			lvl := p["level"]
-			if lvl == "" {
-				lvl = "info"
-			}
-			return nil, r.SetNotice(arg(ar.Args, 1), lvl, d)
-		case "clear":
-			return nil, r.SetNotice("", "", 0)
-		}
-		return nil, adminError("notice set <id> [--level L] [--for D] | notice clear")
+		return nil, r.adminNotice(a, p)
 	case "suspend":
-		return nil, r.Suspend(arg(ar.Args, 0), arg(ar.Args, 1))
+		return nil, r.Suspend(arg(a, 0), arg(a, 1))
 	case "unsuspend":
-		return nil, r.Unsuspend(arg(ar.Args, 0))
+		return nil, r.Unsuspend(arg(a, 0))
 	case "revoke":
-		return nil, r.Revoke(arg(ar.Args, 0), arg(ar.Args, 1))
+		return nil, r.Revoke(arg(a, 0), arg(a, 1))
 	case "block-token", "unblock-token":
 		return nil, r.BlockToken(p["token"], p["mac"], ar.Cmd == "unblock-token")
 	case "limits":
@@ -120,28 +90,70 @@ func (r *Relay) admin(ar *AdminRequest) (any, error) {
 		if err != nil {
 			return nil, adminError("limits <id> devices=<n>")
 		}
-		return nil, r.SetDeviceLimit(arg(ar.Args, 0), n)
+		return nil, r.SetDeviceLimit(arg(a, 0), n)
 	case "recovery":
-		until, err := store.ParseDayString(p["until"])
-		if err != nil {
-			return nil, adminError("recovery --until YYYY-MM-DD [--from file]")
-		}
-		var ex *store.Export
-		if p["from"] != "" {
-			if ex, err = store.ReadExport(p["from"]); err != nil {
-				return nil, err
-			}
-		}
-		n, err := r.SetRecovery(until, ex)
-		return map[string]int{"imported": n}, err
+		return r.adminRecovery(p)
 	case "export":
 		return nil, r.ExportNow()
 	case "breaker":
-		return nil, r.BreakerCommand(arg(ar.Args, 0))
+		return nil, r.BreakerCommand(arg(a, 0))
 	case "status-file":
 		return r.StatusFile(), nil
 	}
 	return nil, adminError("unknown command")
+}
+
+// paramDuration reads a duration parameter, def when it is absent.
+func paramDuration(p map[string]string, k string, def time.Duration) (time.Duration, error) {
+	if p[k] == "" {
+		return def, nil
+	}
+	return time.ParseDuration(p[k])
+}
+
+// paramOr reads a parameter, def when it is absent.
+func paramOr(p map[string]string, k, def string) string {
+	if v := p[k]; v != "" {
+		return v
+	}
+	return def
+}
+
+func (r *Relay) adminPause(p map[string]string) error {
+	d, err := paramDuration(p, "for", 30*time.Minute)
+	if err != nil {
+		return err
+	}
+	return r.SetPause(paramOr(p, "class", "all"), paramOr(p, "tier", "all"), d)
+}
+
+func (r *Relay) adminNotice(a []string, p map[string]string) error {
+	switch arg(a, 0) {
+	case "set":
+		d, err := paramDuration(p, "for", 0)
+		if err != nil {
+			return err
+		}
+		return r.SetNotice(arg(a, 1), paramOr(p, "level", "info"), d)
+	case "clear":
+		return r.SetNotice("", "", 0)
+	}
+	return adminError("notice set <id> [--level L] [--for D] | notice clear")
+}
+
+func (r *Relay) adminRecovery(p map[string]string) (any, error) {
+	until, err := store.ParseDayString(p["until"])
+	if err != nil {
+		return nil, adminError("recovery --until YYYY-MM-DD [--from file]")
+	}
+	var ex *store.Export
+	if p["from"] != "" {
+		if ex, err = store.ReadExport(p["from"]); err != nil {
+			return nil, err
+		}
+	}
+	n, err := r.SetRecovery(until, ex)
+	return map[string]int{"imported": n}, err
 }
 
 // StatusFile is the signed status document for an out-of-band location (spec/protocol.md, "Status file").

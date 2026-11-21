@@ -52,7 +52,7 @@ func TestBreakerThresholds(t *testing.T) {
 	}
 }
 
-// TestBreakerNeedsThreeInstances (K1): failures from one or two instances never open the breaker, however
+// TestBreakerNeedsThreeInstances: failures from one or two instances never open the breaker, however
 // many there are.
 func TestBreakerNeedsThreeInstances(t *testing.T) {
 	now := time.Date(2026, 12, 1, 0, 0, 0, 0, time.UTC)

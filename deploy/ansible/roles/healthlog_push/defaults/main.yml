@@ -33,7 +33,6 @@ healthlog_push_listen: ":8443"
 healthlog_push_tls_mode: acme
 healthlog_push_acme_directory: https://acme-v02.api.letsencrypt.org/directory
 healthlog_push_acme_email: ""
-healthlog_push_apns_url: https://api.push.apple.com
 healthlog_push_apns_topic: ""
 healthlog_push_apns_key_id: ""
 healthlog_push_apns_team_id: ""

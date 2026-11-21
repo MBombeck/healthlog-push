@@ -35,14 +35,14 @@ type DeviceLimits struct {
 
 // Limits is the full limit configuration.
 type Limits struct {
-	Probation         TierLimits   `json:"probation"`
-	Standard          TierLimits   `json:"standard"`
-	Device            DeviceLimits `json:"device"`
-	ProbationPoolMin  int64        `json:"probationPoolPerMinute"`
-	GlobalMin         int64        `json:"globalMinPerMinute"`
-	GlobalMax         int64        `json:"globalMaxPerMinute"`
-	StandardDevicesUp int          `json:"standardDevicesAuto"` // automatic raise after 30 quiet days
-	StandardDevicesMx int          `json:"standardDevicesMax"`  // highest value admin limits may set
+	Probation          TierLimits   `json:"probation"`
+	Standard           TierLimits   `json:"standard"`
+	Device             DeviceLimits `json:"device"`
+	ProbationPoolMin   int64        `json:"probationPoolPerMinute"`
+	GlobalMin          int64        `json:"globalMinPerMinute"`
+	GlobalMax          int64        `json:"globalMaxPerMinute"`
+	StandardDevicesUp  int          `json:"standardDevicesAuto"` // automatic raise after 30 quiet days
+	StandardDevicesMax int          `json:"standardDevicesMax"`  // highest value admin limits may set
 }
 
 // DefaultLimits are the values of the hosted relay.
@@ -52,7 +52,7 @@ var DefaultLimits = Limits{
 	Standard: TierLimits{Devices: 50, Provisional: 20, NewBindingsDay: 100, RequestsMinute: 60, PushesDay: 10000, PushesMinute: 120,
 		InvalidTokensDay: 100, ChallengesDay: 20, BadSignatureBurst: 60},
 	Device:           DeviceLimits{AllDay: 300, AlertBurst: 20, AlertPerHour: 6, AlertDay: 100, SilentHour: 6, LiveActivityDay: 12},
-	ProbationPoolMin: 600, GlobalMin: 600, GlobalMax: 6000, StandardDevicesUp: 80, StandardDevicesMx: 150,
+	ProbationPoolMin: 600, GlobalMin: 600, GlobalMax: 6000, StandardDevicesUp: 80, StandardDevicesMax: 150,
 }
 
 // Config configures a Relay.
@@ -61,14 +61,14 @@ type Config struct {
 	Identity     ed25519.PrivateKey // relay identity key, signs every /v1 response
 	MACKeys      [][]byte           // token MAC keys, current first, then previous
 	Environments map[string]bool    // APNs environments served, e.g. {"production": true}
-	Limits       Limits
-	Workers      int
-	ExportDir    string
-	MinClient    [3]int // minimum HealthLog server version, zero means none
-	Version      string
-	Commit       string
-	ImageDigest  string
-	Now          func() time.Time
+	Limits       Limits             // zero means DefaultLimits
+	Workers      int                // concurrent sends to Apple; zero means 256
+	ExportDir    string             // where the daily registry export goes; empty means no export
+	MinClient    [3]int             // minimum HealthLog server version, zero means none
+	Version      string             // build version, shown at /version
+	Commit       string             // source commit, shown at /version
+	ImageDigest  string             // container image digest, shown at /version
+	Now          func() time.Time   // the clock; nil means time.Now
 	// Registrations overrides the registration limits; zero means limits.DefaultRegistrationLimits.
 	Registrations limits.RegistrationLimits
 	// ProviderTokenOK reports whether the signer's JWT is available; nil means it is not checked.

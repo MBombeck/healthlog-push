@@ -4,9 +4,11 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
+	"math/big"
 	"os"
 	"path/filepath"
 	"strings"
@@ -58,13 +60,13 @@ func TestJWTShape(t *testing.T) {
 	if hm["alg"] != "ES256" || hm["kid"] != "ABC123DEFG" || cm["iss"] != "TEAM123456" || cm["iat"] != float64(now.Unix()) || len(cm) != 2 {
 		t.Fatalf("jwt: %v %v", hm, cm)
 	}
-	if !VerifyJWT(&k.PublicKey, j) || VerifyJWT(&testKey(t).PublicKey, j) {
+	if !verifyJWT(&k.PublicKey, j) || verifyJWT(&testKey(t).PublicKey, j) {
 		t.Fatal("verification")
 	}
 }
 
 // TestRenewalTiming: a token every 30 minutes, a refresh request honored only 20 minutes after the last
-// token (F7: one renewal, never a burst), and the marker counts only when touched after the last token.
+// token (one renewal, never a burst), and the marker counts only when touched after the last token.
 func TestRenewalTiming(t *testing.T) {
 	dir, rdir := t.TempDir(), t.TempDir()
 	now := time.Date(2026, 12, 1, 10, 0, 0, 0, time.UTC)
@@ -110,4 +112,18 @@ func TestRenewalTiming(t *testing.T) {
 	if fi.Mode().Perm() != 0o640 {
 		t.Fatalf("token mode %v", fi.Mode().Perm())
 	}
+}
+
+// verifyJWT checks an ES256 token against a public key.
+func verifyJWT(pub *ecdsa.PublicKey, jwt string) bool {
+	i := strings.LastIndexByte(jwt, '.')
+	if i < 0 {
+		return false
+	}
+	sig, err := wire.DecodeB64(jwt[i+1:], 64)
+	if err != nil {
+		return false
+	}
+	sum := sha256.Sum256([]byte(jwt[:i]))
+	return ecdsa.Verify(pub, sum[:], new(big.Int).SetBytes(sig[:32]), new(big.Int).SetBytes(sig[32:]))
 }

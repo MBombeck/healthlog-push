@@ -12,7 +12,7 @@ import (
 	"github.com/MBombeck/healthlog-push/internal/store"
 )
 
-// TestDamagedStoreRecovers covers F8: a damaged database is moved aside, the relay starts empty, imports the
+// TestDamagedStoreRecovers: a damaged database is moved aside, the relay starts empty, imports the
 // registry export and reports that the recovery window must open.
 func TestDamagedStoreRecovers(t *testing.T) {
 	data, export := t.TempDir(), t.TempDir()
@@ -37,7 +37,7 @@ func TestDamagedStoreRecovers(t *testing.T) {
 	}
 	defer func() { _ = got.Close() }()
 	ins, _ := got.Instances()
-	if !got.PairBlocked([]byte("token-mac"), "6f1c2a4e-1b9d-4c3e-8a7f-0d2b5e9c1a37") {
+	if _, blocked := got.GetPairBlock([]byte("token-mac"), "6f1c2a4e-1b9d-4c3e-8a7f-0d2b5e9c1a37"); !blocked {
 		t.Fatal("device opt-out lost when the damaged database was rebuilt from the export")
 	}
 	if !recovered || len(ins) != 1 {
@@ -86,7 +86,7 @@ func TestKeygenRoundTrip(t *testing.T) {
 	}
 }
 
-// TestStoreNotMovedWithoutProof (M2): an error that does not prove damage (here: no permission) stops the
+// TestStoreNotMovedWithoutProof: an error that does not prove damage (here: no permission) stops the
 // start and leaves the file where it is.
 func TestStoreNotMovedWithoutProof(t *testing.T) {
 	data := t.TempDir()
@@ -111,7 +111,7 @@ func TestStoreNotMovedWithoutProof(t *testing.T) {
 	}
 }
 
-// TestDamagedAsideNeverOverwritten (M2): two damaged starts keep two files aside.
+// TestDamagedAsideNeverOverwritten: two damaged starts keep two files aside.
 func TestDamagedAsideNeverOverwritten(t *testing.T) {
 	data := t.TempDir()
 	for range 2 {
@@ -129,7 +129,7 @@ func TestDamagedAsideNeverOverwritten(t *testing.T) {
 	}
 }
 
-// TestTLS12OnlyForPureACMEValidation (N8): a client that offers h2 next to acme-tls/1 gets the TLS 1.3
+// TestTLS12OnlyForPureACMEValidation: a client that offers h2 next to acme-tls/1 gets the TLS 1.3
 // configuration; only a handshake offering nothing but acme-tls/1 may use TLS 1.2.
 func TestTLS12OnlyForPureACMEValidation(t *testing.T) {
 	dir := t.TempDir()

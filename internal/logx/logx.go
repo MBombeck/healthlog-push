@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -75,16 +76,13 @@ func Event(action string, fields ...Field) {
 // CountingWriter is used as http.Server.ErrorLog: it counts and discards, because the standard library
 // writes client addresses into TLS handshake and protocol error messages.
 type CountingWriter struct {
-	mu sync.Mutex
-	n  int64
+	n atomic.Int64
 }
 
 func (c *CountingWriter) Write(p []byte) (int, error) {
-	c.mu.Lock()
-	c.n++
-	c.mu.Unlock()
+	c.n.Add(1)
 	return len(p), nil
 }
 
 // Count returns the number of discarded lines.
-func (c *CountingWriter) Count() int64 { c.mu.Lock(); defer c.mu.Unlock(); return c.n }
+func (c *CountingWriter) Count() int64 { return c.n.Load() }

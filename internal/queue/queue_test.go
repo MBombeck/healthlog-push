@@ -8,7 +8,7 @@ import (
 )
 
 // TestFairAndPrioritised: with one worker blocked, queued jobs run high priority first and round robin
-// across instances, so one busy instance cannot starve another (F3, L2).
+// across instances, so one busy instance cannot starve another.
 func TestFairAndPrioritised(t *testing.T) {
 	q := New(1, 100, 100, time.Hour)
 	defer q.Close(time.Second)

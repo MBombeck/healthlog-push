@@ -4,11 +4,10 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"strconv"
-
-	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 
 	bolt "go.etcd.io/bbolt"
 )
@@ -80,10 +79,10 @@ func (s *Store) BuildExport(today int) (*Export, error) {
 			ex.Denylist = append(ex.Denylist, ExportedDeny{InstanceID: d.InstanceID, Reason: d.Reason, ExpiresDay: DayString(d.Day + RetainBlocks)})
 		}
 	}
-	collect := func(bucket []byte, reason string, out *[]ExportedBlock) func(tx *bolt.Tx) error {
+	collect := func(bucket []byte, dayOf func(k, v []byte) int, reason string, out *[]ExportedBlock) func(tx *bolt.Tx) error {
 		return func(tx *bolt.Tx) error {
 			return tx.Bucket(bucket).ForEach(func(k, v []byte) error {
-				d := blockDay(v)
+				d := dayOf(k, v)
 				if today-d > RetainBlocks {
 					return nil
 				}
@@ -92,10 +91,10 @@ func (s *Store) BuildExport(today int) (*Export, error) {
 			})
 		}
 	}
-	if err := s.db.View(collect(bBlockedPairs, ReasonDeviceOptOut, &ex.BlockedPairs)); err != nil {
+	if err := s.db.View(collect(bBlockedPairs, pairBlockDay, ReasonDeviceOptOut, &ex.BlockedPairs)); err != nil {
 		return nil, err
 	}
-	if err := s.db.View(collect(bBlockedToken, ReasonOperatorBlock, &ex.BlockedTokens)); err != nil {
+	if err := s.db.View(collect(bBlockedTokens, tokenBlockDay, ReasonOperatorBlock, &ex.BlockedTokens)); err != nil {
 		return nil, err
 	}
 	for _, in := range ins {
@@ -148,7 +147,7 @@ func ReadExport(path string) (*Export, error) {
 		return nil, err
 	}
 	if ex.Format != ExportFormat {
-		return nil, errors.New("unknown export format")
+		return nil, fmt.Errorf("unknown export format %q, expected %q", ex.Format, ExportFormat)
 	}
 	return &ex, nil
 }
@@ -191,18 +190,21 @@ func (s *Store) Import(ex *Export, today int) (int, error) {
 	for _, set := range []struct {
 		blocks []ExportedBlock
 		reason string
-		bucket []byte
-	}{{ex.BlockedPairs, ReasonDeviceOptOut, bBlockedPairs}, {ex.BlockedTokens, ReasonOperatorBlock, bBlockedToken}} {
+		write  func(tx *bolt.Tx, k []byte, day int) error
+	}{
+		{ex.BlockedPairs, ReasonDeviceOptOut, func(tx *bolt.Tx, k []byte, day int) error { return put(tx, bBlockedPairs, k, PairBlock{Day: day}) }},
+		{ex.BlockedTokens, ReasonOperatorBlock, func(tx *bolt.Tx, k []byte, day int) error {
+			return tx.Bucket(bBlockedTokens).Put(k, []byte(strconv.Itoa(day)))
+		}},
+	} {
 		for _, b := range set.blocks {
 			k, err := hex.DecodeString(b.Pair)
 			exp, derr := ParseDayString(b.ExpiresDay)
 			if err != nil || len(k) != sha256.Size || derr != nil || b.Reason != set.reason || exp < today {
 				continue
 			}
-			bucket := set.bucket
-			if err := s.update(func(tx *bolt.Tx) error {
-				return tx.Bucket(bucket).Put(k, []byte(strconv.Itoa(exp-RetainBlocks)))
-			}); err != nil {
+			write := set.write
+			if err := s.update(func(tx *bolt.Tx) error { return write(tx, k, exp-RetainBlocks) }); err != nil {
 				return n, err
 			}
 		}

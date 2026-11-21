@@ -6,7 +6,8 @@ package metrics
 import (
 	"fmt"
 	"io"
-	"sort"
+	"maps"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -35,7 +36,7 @@ func key(name string, labels ...string) string {
 	for i := 0; i+1 < len(labels); i += 2 {
 		parts = append(parts, fmt.Sprintf("%s=%q", labels[i], labels[i+1]))
 	}
-	sort.Strings(parts)
+	slices.Sort(parts)
 	return name + "{" + strings.Join(parts, ",") + "}"
 }
 
@@ -59,23 +60,11 @@ func (r *Registry) Set(name string, v float64, labels ...string) {
 	r.mu.Unlock()
 }
 
-// Counter returns the live value of a counter, for tests and health decisions.
-func (r *Registry) Counter(name string, labels ...string) float64 {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.counters[key(name, labels...)]
-}
-
 func (r *Registry) render() string {
 	var b strings.Builder
 	emit := func(m map[string]float64, typ string) {
-		keys := make([]string, 0, len(m))
-		for k := range m {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
 		seen := map[string]bool{}
-		for _, k := range keys {
+		for _, k := range slices.Sorted(maps.Keys(m)) {
 			name, _, _ := strings.Cut(k, "{")
 			if !seen[name] {
 				seen[name] = true

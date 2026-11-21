@@ -11,7 +11,6 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"errors"
-	"math/big"
 	"os"
 	"path/filepath"
 	"time"
@@ -70,29 +69,6 @@ func MakeJWT(key *ecdsa.PrivateKey, keyID, teamID string, iat time.Time) (string
 	return in + "." + wire.EncodeB64(sig), nil
 }
 
-// VerifyJWT checks an ES256 token against a public key; used by tests and the fake APNs server.
-func VerifyJWT(pub *ecdsa.PublicKey, jwt string) bool {
-	dot1, dot2 := -1, -1
-	for i := range len(jwt) {
-		if jwt[i] == '.' {
-			if dot1 < 0 {
-				dot1 = i
-			} else {
-				dot2 = i
-			}
-		}
-	}
-	if dot1 < 0 || dot2 < 0 {
-		return false
-	}
-	sig, err := wire.DecodeB64(jwt[dot2+1:], 64)
-	if err != nil {
-		return false
-	}
-	sum := sha256.Sum256([]byte(jwt[:dot2]))
-	return ecdsa.Verify(pub, sum[:], new(big.Int).SetBytes(sig[:32]), new(big.Int).SetBytes(sig[32:]))
-}
-
 // Signer writes JWTs.
 type Signer struct {
 	Key        *ecdsa.PrivateKey
@@ -110,7 +86,7 @@ func (s *Signer) Step() (bool, error) {
 	now := s.Now()
 	if s.last.IsZero() {
 		if b, err := os.ReadFile(filepath.Join(s.Dir, TokenFile)); err == nil {
-			if iat, err := issuedAt(string(b)); err == nil {
+			if iat, err := wire.JWTIssuedAt(string(b)); err == nil {
 				s.last = time.Unix(iat, 0)
 			}
 		}
@@ -137,35 +113,6 @@ func (s *Signer) Step() (bool, error) {
 	}
 	s.last = now
 	return true, nil
-}
-
-func issuedAt(jwt string) (int64, error) {
-	var claims struct {
-		Iat int64 `json:"iat"`
-	}
-	parts := []byte(jwt)
-	start, end := -1, -1
-	for i, c := range parts {
-		if c == '.' {
-			if start < 0 {
-				start = i + 1
-			} else {
-				end = i
-				break
-			}
-		}
-	}
-	if start < 0 || end < 0 {
-		return 0, errors.New("not a jwt")
-	}
-	b, err := wire.DecodeB64(string(parts[start:end]), 0)
-	if err != nil {
-		return 0, err
-	}
-	if err := json.Unmarshal(b, &claims); err != nil {
-		return 0, err
-	}
-	return claims.Iat, nil
 }
 
 func writeAtomic(dir, name string, b []byte) error {
@@ -195,6 +142,6 @@ func Fresh(dir string, maxAge time.Duration, now time.Time) bool {
 	if err != nil {
 		return false
 	}
-	iat, err := issuedAt(string(b))
+	iat, err := wire.JWTIssuedAt(string(b))
 	return err == nil && now.Sub(time.Unix(iat, 0)) < maxAge
 }

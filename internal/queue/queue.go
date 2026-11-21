@@ -110,13 +110,7 @@ func New(workers, capacity, perInstance int, maxWait time.Duration) *Queue {
 	return q
 }
 
-// EstimatedWait is the expected wait for a new job of the given priority.
-func (q *Queue) EstimatedWait(high bool) time.Duration {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	return q.estimate(high)
-}
-
+// estimate is the expected wait for a new job of the given priority. Caller holds q.mu.
 func (q *Queue) estimate(high bool) time.Duration {
 	ahead := q.total
 	if high {

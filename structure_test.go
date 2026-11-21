@@ -64,7 +64,7 @@ func imports(f goFile) []string {
 	return out
 }
 
-// TestRelayCannotOpenEnvelopes: no HPKE, X25519 or AEAD code in the service (9.4.5). The only cryptography
+// TestRelayCannotOpenEnvelopes: no HPKE, X25519 or AEAD code in the service. The only cryptography
 // is Ed25519, HMAC, SHA-256 and, in the signer, ES256.
 func TestRelayCannotOpenEnvelopes(t *testing.T) {
 	banned := []string{"crypto/hpke", "crypto/ecdh", "crypto/cipher", "crypto/aes", "golang.org/x/crypto/chacha20poly1305",
@@ -156,13 +156,18 @@ func TestLogFieldsAreClosed(t *testing.T) {
 	}
 }
 
-// TestServerErrorLogIsSet: the public server's ErrorLog points at the counting writer (F8).
+// TestServerErrorLogIsSet: every http.Server in the command has a silent ErrorLog, and the public one points
+// at the counting writer, because the standard library writes client addresses into its error lines.
 func TestServerErrorLogIsSet(t *testing.T) {
-	b, err := os.ReadFile("cmd/healthlog-push/main.go")
-	if err != nil {
-		t.Fatal(err)
+	var s string
+	for _, f := range goFiles(t) {
+		if strings.HasPrefix(f.path, "cmd/healthlog-push/") {
+			s += f.src
+		}
 	}
-	s := string(b)
+	if !strings.Contains(s, "&http.Server{") {
+		t.Fatal("no http.Server found in cmd/healthlog-push; matcher broken")
+	}
 	if strings.Count(s, "&http.Server{") != strings.Count(s, "ErrorLog:") || !strings.Contains(s, "ErrorLog:          log.New(r.ErrLog") {
 		t.Fatal("an http.Server without a silent ErrorLog")
 	}
@@ -197,7 +202,7 @@ func TestDeletionOnlyThroughKnownPaths(t *testing.T) {
 			got[f.path] = c
 		}
 	}
-	want := map[string]int{"internal/relay/push.go": 1, "internal/relay/bindings.go": 2, "internal/relay/maintenance.go": 1}
+	want := map[string]int{"internal/relay/push_result.go": 1, "internal/relay/bindings.go": 2, "internal/relay/maintenance.go": 1}
 	for p, c := range want {
 		if got[p] != c {
 			t.Errorf("%s: %d DeleteBinding calls, want %d", p, got[p], c)
@@ -233,5 +238,40 @@ func TestTextRules(t *testing.T) {
 				t.Errorf("%s contains %q", p, r)
 			}
 		}
+	}
+}
+
+// Size limits for the code an auditor reads: no non-test file over maxFileLines lines, no function over
+// maxFuncLines lines, counted from the func keyword to the closing brace.
+const (
+	maxFileLines = 350
+	maxFuncLines = 60
+)
+
+// TestFileAndFunctionSize keeps every non-test file and function small enough to read in one sitting.
+func TestFileAndFunctionSize(t *testing.T) {
+	fs := token.NewFileSet()
+	funcs := 0
+	for _, f := range goFiles(t) {
+		if n := strings.Count(f.src, "\n"); n > maxFileLines {
+			t.Errorf("%s has %d lines, more than %d", f.path, n, maxFileLines)
+		}
+		file, err := parser.ParseFile(fs, f.path, f.src, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, d := range file.Decls {
+			fn, ok := d.(*ast.FuncDecl)
+			if !ok || fn.Body == nil {
+				continue
+			}
+			funcs++
+			if n := fs.Position(fn.End()).Line - fs.Position(fn.Type.Func).Line + 1; n > maxFuncLines {
+				t.Errorf("%s: %s has %d lines, more than %d", f.path, fn.Name.Name, n, maxFuncLines)
+			}
+		}
+	}
+	if funcs < 100 {
+		t.Fatalf("only %d functions seen; the walk is broken", funcs)
 	}
 }

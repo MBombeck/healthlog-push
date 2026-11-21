@@ -6,11 +6,13 @@ import (
 	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/hex"
 	"encoding/json"
 	"io"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -39,6 +41,20 @@ type clock struct {
 func (c *clock) Now() time.Time      { c.mu.Lock(); defer c.mu.Unlock(); return c.t }
 func (c *clock) Add(d time.Duration) { c.mu.Lock(); c.t = c.t.Add(d); c.mu.Unlock() }
 
+// verifyJWT checks an ES256 token against a public key.
+func verifyJWT(pub *ecdsa.PublicKey, jwt string) bool {
+	i := strings.LastIndexByte(jwt, '.')
+	if i < 0 {
+		return false
+	}
+	sig, err := wire.DecodeB64(jwt[i+1:], 64)
+	if err != nil {
+		return false
+	}
+	sum := sha256.Sum256([]byte(jwt[:i]))
+	return ecdsa.Verify(pub, sum[:], new(big.Int).SetBytes(sig[:32]), new(big.Int).SetBytes(sig[32:]))
+}
+
 // fakeAPNs is an HTTP/2 TLS server that checks the provider JWT and answers per token.
 type fakeAPNs struct {
 	srv    *httptest.Server
@@ -61,7 +77,7 @@ func newFakeAPNs(t *testing.T, pub *ecdsa.PublicKey) *fakeAPNs {
 		b, _ := io.ReadAll(r.Body)
 		tok := strings.TrimPrefix(r.URL.Path, "/3/device/")
 		ar := apnsReq{Token: tok, Header: r.Header.Clone(), Body: string(b), Proto: r.Proto}
-		if !signer.VerifyJWT(f.pub, strings.TrimPrefix(r.Header.Get("authorization"), "bearer ")) {
+		if !verifyJWT(f.pub, strings.TrimPrefix(r.Header.Get("authorization"), "bearer ")) {
 			w.WriteHeader(http.StatusForbidden)
 			_, _ = io.WriteString(w, `{"reason":"InvalidProviderToken"}`)
 			return
@@ -221,6 +237,12 @@ func (h *harness) send(req *http.Request, nonce string) response {
 	return out
 }
 
+// hexSHA256 is the lowercase hex SHA-256 of b, the body hash in a signed request text.
+func hexSHA256(b []byte) string {
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
+}
+
 func randNonce() string {
 	b := make([]byte, 16)
 	_, _ = rand.Read(b)
@@ -308,6 +330,13 @@ func (d *device) bindBody(instID string, iat int64) wire.BindBody {
 	}
 }
 
+// heldBody signs the statement of the device's current seq again: what an instance the device left still
+// holds and can replay.
+func (d *device) heldBody(instID string, iat int64) wire.BindBody {
+	d.seq--
+	return d.bindBody(instID, iat)
+}
+
 func (i *instance) bind(d *device) response {
 	return i.do(http.MethodPost, "/v1/bindings", d.bindBody(i.id, i.h.clk.Now().Unix()))
 }
@@ -345,6 +374,33 @@ func (i *instance) push1(it wire.PushItem) ItemResult {
 		i.h.t.Fatalf("push: %d %s", rp.Status, rp.Raw)
 	}
 	return res[0]
+}
+
+// answer answers a conflict challenge for the device's token, signed with its binding key.
+func (d *device) answer(h *harness, challenge string) response {
+	tag := wire.TokenTag(d.token)
+	b, _ := json.Marshal(wire.ChallengeBody{BindingKey: wire.EncodeB64(ed25519.PublicKey(d.key[32:])), Challenge: challenge,
+		TokenTag: hex.EncodeToString(tag), Signature: wire.EncodeB64(ed25519.Sign(d.key, []byte(wire.ChallengeText(host, challenge, tag))))})
+	req, _ := http.NewRequest(http.MethodPost, h.srv.URL+"/v1/bindings/challenge", bytes.NewReader(b))
+	return h.send(req, "")
+}
+
+// activity is a Live Activity end for the activity token la, with an activity statement signed by the
+// device's binding key at iat.
+func (d *device) activity(ref, instID string, la []byte, iat int64) wire.PushItem {
+	tag, laTag := wire.TokenTag(d.token), wire.TokenTag(la)
+	a := &wire.Activity{Token: hex.EncodeToString(la), BindingKey: wire.EncodeB64(ed25519.PublicKey(d.key[32:])),
+		Signature: wire.EncodeB64(ed25519.Sign(d.key, []byte(wire.ActivityText(host, instID, tag, laTag, iat))))}
+	a.Statement.InstanceID, a.Statement.TokenTag, a.Statement.LATokenTag, a.Statement.Iat = instID, hex.EncodeToString(tag), hex.EncodeToString(laTag), iat
+	return wire.PushItem{Ref: ref, Token: d.hex(), Env: "production", Class: wire.ClassLiveActivity, TTLSeconds: 3600, Activity: a}
+}
+
+// rotate asks the relay to replace the instance key with key, with a proof of possession of the new key.
+func (i *instance) rotate(key ed25519.PrivateKey) response {
+	pub := ed25519.PublicKey(key[32:])
+	ts := i.h.clk.Now().Unix()
+	return i.do(http.MethodPost, "/v1/instances/self/rotate", wire.RegisterBody{PublicKey: wire.EncodeB64(pub), Time: ts,
+		Proof: wire.EncodeB64(ed25519.Sign(key, []byte(wire.RegisterText(host, pub, ts))))})
 }
 
 // selfRead calls GET /v1/bindings/self as the app.
@@ -401,7 +457,5 @@ func (i *instance) activate(d *device) {
 		i.h.t.Fatalf("activate: %+v", res)
 	}
 }
-
-type regLimits = limits.RegistrationLimits
 
 func withDefaultLimits(c *Config) { c.Limits = DefaultLimits }

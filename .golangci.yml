@@ -49,7 +49,7 @@ linters:
         - pattern: ^fmt\.Print.*$
           msg: "use the structured logger; printing is only allowed in cmd/ and tests"
         - pattern: ^log\.Print.*$
-          msg: "use the structured logger (log/slog)"
+          msg: "use the structured logger (internal/logx)"
 
     gocritic:
       enabled-tags:

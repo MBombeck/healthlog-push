@@ -57,12 +57,3 @@ func TestTemplates(t *testing.T) {
 		t.Fatalf("live activity end: %+v", la)
 	}
 }
-
-func TestJWTIssuedAt(t *testing.T) {
-	if _, err := JWTIssuedAt("a.b"); err == nil {
-		t.Fatal("two parts accepted")
-	}
-	if n, err := JWTIssuedAt("e30.eyJpYXQiOjEyM30.x"); err != nil || n != 123 {
-		t.Fatal(n, err)
-	}
-}

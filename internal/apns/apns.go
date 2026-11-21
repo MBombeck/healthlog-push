@@ -9,7 +9,6 @@ import (
 	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -18,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/MBombeck/healthlog-push/internal/wire"
@@ -25,6 +25,13 @@ import (
 
 // RequestTimeout bounds a single request to Apple.
 const RequestTimeout = 3 * time.Second
+
+// Apple's endpoints. They are constants on purpose: no configuration can send the provider token and the
+// device tokens to another host.
+const (
+	ProductionURL = "https://api.push.apple.com"
+	SandboxURL    = "https://api.sandbox.push.apple.com"
+)
 
 // Outcome is the classified result of one send.
 type Outcome string
@@ -153,38 +160,40 @@ type TokenSource interface {
 
 // Client sends to APNs.
 type Client struct {
-	HTTP       *http.Client
-	BaseURL    string // production endpoint, e.g. https://api.push.apple.com
+	HTTP *http.Client
+	// BaseURL and SandboxURL are the production and sandbox endpoints: ProductionURL and SandboxURL in the
+	// service, a fake server in tests.
+	BaseURL    string
 	SandboxURL string
-	Topic      string
+	Topic      string // the app's bundle id
 	Tokens     TokenSource
 
-	warm     sync.Mutex // until the first response, only one request is in flight
-	warmDone bool
-	warmMu   sync.Mutex
+	// Until Apple has answered once, requests go out one at a time (warmMu), so the first connection is
+	// set up once instead of by every concurrent sender. warm is set by the first response.
+	warmMu sync.Mutex
+	warm   atomic.Bool
 }
 
 // NewHTTPClient returns the shared HTTP/2 client: TLS 1.2+ (Apple's minimum), at most four connections,
 // a new connection when the server's stream limit is reached, and a PING after an hour without traffic.
-func NewHTTPClient(roots *tls.Config) *http.Client {
+// No proxy is taken from the environment and idle connections are kept open. tlsCfg replaces the default
+// TLS configuration when not nil (tests pass their own roots).
+func NewHTTPClient(tlsCfg *tls.Config) *http.Client {
 	tr := &http.Transport{
-		Proxy:               nil,
 		ForceAttemptHTTP2:   true,
 		MaxConnsPerHost:     4,
 		MaxIdleConnsPerHost: 4,
-		IdleConnTimeout:     0,
 		TLSHandshakeTimeout: 5 * time.Second,
 		DialContext:         (&net.Dialer{Timeout: 3 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
 		TLSClientConfig:     &tls.Config{MinVersion: tls.VersionTLS12},
 		HTTP2: &http.HTTP2Config{
-			StrictMaxConcurrentRequests: false,
-			SendPingTimeout:             time.Hour,
-			PingTimeout:                 15 * time.Second,
+			SendPingTimeout: time.Hour,
+			PingTimeout:     15 * time.Second,
 		},
 		Protocols: protocolsHTTP2(),
 	}
-	if roots != nil {
-		tr.TLSClientConfig = roots
+	if tlsCfg != nil {
+		tr.TLSClientConfig = tlsCfg
 	}
 	return &http.Client{Transport: tr, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 }
@@ -201,12 +210,9 @@ func (c *Client) Send(ctx context.Context, p *Push) Result {
 	if !ok {
 		return Result{Outcome: NoProviderToken}
 	}
-	c.warmMu.Lock()
-	warm := c.warmDone
-	c.warmMu.Unlock()
-	if !warm {
-		c.warm.Lock()
-		defer c.warm.Unlock()
+	if !c.warm.Load() {
+		c.warmMu.Lock()
+		defer c.warmMu.Unlock()
 	}
 	base := c.BaseURL
 	if p.Sandbox {
@@ -218,7 +224,34 @@ func (c *Client) Send(ctx context.Context, p *Push) Result {
 	if err != nil {
 		return Result{Outcome: Rejected, Reason: "other"}
 	}
-	h := req.Header
+	c.setHeaders(req.Header, p, jwt)
+	start := time.Now()
+	resp, err := c.HTTP.Do(req)
+	lat := time.Since(start)
+	if err != nil {
+		return Result{Outcome: Unavailable, Reason: "transport", Latency: lat, TokenIat: iat}
+	}
+	defer func() { _ = resp.Body.Close() }()
+	c.warm.Store(true)
+	var body struct {
+		Reason string `json:"reason"`
+	}
+	b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	_ = json.Unmarshal(b, &body)
+	reason := body.Reason
+	if reason != "" && !knownReasons[reason] {
+		reason = "other"
+	}
+	out := Classify(resp.StatusCode, reason)
+	if out == ProviderExpired {
+		c.Tokens.RequestRefresh()
+	}
+	return Result{Outcome: out, Reason: reason, Latency: lat, TokenIat: iat}
+}
+
+// setHeaders sets the APNs request headers of p: provider token, expiration, push type, priority, topic
+// and collapse id.
+func (c *Client) setHeaders(h http.Header, p *Push, jwt string) {
 	h.Set("authorization", "bearer "+jwt)
 	h.Set("content-type", "application/json")
 	h.Set("apns-expiration", strconv.FormatInt(p.Expiration.Unix(), 10))
@@ -239,30 +272,6 @@ func (c *Client) Send(ctx context.Context, p *Push) Result {
 	if p.Collapse != "" {
 		h.Set("apns-collapse-id", p.Collapse)
 	}
-	start := time.Now()
-	resp, err := c.HTTP.Do(req)
-	lat := time.Since(start)
-	if err != nil {
-		return Result{Outcome: Unavailable, Reason: "transport", Latency: lat, TokenIat: iat}
-	}
-	defer func() { _ = resp.Body.Close() }()
-	c.warmMu.Lock()
-	c.warmDone = true
-	c.warmMu.Unlock()
-	var body struct {
-		Reason string `json:"reason"`
-	}
-	b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-	_ = json.Unmarshal(b, &body)
-	reason := body.Reason
-	if reason != "" && !knownReasons[reason] {
-		reason = "other"
-	}
-	out := Classify(resp.StatusCode, reason)
-	if out == ProviderExpired {
-		c.Tokens.RequestRefresh()
-	}
-	return Result{Outcome: out, Reason: reason, Latency: lat, TokenIat: iat}
 }
 
 // FileTokens reads the JWT the signer writes to a shared tmpfs and asks for a refresh by creating an empty
@@ -283,7 +292,7 @@ func (f *FileTokens) Token() (string, int64, bool) {
 	if time.Since(f.readAt) > 10*time.Second || f.cached == "" {
 		if b, err := os.ReadFile(filepath.Join(f.Dir, "token")); err == nil {
 			s := strings.TrimSpace(string(b))
-			if iat, err := JWTIssuedAt(s); err == nil {
+			if iat, err := wire.JWTIssuedAt(s); err == nil {
 				f.cached, f.iat = s, iat
 			}
 		}
@@ -310,23 +319,4 @@ func (f *FileTokens) RequestRefresh() {
 	f.mu.Lock()
 	f.readAt = time.Time{}
 	f.mu.Unlock()
-}
-
-// JWTIssuedAt extracts the iat claim of a provider JWT without verifying it.
-func JWTIssuedAt(jwt string) (int64, error) {
-	parts := strings.Split(jwt, ".")
-	if len(parts) != 3 {
-		return 0, errors.New("not a jwt")
-	}
-	b, err := wire.DecodeB64(parts[1], 0)
-	if err != nil {
-		return 0, err
-	}
-	var c struct {
-		Iat int64 `json:"iat"`
-	}
-	if err := json.Unmarshal(b, &c); err != nil || c.Iat == 0 {
-		return 0, errors.New("no iat")
-	}
-	return c.Iat, nil
 }
