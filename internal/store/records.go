@@ -144,3 +144,13 @@ func (s *Store) Bindings() (map[string]*Binding, error) {
 	})
 	return out, err
 }
+
+// RevokeInstance writes a revoked instance record and deletes all its bindings in one transaction.
+func (s *Store) RevokeInstance(in *Instance) error {
+	return s.update(func(tx *bolt.Tx) error {
+		if err := put(tx, bInstances, []byte(in.ID), in); err != nil {
+			return err
+		}
+		return deleteBindingsOf(tx, in.ID)
+	})
+}

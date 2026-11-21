@@ -174,7 +174,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 	pool.AddCert(f.srv.Certificate())
 	client := &apns.Client{HTTP: apns.NewHTTPClient(&tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}), BaseURL: f.srv.URL, SandboxURL: f.srv.URL,
 		Topic: "dev.example.app", Tokens: tokens}
-	idPub, idKey, _ := ed25519.GenerateKey(rand.Reader)
+	_, idKey, _ := ed25519.GenerateKey(rand.Reader)
 	cfg := Config{Host: host, Identity: idKey, MACKeys: [][]byte{bytes.Repeat([]byte{7}, 32)}, Workers: 8, Now: clk.Now,
 		ExportDir: dir, Registrations: limits.RegistrationLimits{PerNarrowDay: 1000, PerWideDay: 1000, GlobalHour: 1000, GlobalDay: 1000}}
 	// Request and push rates are raised so tests can issue many calls inside one fake minute; the tests of
@@ -194,7 +194,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 	srv := httptest.NewUnstartedServer(r.Handler())
 	srv.EnableHTTP2 = true
 	srv.StartTLS()
-	h := &harness{t: t, clk: clk, r: r, st: st, apns: f, tokens: tokens, srv: srv, client: srv.Client(), relayP: idPub, logs: logs, dir: dir}
+	h := &harness{t: t, clk: clk, r: r, st: st, apns: f, tokens: tokens, srv: srv, client: srv.Client(), relayP: ed25519.PublicKey(cfg.Identity[32:]), logs: logs, dir: dir}
 	t.Cleanup(func() { srv.Close(); r.Close(); _ = st.Close() })
 	return h
 }

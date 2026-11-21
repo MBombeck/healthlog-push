@@ -1,6 +1,7 @@
 package relay
 
 import (
+	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -181,7 +182,10 @@ func (r *Relay) SetRecovery(untilDay int, ex *store.Export) (int, error) {
 	n := 0
 	if ex != nil {
 		var err error
-		n, err = r.st.Import(ex, store.Day(r.cfg.Now()))
+		if err := OpenExport(ed25519.PublicKey(r.cfg.Identity[32:]), r.cfg.Host, ex); err != nil {
+			return 0, err
+		}
+		n, err = r.st.Import(ex, store.Day(r.cfg.Now()), r.cfg.Limits.StandardDevicesMax)
 		if err != nil {
 			return n, err
 		}

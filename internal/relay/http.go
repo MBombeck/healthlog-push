@@ -8,10 +8,8 @@ import (
 	"math/rand/v2"
 	"net/http"
 	"net/netip"
-	"path"
 	"slices"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/MBombeck/healthlog-push/internal/notice"
@@ -50,52 +48,7 @@ func (r *Relay) Handler() http.Handler {
 	mux.HandleFunc("GET /privacy", textPage(notice.Privacy))
 	mux.HandleFunc("GET /terms", textPage(notice.Terms))
 	mux.HandleFunc("GET /{$}", textPage(notice.Index))
-	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		h := w.Header()
-		h.Set("Cache-Control", "no-store")
-		h.Set("X-Content-Type-Options", "nosniff")
-		h.Set("Strict-Transport-Security", "max-age=31536000")
-		h.Set("Content-Security-Policy", "default-src 'none'")
-		// Every /v1 request carries a nonce so that its signed response cannot be replayed onto another
-		// request (spec/statements.md, hl-relay-resp-v2). Only the public monitoring endpoints may omit it.
-		// Checked before routing, so even a 404 under /v1 is bound to a nonce.
-		p := req.URL.Path
-		if p == "/v1" || strings.HasPrefix(p, "/v1/") {
-			if _, err := wire.ParseNonce(req.Header.Get("HL-Nonce")); err != nil {
-				r.fail(w, req, http.StatusBadRequest, errBody{Error: "nonce_required"})
-				return
-			}
-		}
-		// Only canonical paths are routed. ServeMux would answer a path like /v1//push with an unsigned
-		// redirect; every answer here must be signed, so such paths are a plain signed 404.
-		if path.Clean(p) != p {
-			r.fail(w, req, http.StatusNotFound, errBody{Error: "not_found"})
-			return
-		}
-		if _, pattern := mux.Handler(req); pattern == "" {
-			r.fail(w, req, http.StatusNotFound, errBody{Error: "not_found"})
-			return
-		}
-		// Header checks before any body byte is read: the length must be declared and within the largest
-		// limit, and the bytes are reserved against a global budget for buffered bodies.
-		if req.Method == http.MethodPost || req.Method == http.MethodDelete {
-			switch {
-			case req.ContentLength < 0:
-				r.fail(w, req, http.StatusLengthRequired, errBody{Error: "length_required"})
-				return
-			case req.ContentLength > maxPushBody:
-				r.fail(w, req, http.StatusRequestEntityTooLarge, errBody{Error: "too_large"})
-				return
-			}
-			if !r.reserveBody(req.ContentLength) {
-				r.Metrics.Inc("hlp_body_budget_refused_total")
-				r.fail(w, req, http.StatusServiceUnavailable, errBody{Error: "overloaded", RetryAfter: jitter(2 * time.Second)})
-				return
-			}
-			defer r.releaseBody(req.ContentLength)
-		}
-		mux.ServeHTTP(w, req)
-	})
+	return r.edge(mux)
 }
 
 func textPage(s string) http.HandlerFunc {
@@ -321,33 +274,4 @@ func (r *Relay) rollInstanceDay(s *instState, now time.Time) {
 	if d := store.Day(now); d != s.day {
 		s.day, s.newBindings, s.invalid, s.challenges, s.flaggedToday = d, 0, 0, 0, false
 	}
-}
-
-// appFailLocked answers a failed app-direct request. Failures are charged to one global bucket; when it is
-// empty the answer becomes 429 global. A request that verifies is never charged here, so junk traffic cannot
-// block a device's opt-out, self-read or challenge answer. Caller holds r.mu.
-func (r *Relay) appFailLocked(w http.ResponseWriter, req *http.Request, status int, e errBody) {
-	if !r.appDirect.Allow(r.cfg.Now()) {
-		r.fail(w, req, http.StatusTooManyRequests, errBody{Error: "global", Scope: "global", RetryAfter: jitter(2 * time.Second)})
-		return
-	}
-	r.fail(w, req, status, e)
-}
-
-// appFail is appFailLocked for callers that do not hold r.mu.
-func (r *Relay) appFail(w http.ResponseWriter, req *http.Request, status int, e errBody) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.appFailLocked(w, req, status, e)
-}
-
-// appAllowedLocked applies the per-device bucket to a verified app-direct request. Caller holds r.mu.
-func (r *Relay) appAllowedLocked(w http.ResponseWriter, req *http.Request, m string) bool {
-	now := r.cfg.Now()
-	d := r.dev(m)
-	if !d.app.Allow(now) {
-		r.fail(w, req, http.StatusTooManyRequests, errBody{Error: "device_quota", Scope: "device", RetryAfter: jitter(d.app.RetryAfter(now))})
-		return false
-	}
-	return true
 }

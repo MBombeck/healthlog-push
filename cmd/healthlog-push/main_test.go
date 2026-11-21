@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"crypto/ed25519"
 	"crypto/tls"
 	"encoding/json"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/MBombeck/healthlog-push/internal/relay"
 	"github.com/MBombeck/healthlog-push/internal/store"
 )
 
@@ -20,18 +22,21 @@ func TestDamagedStoreRecovers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_ = st.PutInstance(&store.Instance{ID: "6f1c2a4e-1b9d-4c3e-8a7f-0d2b5e9c1a37", PublicKey: bytes.Repeat([]byte{1}, 32), Tier: store.TierStandard})
+	_ = st.PutInstance(&store.Instance{ID: "6f1c2a4e-1b9d-4c3e-8a7f-0d2b5e9c1a37", PublicKey: bytes.Repeat([]byte{1}, 32), Tier: store.TierStandard, DeviceLimit: 50})
 	today := store.Day(time.Now())
 	_ = st.BlockPair([]byte("token-mac"), "6f1c2a4e-1b9d-4c3e-8a7f-0d2b5e9c1a37", store.PairBlock{Day: today})
-	ex, _ := st.BuildExport(today)
+	ex, _ := st.BuildExport(testHost, today)
 	_ = st.Close()
+	if err := relay.SealExport(testID, ex); err != nil {
+		t.Fatal(err)
+	}
 	if err := store.WriteExport(export, ex); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(data, "relay.db"), bytes.Repeat([]byte("garbage!"), 1024), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	got, recovered, err := openStore(data, export)
+	got, recovered, err := openStore(data, export, testTrust)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,20 +56,31 @@ func TestDamagedStoreRecovers(t *testing.T) {
 
 func TestFreshStoreImportsExportOnce(t *testing.T) {
 	data, export := t.TempDir(), t.TempDir()
-	if err := store.WriteExport(export, &store.Export{Format: store.ExportFormat, Instances: []store.ExportedInst{{ID: "a", PublicKey: bytes.Repeat([]byte{2}, 32), Tier: "probation"}}}); err != nil {
+	ex := &store.Export{Format: store.ExportFormat, Host: testHost, Instances: []store.ExportedInst{{ID: "6f1c2a4e-1b9d-4c3e-8a7f-0d2b5e9c1a37",
+		PublicKey: bytes.Repeat([]byte{2}, 32), Tier: "probation", DeviceLimit: 20}}}
+	if err := relay.SealExport(testID, ex); err != nil {
 		t.Fatal(err)
 	}
-	st, recovered, err := openStore(data, export)
+	if err := store.WriteExport(export, ex); err != nil {
+		t.Fatal(err)
+	}
+	st, recovered, err := openStore(data, export, testTrust)
 	if err != nil || !recovered {
 		t.Fatal(err, recovered)
 	}
 	_ = st.Close()
-	st, recovered, err = openStore(data, export)
+	st, recovered, err = openStore(data, export, testTrust)
 	if err != nil || recovered {
 		t.Fatal("an existing database must not import again", err)
 	}
 	_ = st.Close()
 }
+
+var (
+	testID    = ed25519.NewKeyFromSeed(bytes.Repeat([]byte{0x31}, 32))
+	testHost  = "push.example.org"
+	testTrust = exportTrust{pub: ed25519.PublicKey(testID[32:]), host: testHost}
+)
 
 func TestKeygenRoundTrip(t *testing.T) {
 	var b bytes.Buffer
@@ -103,7 +119,7 @@ func TestStoreNotMovedWithoutProof(t *testing.T) {
 	if os.Getuid() == 0 {
 		t.Skip("root ignores file permissions")
 	}
-	if _, _, err := openStore(data, t.TempDir()); err == nil {
+	if _, _, err := openStore(data, t.TempDir(), testTrust); err == nil {
 		t.Fatal("started despite an unreadable database")
 	}
 	if m, _ := filepath.Glob(filepath.Join(data, "relay.db.damaged-*")); len(m) != 0 {
@@ -118,7 +134,7 @@ func TestDamagedAsideNeverOverwritten(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(data, "relay.db"), bytes.Repeat([]byte("damaged!"), 8192), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		st, _, err := openStore(data, t.TempDir())
+		st, _, err := openStore(data, t.TempDir(), testTrust)
 		if err != nil {
 			t.Fatal(err)
 		}

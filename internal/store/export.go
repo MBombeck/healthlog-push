@@ -4,53 +4,53 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 
 	bolt "go.etcd.io/bbolt"
 )
 
 // ExportFormat identifies the registry export file.
-const ExportFormat = "healthlog-push-registry-v1"
+const ExportFormat = "healthlog-push-registry-v2"
 
-// Export is the daily registry export: instances and the denylist, nothing else. No bindings, no counters,
-// no key material other than the instances' public keys.
+// Export is the daily registry export: instances and the blocks, nothing else. No bindings, no counters,
+// no key material other than the instances' public keys. It is the root of trust after a database loss,
+// so it is signed with the relay identity key and checked on import (see Seal and Open).
 type Export struct {
 	Format    string         `json:"format"`
+	Host      string         `json:"host"`
 	Day       string         `json:"day"`
 	Instances []ExportedInst `json:"instances"`
-	Denylist  []ExportedDeny `json:"denylist"`
-	// BlockedPairs are the device opt-outs ("stop pushes from this server"). They must survive a restore,
-	// so they travel in the export in their minimal form only.
-	BlockedPairs []ExportedBlock `json:"blockedPairs"`
-	// BlockedTokens are operator abuse blocks (admin block-token), in the same minimal form.
+	// BlockedPairs are the device opt-outs ("stop pushes from this server"), BlockedTokens the operator
+	// abuse blocks, OptOutPins the binding keys that opted out. All in their minimal keyed-hash form.
+	BlockedPairs  []ExportedBlock `json:"blockedPairs"`
 	BlockedTokens []ExportedBlock `json:"blockedTokens"`
+	OptOutPins    []ExportedBlock `json:"optOutPins"`
+	// Signature is the relay identity key's Ed25519 signature over hl-relay-export-v1 (spec/statements.md)
+	// of the export marshaled without this field.
+	Signature string `json:"signature,omitempty"`
 }
 
-// ReasonOperatorBlock is the reason code of a token blocked by the operator.
-const ReasonOperatorBlock = "operator_block"
+// Reason codes of exported blocks.
+const (
+	ReasonDeviceOptOut  = "device_opt_out"
+	ReasonOperatorBlock = "operator_block"
+	ReasonOptOutPin     = "device_opt_out_pin"
+)
 
-// ExportedDeny is a denylist entry: instance id (already part of the instance list), reason code from the
-// closed set and expiry day.
-type ExportedDeny struct {
-	InstanceID string `json:"instanceId"`
-	Reason     string `json:"reason"`
-	ExpiresDay string `json:"expiresDay"`
-}
-
-// ReasonDeviceOptOut is the reason code of a pair blocked by the device itself.
-const ReasonDeviceOptOut = "device_opt_out"
-
-// ExportedBlock is a blocked device-instance pair: the keyed pair hash, the reason code and the expiry day.
+// ExportedBlock is a block in minimal form: the keyed hash, the reason code and the expiry day.
 type ExportedBlock struct {
-	Pair       string `json:"pair"`       // hex of the stored keyed hash (pair or token)
-	Reason     string `json:"reason"`     // ReasonDeviceOptOut or ReasonOperatorBlock
+	Pair       string `json:"pair"`       // hex of the stored keyed hash
+	Reason     string `json:"reason"`     // one of the reason codes above
 	ExpiresDay string `json:"expiresDay"` // YYYY-MM-DD; the block is dropped after this day
 }
 
-// ExportedInst is the exported subset of an instance.
+// ExportedInst is the exported subset of an instance. A suspended or revoked instance travels with its
+// tier, reason and day, so the block survives a restore.
 type ExportedInst struct {
 	ID               string `json:"id"`
 	PublicKey        []byte `json:"publicKey"`
@@ -62,45 +62,44 @@ type ExportedInst struct {
 	ReasonDay        int    `json:"reasonDay,omitempty"`
 }
 
-// BuildExport assembles the export from the store.
-func (s *Store) BuildExport(today int) (*Export, error) {
+// BuildExport assembles the unsigned export from the store.
+func (s *Store) BuildExport(host string, today int) (*Export, error) {
 	ins, err := s.Instances()
 	if err != nil {
 		return nil, err
 	}
-	deny, err := s.Denylist()
+	ex := &Export{Format: ExportFormat, Host: host, Day: DayString(today), Instances: []ExportedInst{},
+		BlockedPairs: []ExportedBlock{}, BlockedTokens: []ExportedBlock{}, OptOutPins: []ExportedBlock{}}
+	sets := []struct {
+		bucket []byte
+		dayOf  func(k, v []byte) int
+		reason string
+		out    *[]ExportedBlock
+	}{
+		{bBlockedPairs, pairBlockDay, ReasonDeviceOptOut, &ex.BlockedPairs},
+		{bBlockedTokens, tokenBlockDay, ReasonOperatorBlock, &ex.BlockedTokens},
+		{bOptOutPins, pinDay, ReasonOptOutPin, &ex.OptOutPins},
+	}
+	err = s.db.View(func(tx *bolt.Tx) error {
+		for _, set := range sets {
+			err := tx.Bucket(set.bucket).ForEach(func(k, v []byte) error {
+				if d := set.dayOf(k, v); today-d <= RetainBlocks { // expired blocks never leave the database
+					*set.out = append(*set.out, ExportedBlock{Pair: hex.EncodeToString(k), Reason: set.reason, ExpiresDay: DayString(d + RetainBlocks)})
+				}
+				return nil
+			})
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	ex := &Export{Format: ExportFormat, Day: DayString(today), Instances: []ExportedInst{}, Denylist: []ExportedDeny{},
-		BlockedPairs: []ExportedBlock{}, BlockedTokens: []ExportedBlock{}}
-	for _, d := range deny {
-		if today-d.Day <= RetainBlocks { // expired entries never leave the database
-			ex.Denylist = append(ex.Denylist, ExportedDeny{InstanceID: d.InstanceID, Reason: d.Reason, ExpiresDay: DayString(d.Day + RetainBlocks)})
-		}
-	}
-	collect := func(bucket []byte, dayOf func(k, v []byte) int, reason string, out *[]ExportedBlock) func(tx *bolt.Tx) error {
-		return func(tx *bolt.Tx) error {
-			return tx.Bucket(bucket).ForEach(func(k, v []byte) error {
-				d := dayOf(k, v)
-				if today-d > RetainBlocks {
-					return nil
-				}
-				*out = append(*out, ExportedBlock{Pair: hex.EncodeToString(k), Reason: reason, ExpiresDay: DayString(d + RetainBlocks)})
-				return nil
-			})
-		}
-	}
-	if err := s.db.View(collect(bBlockedPairs, pairBlockDay, ReasonDeviceOptOut, &ex.BlockedPairs)); err != nil {
-		return nil, err
-	}
-	if err := s.db.View(collect(bBlockedTokens, tokenBlockDay, ReasonOperatorBlock, &ex.BlockedTokens)); err != nil {
-		return nil, err
-	}
 	for _, in := range ins {
-		// A suspended or revoked record expires with its denylist entry; it is not exported after that.
 		if (in.Tier == TierRevoked || in.Tier == TierSuspended) && today-in.ReasonDay > RetainBlocks {
-			continue
+			continue // a blocked record expires after the block retention
 		}
 		ex.Instances = append(ex.Instances, ExportedInst{
 			ID: in.ID, PublicKey: in.PublicKey, Tier: in.Tier, Reason: in.Reason, CreatedDay: in.CreatedDay,
@@ -110,8 +109,18 @@ func (s *Store) BuildExport(today int) (*Export, error) {
 	return ex, nil
 }
 
-// WriteExport writes the export atomically to dir/registry.json with mode 0600.
+// SignedBytes returns the bytes the export signature covers: the export marshaled without Signature.
+func (ex *Export) SignedBytes() ([]byte, error) {
+	c := *ex
+	c.Signature = ""
+	return json.Marshal(&c)
+}
+
+// WriteExport writes the signed export atomically to dir/registry.json with mode 0600.
 func WriteExport(dir string, ex *Export) error {
+	if ex.Signature == "" {
+		return errors.New("refusing to write an unsigned export")
+	}
 	b, err := json.MarshalIndent(ex, "", "  ")
 	if err != nil {
 		return err
@@ -136,7 +145,7 @@ func WriteExport(dir string, ex *Export) error {
 	return os.Rename(name, filepath.Join(dir, "registry.json"))
 }
 
-// ReadExport reads and validates an export file.
+// ReadExport reads an export file and checks its format. The caller verifies the signature.
 func ReadExport(path string) (*Export, error) {
 	b, err := os.ReadFile(path) //nolint:gosec // operator-provided path
 	if err != nil {
@@ -152,9 +161,35 @@ func ReadExport(path string) (*Export, error) {
 	return &ex, nil
 }
 
-// Import loads instances and denylist entries from an export, skipping ids or keys that already exist.
-// It returns the number of instances imported.
-func (s *Store) Import(ex *Export, today int) (int, error) {
+var uuidV4 = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
+
+var validTiers = map[string]bool{TierProbation: true, TierStandard: true, TierSuspended: true, TierRevoked: true}
+
+// checkInstance refuses an exported instance whose fields are outside the closed sets the relay writes.
+func checkInstance(e *ExportedInst, maxDevices int) error {
+	switch {
+	case !uuidV4.MatchString(e.ID):
+		return fmt.Errorf("instance id %q is not a UUIDv4", e.ID)
+	case len(e.PublicKey) != 32:
+		return errors.New("instance key is not 32 bytes")
+	case !validTiers[e.Tier]:
+		return fmt.Errorf("unknown tier %q", e.Tier)
+	case e.Reason != "" && !Reasons[e.Reason]:
+		return fmt.Errorf("unknown reason %q", e.Reason)
+	case e.DeviceLimit < 1 || e.DeviceLimit > maxDevices:
+		return fmt.Errorf("device limit %d outside 1 to %d", e.DeviceLimit, maxDevices)
+	}
+	return nil
+}
+
+// Import loads a verified export, skipping ids or keys that already exist. Any instance outside the closed
+// sets makes the whole import fail. It returns the number of instances imported.
+func (s *Store) Import(ex *Export, today, maxDevices int) (int, error) {
+	for i := range ex.Instances {
+		if err := checkInstance(&ex.Instances[i], maxDevices); err != nil {
+			return 0, err
+		}
+	}
 	existing, err := s.Instances()
 	if err != nil {
 		return 0, err
@@ -166,7 +201,7 @@ func (s *Store) Import(ex *Export, today int) (int, error) {
 	}
 	n := 0
 	for _, e := range ex.Instances {
-		if ids[e.ID] || keys[string(e.PublicKey)] || len(e.PublicKey) != 32 {
+		if ids[e.ID] || keys[string(e.PublicKey)] {
 			continue
 		}
 		in := &Instance{
@@ -178,16 +213,11 @@ func (s *Store) Import(ex *Export, today int) (int, error) {
 		}
 		n++
 	}
-	for _, d := range ex.Denylist {
-		exp, err := ParseDayString(d.ExpiresDay)
-		if err != nil || exp < today || !Reasons[d.Reason] {
-			continue
-		}
-		if err := s.PutDeny(&DenyEntry{InstanceID: d.InstanceID, Reason: d.Reason, Day: exp - RetainBlocks}); err != nil {
-			return n, err
-		}
-	}
-	for _, set := range []struct {
+	return n, s.importBlocks(ex, today)
+}
+
+func (s *Store) importBlocks(ex *Export, today int) error {
+	sets := []struct {
 		blocks []ExportedBlock
 		reason string
 		write  func(tx *bolt.Tx, k []byte, day int) error
@@ -196,18 +226,21 @@ func (s *Store) Import(ex *Export, today int) (int, error) {
 		{ex.BlockedTokens, ReasonOperatorBlock, func(tx *bolt.Tx, k []byte, day int) error {
 			return tx.Bucket(bBlockedTokens).Put(k, []byte(strconv.Itoa(day)))
 		}},
-	} {
-		for _, b := range set.blocks {
-			k, err := hex.DecodeString(b.Pair)
-			exp, derr := ParseDayString(b.ExpiresDay)
-			if err != nil || len(k) != sha256.Size || derr != nil || b.Reason != set.reason || exp < today {
-				continue
-			}
-			write := set.write
-			if err := s.update(func(tx *bolt.Tx) error { return write(tx, k, exp-RetainBlocks) }); err != nil {
-				return n, err
+		{ex.OptOutPins, ReasonOptOutPin, func(tx *bolt.Tx, k []byte, day int) error { return put(tx, bOptOutPins, k, OptOutPin{Day: day}) }},
+	}
+	return s.update(func(tx *bolt.Tx) error {
+		for _, set := range sets {
+			for _, b := range set.blocks {
+				k, err := hex.DecodeString(b.Pair)
+				exp, derr := ParseDayString(b.ExpiresDay)
+				if err != nil || len(k) != sha256.Size || derr != nil || b.Reason != set.reason || exp < today {
+					continue
+				}
+				if err := set.write(tx, k, exp-RetainBlocks); err != nil {
+					return err
+				}
 			}
 		}
-	}
-	return n, nil
+		return nil
+	})
 }

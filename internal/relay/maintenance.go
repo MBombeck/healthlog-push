@@ -7,6 +7,7 @@ import (
 
 	"github.com/MBombeck/healthlog-push/internal/logx"
 	"github.com/MBombeck/healthlog-push/internal/store"
+	"github.com/MBombeck/healthlog-push/internal/wire"
 )
 
 // fewInstances is the threshold below which logs and metrics are only refreshed hourly, so that the
@@ -82,6 +83,11 @@ func (r *Relay) Tick() {
 	for ch, pc := range r.conflicts {
 		if now.After(pc.expires) {
 			delete(r.conflicts, ch)
+		}
+	}
+	for k, t := range r.recentOptOuts {
+		if now.Unix()-t > 2*wire.ClockSkew {
+			delete(r.recentOptOuts, k)
 		}
 	}
 	for k, e := range r.idem {

@@ -1,5 +1,5 @@
 // Package store persists the relay state in a single bbolt file. It holds only what spec/protocol.md
-// ("State") allows: instances, bindings by token MAC, blocked pairs and tokens, the denylist, day counters
+// ("State") allows: instances, bindings by token MAC, blocked pairs and tokens, opt-out key pins, day counters
 // and the operator control state. Times are stored as day or week numbers only (days since the Unix epoch,
 // UTC), never as a time of day. There is no column for a raw token, an address or a push class per instance.
 package store
@@ -23,12 +23,12 @@ var (
 	bBindings      = []byte("bindings")
 	bBlockedPairs  = []byte("blocked_pairs")
 	bBlockedTokens = []byte("blocked_tokens")
-	bDenylist      = []byte("denylist")
+	bOptOutPins    = []byte("optout_pins")
 	bCounters      = []byte("counters")
 	bGlobal        = []byte("counters_global")
 	bControl       = []byte("control")
 
-	buckets = [][]byte{bInstances, bInstanceKeys, bBindings, bBlockedPairs, bBlockedTokens, bDenylist, bCounters, bGlobal, bControl}
+	buckets = [][]byte{bInstances, bInstanceKeys, bBindings, bBlockedPairs, bBlockedTokens, bOptOutPins, bCounters, bGlobal, bControl}
 )
 
 // Buckets lists every bucket the store creates.
@@ -55,7 +55,7 @@ const (
 	StateSoftInvalid = "soft_invalid"
 )
 
-// Reasons for suspension and denylist entries: a closed set.
+// Reasons for suspension and revocation: a closed set.
 var Reasons = map[string]bool{
 	"abuse": true, "spam": true, "invalid_tokens": true, "harassment": true, "legal": true,
 	"compromised": true, "terms": true, "operator_request": true,

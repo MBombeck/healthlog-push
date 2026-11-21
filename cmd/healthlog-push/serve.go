@@ -51,7 +51,7 @@ func runRelay() error {
 		return err
 	}
 	exportDir := env("HLP_EXPORT_DIR", "/export")
-	st, recovered, err := openStore(dataDir(), exportDir)
+	st, recovered, err := openStore(dataDir(), exportDir, exportTrust{pub: ed25519.PublicKey(id[32:]), host: host})
 	if err != nil {
 		return err
 	}

@@ -44,6 +44,17 @@ func (r *Relay) pairBlock(token []byte, instanceID string) (string, store.PairBl
 	return "", store.PairBlock{}, false
 }
 
+// optOutPin returns the opt-out key pin of a token under any configured MAC key.
+func (r *Relay) optOutPin(token []byte) (string, store.OptOutPin, bool) {
+	for _, k := range r.cfg.MACKeys {
+		m := mac(k, token)
+		if p, ok := r.st.GetOptOutPin([]byte(m)); ok {
+			return m, p, true
+		}
+	}
+	return "", store.OptOutPin{}, false
+}
+
 func (r *Relay) tokenBlocked(token []byte) bool {
 	for _, k := range r.cfg.MACKeys {
 		if r.st.TokenBlocked([]byte(mac(k, token))) {

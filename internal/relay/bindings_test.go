@@ -111,9 +111,12 @@ func TestChallengeFlow(t *testing.T) {
 	if rp := restored.answer(h, ch); rp.Status != 403 {
 		t.Fatal("challenge usable twice")
 	}
-	// One challenge per token per day.
-	other := newDevice(5)
-	if rp := a.bind(other); rp.Status != 409 || rp.str("reason") != "challenge_quota" {
+	// One challenge per token, instance and day: a wakes the device once (b's challenge does not count
+	// against a), the second attempt the same day is refused.
+	if rp := a.bind(newDevice(5)); rp.Status != 409 || rp.str("reason") != "challenge_sent" {
+		t.Fatalf("first challenge of another instance: %d %s", rp.Status, rp.Raw)
+	}
+	if rp := a.bind(newDevice(5)); rp.Status != 409 || rp.str("reason") != "challenge_quota" {
 		t.Fatalf("second challenge same day: %d %s", rp.Status, rp.Raw)
 	}
 }
@@ -258,4 +261,46 @@ func TestBindAfterInstanceDeletion(t *testing.T) {
 func mustJSON(v any) []byte {
 	b, _ := json.Marshal(v)
 	return b
+}
+
+// TestOptOutHoldsAgainstANewInstance: after the device opted out of A, the operator of A registers a second
+// instance and binds the token with a key it made up. The token stays pinned to the device's key, so that
+// is a conflict which only the device can resolve; the device itself may still move to another instance.
+func TestOptOutHoldsAgainstANewInstance(t *testing.T) {
+	h := newHarness(t)
+	a := h.register()
+	d := newDevice(0x71)
+	a.activate(d)
+	if rp := h.unbindSelf(d, d.key, a.id); rp.Status != 204 {
+		t.Fatal(rp.Status)
+	}
+	second := h.register()
+	if rp := second.bind(newDevice(0x71)); rp.Status != 409 || rp.str("error") != "binding_conflict" {
+		t.Fatalf("self-made key on a new instance: %d %s", rp.Status, rp.Raw)
+	}
+	if h.bindingOwner(d) != "" {
+		t.Fatal("token bound by the operator's second instance")
+	}
+	if rp := h.register().bind(d); rp.Status != 201 {
+		t.Fatalf("the device's own key on another instance: %d", rp.Status)
+	}
+}
+
+// TestWithheldStatementCannotLiftOptOut: the device signed a newer binding statement for A, A kept it back,
+// the device opted out. Presenting the kept statement afterwards must not lift the opt-out.
+func TestWithheldStatementCannotLiftOptOut(t *testing.T) {
+	h := newHarness(t)
+	a := h.register()
+	d := newDevice(0x72)
+	a.activate(d)
+	h.clk.Add(time.Minute)
+	withheld := d.bindBody(a.id, h.clk.Now().Unix())
+	h.clk.Add(time.Minute)
+	if rp := h.unbindSelf(d, d.key, a.id); rp.Status != 204 {
+		t.Fatal(rp.Status)
+	}
+	h.clk.Add(time.Minute)
+	if rp := a.do(http.MethodPost, "/v1/bindings", withheld); rp.Status != 403 {
+		t.Fatalf("withheld statement lifted the opt-out: %d %s", rp.Status, rp.Raw)
+	}
 }

@@ -3,10 +3,11 @@ package relay
 import (
 	"crypto/ed25519"
 	"crypto/rand"
-	"github.com/MBombeck/healthlog-push/internal/wire"
 	"net/http"
 	"sync"
 	"testing"
+
+	"github.com/MBombeck/healthlog-push/internal/wire"
 )
 
 // TestRotateRacingDeleteLeavesNoZombie: a rotation and a deletion of the same instance run at the same

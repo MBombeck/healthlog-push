@@ -31,10 +31,13 @@ func (r *Relay) startChallenge(s *instState, m string, b *wire.Bind, kh []byte, 
 	today := store.Day(now)
 	tl := r.tierLimits(s.rec)
 	r.Metrics.Inc("hlp_bindings_total", "result", "conflict")
-	if r.challengeDay[m] == today || s.challenges >= tl.ChallengesDay {
+	// One challenge per token, instance and day: one instance cannot use up the challenge of another, and
+	// an instance can wake a device at most once a day.
+	ck := m + "\x00" + s.rec.ID
+	if r.challengeDay[ck] == today || s.challenges >= tl.ChallengesDay {
 		return &errBody{Error: "binding_conflict", Reason: "challenge_quota"}
 	}
-	r.challengeDay[m] = today
+	r.challengeDay[ck] = today
 	s.challenges++
 	s.flaggedToday = true
 	ch := newChallenge()
@@ -50,7 +53,7 @@ func (r *Relay) startChallenge(s *instState, m string, b *wire.Bind, kh []byte, 
 	if err != nil {
 		// Not sent: give the quota back so the token can be challenged again today.
 		delete(r.conflicts, ch)
-		delete(r.challengeDay, m)
+		delete(r.challengeDay, ck)
 		s.challenges--
 		return &errBody{Error: "binding_conflict", Reason: "challenge_unsent", RetryAfter: jitter(time.Minute)}
 	}
@@ -102,8 +105,13 @@ func (r *Relay) handleChallenge(w http.ResponseWriter, req *http.Request) {
 		r.fail(w, req, http.StatusServiceUnavailable, errStorage(0))
 		return
 	}
-	if cur != nil && cur.InstanceID != pc.instanceID {
+	if cur == nil || cur.InstanceID != pc.instanceID {
+		s.newBindings++ // the same quotas as a direct binding
 		r.dirtyInst[s.rec.ID] = true
+	}
+	// The device proved the new key: an opt-out pin of this token now names that key.
+	if pinMAC, _, pinned := r.optOutPin(pc.token); pinned {
+		r.persist(r.st.PutOptOutPin([]byte(pinMAC), store.OptOutPin{Day: store.Day(now), KeyHash: pc.keyHash}))
 	}
 	r.Metrics.Inc("hlp_bindings_total", "result", "challenge_resolved")
 	r.summary.events["challenge_resolved"]++

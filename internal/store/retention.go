@@ -1,8 +1,6 @@
 package store
 
 import (
-	"encoding/json"
-
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -17,17 +15,16 @@ const (
 	UndeliveredInstDays = 2  // an instance that never delivered is removed after 48 h
 )
 
-// Prune applies the retention rules for blocks, denylist and counters for the given day. Bindings and
+// Prune applies the retention rules for blocks, opt-out pins and counters for the given day. Bindings and
 // instances are pruned by the relay, which owns their in-memory copies.
 func (s *Store) Prune(today int) error {
-	denyDay := func(_, v []byte) int { var e DenyEntry; _ = json.Unmarshal(v, &e); return e.Day }
 	steps := []struct {
 		bucket []byte
 		keep   int
 		dayOf  func(k, v []byte) int
 	}{
 		{bBlockedPairs, RetainBlocks, pairBlockDay}, {bBlockedTokens, RetainBlocks, tokenBlockDay},
-		{bDenylist, RetainBlocks, denyDay}, {bCounters, RetainCounters, keyDay}, {bGlobal, RetainGlobal, keyDay},
+		{bOptOutPins, RetainBlocks, pinDay}, {bCounters, RetainCounters, keyDay}, {bGlobal, RetainGlobal, keyDay},
 	}
 	return s.update(func(tx *bolt.Tx) error {
 		for _, step := range steps {

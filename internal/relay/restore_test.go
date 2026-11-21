@@ -28,7 +28,7 @@ func TestMigrationExportRestore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	nh := newHarness(t, func(c *Config) { c.MACKeys = old.r.cfg.MACKeys })
+	nh := newHarness(t, func(c *Config) { c.MACKeys, c.Identity = old.r.cfg.MACKeys, old.r.cfg.Identity })
 	n, err := nh.r.SetRecovery(store.Day(nh.clk.Now())+14, ex)
 	if err != nil || n != 1 {
 		t.Fatalf("import: %d %v", n, err)
@@ -89,7 +89,7 @@ func TestBlocksSurviveMACRotation(t *testing.T) {
 	}
 }
 
-func TestRevokedRecordsExpireWithTheDenylist(t *testing.T) {
+func TestRevokedRecordsExpireAfterTwelveMonths(t *testing.T) {
 	h := newHarness(t)
 	i := h.register()
 	_ = h.r.Revoke(i.id, "abuse")
@@ -130,7 +130,7 @@ func TestOptOutSurvivesRestore(t *testing.T) {
 			t.Fatal("export leaks the token or its MAC")
 		}
 	}
-	restored := newHarness(t, func(c *Config) { c.MACKeys = old.r.cfg.MACKeys })
+	restored := newHarness(t, func(c *Config) { c.MACKeys, c.Identity = old.r.cfg.MACKeys, old.r.cfg.Identity })
 	if _, err := restored.r.SetRecovery(store.Day(restored.clk.Now())+14, &ex); err != nil {
 		t.Fatal(err)
 	}
@@ -141,8 +141,10 @@ func TestOptOutSurvivesRestore(t *testing.T) {
 	if rp := h2.bind(d); rp.Status != 403 || rp.str("error") != "binding_refused" {
 		t.Fatalf("opt-out lost on restore: %d %s", rp.Status, rp.Raw)
 	}
+	// The restored pin carries no key either: another instance may bind the token only through the
+	// challenge the device answers.
 	o2 := &instance{h: restored, key: other.key, id: other.id}
-	if rp := o2.bind(d); rp.Status != 201 {
+	if rp := o2.bind(d); rp.Status != 409 || rp.str("reason") != "challenge_sent" {
 		t.Fatalf("another instance after restore: %d %s", rp.Status, rp.Raw)
 	}
 }
@@ -165,13 +167,13 @@ func TestAbuseBlocksSurviveRestore(t *testing.T) {
 	raw, _ := os.ReadFile(filepath.Join(old.dir, "registry.json"))
 	var ex store.Export
 	_ = json.Unmarshal(raw, &ex)
-	if len(ex.BlockedTokens) != 1 || ex.BlockedTokens[0].Reason != store.ReasonOperatorBlock || len(ex.Denylist) != 2 {
-		t.Fatalf("export: tokens %+v denylist %+v", ex.BlockedTokens, ex.Denylist)
+	if len(ex.BlockedTokens) != 1 || ex.BlockedTokens[0].Reason != store.ReasonOperatorBlock {
+		t.Fatalf("export: tokens %+v", ex.BlockedTokens)
 	}
 	if bytes.Contains(raw, []byte(d.hex())) || bytes.Contains(raw, []byte(hex.EncodeToString([]byte(mac(old.r.cfg.MACKeys[0], d.token))))) {
 		t.Fatal("export leaks the token or its MAC")
 	}
-	restored := newHarness(t, func(c *Config) { c.MACKeys = old.r.cfg.MACKeys })
+	restored := newHarness(t, func(c *Config) { c.MACKeys, c.Identity = old.r.cfg.MACKeys, old.r.cfg.Identity })
 	if _, err := restored.r.SetRecovery(store.Day(restored.clk.Now())+14, &ex); err != nil {
 		t.Fatal(err)
 	}
@@ -188,5 +190,34 @@ func TestAbuseBlocksSurviveRestore(t *testing.T) {
 	}
 	if rp := (&instance{h: restored, key: suspended.key, id: suspended.id}).do(http.MethodGet, "/v1/status", nil); rp.Status != 403 || rp.str("reason") != "spam" {
 		t.Fatalf("suspension lost on restore: %d %s", rp.Status, rp.Raw)
+	}
+}
+
+// TestEditedExportRefused: the export is signed with the relay identity key; an edited file, one signed by
+// another key or one for another host is refused, so a change in the backup path cannot lift a block.
+func TestEditedExportRefused(t *testing.T) {
+	old := newHarness(t)
+	i := old.register()
+	_ = old.r.Suspend(i.id, "spam")
+	if err := old.r.ExportNow(); err != nil {
+		t.Fatal(err)
+	}
+	ex, err := store.ReadExport(filepath.Join(old.dir, "registry.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	same := newHarness(t, func(c *Config) { c.MACKeys, c.Identity = old.r.cfg.MACKeys, old.r.cfg.Identity })
+	edited := *ex
+	edited.Instances = append([]store.ExportedInst(nil), ex.Instances...)
+	edited.Instances[0].Tier = store.TierStandard
+	if _, err := same.r.SetRecovery(99999, &edited); err == nil {
+		t.Fatal("edited export imported")
+	}
+	other := newHarness(t)
+	if _, err := other.r.SetRecovery(99999, ex); err == nil {
+		t.Fatal("export of another relay imported")
+	}
+	if _, err := same.r.SetRecovery(99999, ex); err != nil {
+		t.Fatalf("genuine export refused: %v", err)
 	}
 }

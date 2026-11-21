@@ -65,7 +65,7 @@ func (r *Relay) bindLocked(s *instState, b *wire.Bind, now time.Time) (int, *bin
 	kh := keyHash(b.BindingKey)
 	cur := r.bindings[m]
 	blockMAC, block, blocked := r.pairBlock(b.Token, id)
-	if status, resp, e := r.bindPrecheckLocked(s, b, m, kh, cur, blocked && !optOutReturn(block, kh, b), now); status != 0 {
+	if status, resp, e := r.bindPrecheckLocked(s, b, m, kh, cur, blocked && !r.optOutReturnLocked(blockMAC, id, block, kh, b), now); status != 0 {
 		return status, resp, e
 	}
 	if code, e := r.admitNewBinding(s, cur, now); e != nil {
@@ -111,6 +111,13 @@ func (r *Relay) bindPrecheckLocked(s *instState, b *wire.Bind, m string, kh []by
 	if r.tokenBlocked(b.Token) && (cur == nil || cur.InstanceID != id) {
 		return http.StatusForbidden, nil, &errBody{Error: "binding_refused"}
 	}
+	// After an opt-out the token is unbound, but its binding key stays pinned for a year: a binding with any
+	// other key, for example one a second instance made up, needs the challenge only the device can answer.
+	if cur == nil {
+		if _, pin, pinned := r.optOutPin(b.Token); pinned && (pin.KeyHash == nil || !bytes.Equal(pin.KeyHash, kh)) {
+			return http.StatusConflict, nil, r.startChallenge(s, m, b, kh, now)
+		}
+	}
 	// Same key: a repeat of the stored statement is idempotent; anything else needs a higher seq.
 	if cur != nil && bytes.Equal(cur.KeyHash, kh) {
 		if cur.InstanceID == id && b.Seq == cur.Seq {
@@ -154,11 +161,18 @@ func (r *Relay) storeBindingLocked(s *instState, m string, cur, nb *store.Bindin
 	return true
 }
 
-// optOutReturn reports whether b undoes the opt-out recorded in block: same binding key and a higher seq
-// than the binding that left. The seq of a binding key only ever grows, so no statement made before the
-// opt-out can lift it. A block without a key (restored from an export) is never undone this way.
-func optOutReturn(block store.PairBlock, kh []byte, b *wire.Bind) bool {
-	return len(block.KeyHash) > 0 && bytes.Equal(block.KeyHash, kh) && b.Seq > block.Seq
+// optOutReturnLocked reports whether b undoes the opt-out recorded in block: same binding key, a higher seq
+// than the binding that left, and signed after the opt-out. The last condition stops an instance that kept
+// back a statement the device signed shortly before leaving: such a statement is at most 300 seconds old
+// when it is used, so the opt-out time is kept in memory for ten minutes only (never stored), and after a
+// restart every statement must be newer than the start. A block without a key (restored from an export) is
+// never undone this way.
+func (r *Relay) optOutReturnLocked(blockMAC, instID string, block store.PairBlock, kh []byte, b *wire.Bind) bool {
+	floor := r.started.Unix()
+	if t, ok := r.recentOptOuts[blockMAC+"\x00"+instID]; ok {
+		floor = max(floor, t)
+	}
+	return len(block.KeyHash) > 0 && bytes.Equal(block.KeyHash, kh) && b.Seq > block.Seq && b.Iat > floor
 }
 
 // admitNewBinding checks the binding quotas for a binding that is new to this instance.
@@ -246,11 +260,14 @@ func (r *Relay) handleUnbindSelf(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	block := store.PairBlock{Day: store.Day(now), KeyHash: b.KeyHash, Seq: b.Seq}
-	if !r.persist(r.st.BlockPair([]byte(m), u.InstanceID, block)) || !r.persist(r.st.DeleteBinding([]byte(m))) {
+	pin := store.OptOutPin{Day: store.Day(now), KeyHash: b.KeyHash}
+	if !r.persist(r.st.BlockPair([]byte(m), u.InstanceID, block)) || !r.persist(r.st.PutOptOutPin([]byte(m), pin)) ||
+		!r.persist(r.st.DeleteBinding([]byte(m))) {
 		r.fail(w, req, http.StatusServiceUnavailable, errStorage(0))
 		return
 	}
 	r.dropBindingLocked(m)
+	r.recentOptOuts[m+"\x00"+u.InstanceID] = u.Iat
 	for ch, pc := range r.conflicts {
 		if pc.mac == m {
 			delete(r.conflicts, ch)

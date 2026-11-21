@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/ed25519"
 	"errors"
 	"fmt"
 	"os"
@@ -8,12 +9,19 @@ import (
 	"time"
 
 	"github.com/MBombeck/healthlog-push/internal/logx"
+	"github.com/MBombeck/healthlog-push/internal/relay"
 	"github.com/MBombeck/healthlog-push/internal/store"
 )
 
 // openStore opens the database. A damaged file is moved aside, an empty store is created, and the latest
 // registry export is imported; the caller then opens the recovery window.
-func openStore(dataDir, exportDir string) (*store.Store, bool, error) {
+// exportTrust is what an imported registry export must match: signed by this identity key for this host.
+type exportTrust struct {
+	pub  ed25519.PublicKey
+	host string
+}
+
+func openStore(dataDir, exportDir string, trust exportTrust) (*store.Store, bool, error) {
 	path := filepath.Join(dataDir, "relay.db")
 	_, statErr := os.Stat(path)
 	fresh := errors.Is(statErr, os.ErrNotExist)
@@ -22,7 +30,7 @@ func openStore(dataDir, exportDir string) (*store.Store, bool, error) {
 		cerr := st.Check()
 		if cerr == nil {
 			if fresh {
-				return importExport(st, exportDir)
+				return importExport(st, exportDir, trust)
 			}
 			return st, false, nil
 		}
@@ -50,10 +58,10 @@ func openStore(dataDir, exportDir string) (*store.Store, bool, error) {
 	if err != nil {
 		return nil, false, err
 	}
-	return importExport(st, exportDir)
+	return importExport(st, exportDir, trust)
 }
 
-func importExport(st *store.Store, exportDir string) (*store.Store, bool, error) {
+func importExport(st *store.Store, exportDir string, trust exportTrust) (*store.Store, bool, error) {
 	ex, err := store.ReadExport(filepath.Join(exportDir, "registry.json"))
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -61,7 +69,11 @@ func importExport(st *store.Store, exportDir string) (*store.Store, bool, error)
 		}
 		return nil, false, fmt.Errorf("registry export unreadable: %w", err)
 	}
-	n, err := st.Import(ex, store.Day(time.Now()))
+	if err := relay.OpenExport(trust.pub, trust.host, ex); err != nil {
+		_ = st.Close()
+		return nil, false, fmt.Errorf("registry export refused: %w", err)
+	}
+	n, err := st.Import(ex, store.Day(time.Now()), relay.DefaultLimits.StandardDevicesMax)
 	if err != nil {
 		return nil, false, err
 	}

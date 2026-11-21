@@ -4,7 +4,6 @@
 package wire
 
 import (
-	"sync/atomic"
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/base64"
@@ -14,6 +13,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync/atomic"
 )
 
 // ClockSkew is the accepted difference between a signed time and the relay clock, in seconds.
@@ -229,6 +229,12 @@ func RequestText(host, instanceID, method, pathQuery string, t int64, nonce stri
 // treat a response bound to "-" as untrusted.
 func ResponseText(host, method, pathQuery, nonce string, status int, body []byte) string {
 	return join("hl-relay-resp-v2", host, method, pathQuery, nonce, strconv.Itoa(status), hexSHA256(body))
+}
+
+// ExportText is signed by the relay identity key over the registry export (marshaled without its
+// signature field).
+func ExportText(host string, body []byte) string {
+	return join("hl-relay-export-v1", host, hexSHA256(body))
 }
 
 // StatusFileText is signed by the relay identity key for the out-of-band status file.

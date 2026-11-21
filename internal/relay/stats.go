@@ -75,8 +75,11 @@ func (r *Relay) ExportNow() error {
 	if r.cfg.ExportDir == "" {
 		return errors.New("no export directory configured")
 	}
-	ex, err := r.st.BuildExport(store.Day(r.cfg.Now()))
+	ex, err := r.st.BuildExport(r.cfg.Host, store.Day(r.cfg.Now()))
 	if err != nil {
+		return err
+	}
+	if err := SealExport(r.cfg.Identity, ex); err != nil {
 		return err
 	}
 	return store.WriteExport(r.cfg.ExportDir, ex)

@@ -18,15 +18,20 @@ func (r *Relay) Suspend(id, reason string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s := r.instances[id]
-	if s == nil {
+	switch {
+	case s == nil:
 		return errors.New("unknown instance")
+	case s.rec.Tier == store.TierRevoked:
+		return errors.New("instance is revoked; a revocation cannot be turned into a suspension")
 	}
-	s.rec.Tier, s.rec.Reason, s.rec.ReasonDay = store.TierSuspended, reason, store.Day(r.cfg.Now())
-	logx.Event("admin.suspend", logx.Str(logx.KReason, reason))
-	if err := r.st.PutInstance(s.rec); err != nil {
+	next := *s.rec
+	next.Tier, next.Reason, next.ReasonDay = store.TierSuspended, reason, store.Day(r.cfg.Now())
+	if err := r.st.PutInstance(&next); err != nil {
 		return err
 	}
-	return r.st.PutDeny(&store.DenyEntry{InstanceID: id, Reason: reason, Day: store.Day(r.cfg.Now())})
+	*s.rec = next
+	logx.Event("admin.suspend", logx.Str(logx.KReason, reason))
+	return nil
 }
 
 // Unsuspend returns a suspended instance to probation.
@@ -37,12 +42,14 @@ func (r *Relay) Unsuspend(id string) error {
 	if s == nil || s.rec.Tier != store.TierSuspended {
 		return errors.New("instance not suspended")
 	}
-	s.rec.Tier, s.rec.Reason = store.TierProbation, ""
-	logx.Event("admin.unsuspend")
-	if err := r.st.PutInstance(s.rec); err != nil {
+	next := *s.rec
+	next.Tier, next.Reason, next.ReasonDay = store.TierProbation, "", 0
+	if err := r.st.PutInstance(&next); err != nil {
 		return err
 	}
-	return r.st.DeleteDeny(id)
+	*s.rec = next
+	logx.Event("admin.unsuspend")
+	return nil
 }
 
 // Revoke revokes an instance and deletes its bindings. The instance record stays as revoked so that its key
@@ -60,20 +67,18 @@ func (r *Relay) Revoke(id, reason string) error {
 	if s == nil {
 		return errors.New("unknown instance")
 	}
-	s.rec.Tier, s.rec.Reason, s.rec.ReasonDay = store.TierRevoked, reason, store.Day(r.cfg.Now())
-	for m, b := range r.bindings {
-		if b.InstanceID == id {
-			r.dropBindingLocked(m)
-		}
+	next := *s.rec
+	next.Tier, next.Reason, next.ReasonDay = store.TierRevoked, reason, store.Day(r.cfg.Now())
+	// One transaction for record and bindings; memory changes only after the store accepted it.
+	if err := r.st.RevokeInstance(&next); err != nil {
+		return err
+	}
+	*s.rec = next
+	for m := range r.byInst[id] {
+		r.dropBindingLocked(m)
 	}
 	logx.Event("admin.revoke", logx.Str(logx.KReason, reason))
-	if err := r.st.DeleteBindingsOf(id); err != nil {
-		return err
-	}
-	if err := r.st.PutInstance(s.rec); err != nil {
-		return err
-	}
-	return r.st.PutDeny(&store.DenyEntry{InstanceID: id, Reason: reason, Day: store.Day(r.cfg.Now())})
+	return nil
 }
 
 // BlockToken blocks a token for every instance except its current holder. Either the raw token (hex) or the

@@ -68,29 +68,30 @@ type Relay struct {
 	// ErrLog is the http.Server error log: it counts lines and discards them, because they carry addresses.
 	ErrLog *logx.CountingWriter
 
-	mu           sync.Mutex
-	instances    map[string]*instState
-	byKey        map[string]string // raw public key to instance id
-	bindings     map[string]*store.Binding
-	byInst       map[string]map[string]struct{} // instance id to the MACs of its bindings
-	dirtyInst    map[string]bool                // instances whose record changed since the last flush
-	bodyBytes    atomic.Int64                   // request body bytes currently reserved
-	dirty        map[string]bool
-	devs         map[string]*devQuota
-	idem         map[string]*idemEntry
-	idemOrder    []string
-	nonceTotal   int
-	conflicts    map[string]*pendingConflict // by challenge
-	challengeDay map[string]int              // token MAC to the day of its last challenge
-	control      Control
-	breaker      *Breaker
-	regs         *limits.Registrations
-	appDirect    *limits.Bucket
-	halfUntil    time.Time
-	dbWritable   bool
-	lastDay      int
-	summary      summary
-	global       map[store.GlobalKey]int64 // pending for counters_global
+	mu            sync.Mutex
+	instances     map[string]*instState
+	byKey         map[string]string // raw public key to instance id
+	bindings      map[string]*store.Binding
+	byInst        map[string]map[string]struct{} // instance id to the MACs of its bindings
+	dirtyInst     map[string]bool                // instances whose record changed since the last flush
+	bodyBytes     atomic.Int64                   // request body bytes currently reserved
+	dirty         map[string]bool
+	devs          map[string]*devQuota
+	idem          map[string]*idemEntry
+	idemOrder     []string
+	nonceTotal    int
+	conflicts     map[string]*pendingConflict
+	recentOptOuts map[string]int64 // token MAC and instance id to the opt-out statement time, for ten minutes
+	challengeDay  map[string]int   // token MAC and instance id to the day of its last challenge
+	control       Control
+	breaker       *Breaker
+	regs          *limits.Registrations
+	appDirect     *limits.Bucket
+	halfUntil     time.Time
+	dbWritable    bool
+	lastDay       int
+	summary       summary
+	global        map[store.GlobalKey]int64 // pending for counters_global
 
 	apnsState
 	pools
@@ -158,7 +159,8 @@ func New(cfg Config, st *store.Store, sender Sender) (*Relay, error) {
 		instances: map[string]*instState{}, byKey: map[string]string{}, bindings: map[string]*store.Binding{},
 		byInst: map[string]map[string]struct{}{}, dirtyInst: map[string]bool{}, dirty: map[string]bool{},
 		devs: map[string]*devQuota{}, idem: map[string]*idemEntry{}, conflicts: map[string]*pendingConflict{},
-		challengeDay: map[string]int{}, breaker: NewBreaker(), regs: limits.NewRegistrations(cfg.Registrations, now),
+		recentOptOuts: map[string]int64{},
+		challengeDay:  map[string]int{}, breaker: NewBreaker(), regs: limits.NewRegistrations(cfg.Registrations, now),
 		appDirect: limits.NewBucket(100, 20, now), halfUntil: now.Truncate(fullDay).Add(fullDay), dbWritable: true,
 		lastDay: store.Day(now), summary: newSummary(now), global: map[store.GlobalKey]int64{},
 		pools: pools{probationMin: limits.Window{Size: time.Minute}, standardMin: limits.Window{Size: time.Minute},

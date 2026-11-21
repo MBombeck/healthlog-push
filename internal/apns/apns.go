@@ -229,7 +229,7 @@ func (c *Client) Send(ctx context.Context, p *Push) Result {
 	resp, err := c.HTTP.Do(req)
 	lat := time.Since(start)
 	// The first attempt ends the warm-up whatever its outcome, so an unreachable Apple at start cannot
-	// serialise every sender behind one lock.
+	// serialize every sender behind one lock.
 	c.warm.Store(true)
 	if err != nil {
 		return Result{Outcome: Unavailable, Reason: "transport", Latency: lat, TokenIat: iat}

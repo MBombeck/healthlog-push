@@ -62,12 +62,15 @@ func (s *Store) GetPairBlock(mac []byte, instanceID string) (PairBlock, bool) {
 		b     PairBlock
 		found bool
 	)
-	_ = s.db.View(func(tx *bolt.Tx) error {
+	err := s.db.View(func(tx *bolt.Tx) error {
 		if v := tx.Bucket(bBlockedPairs).Get(pairKey(mac, instanceID)); v != nil {
 			b, found = decodePairBlock(v), true
 		}
 		return nil
 	})
+	if err != nil {
+		return PairBlock{}, true // fail closed: an unreadable store blocks
+	}
 	return b, found
 }
 
@@ -91,42 +94,60 @@ func (s *Store) UnblockToken(mac []byte) error {
 // TokenBlocked reports whether a token MAC is blocked.
 func (s *Store) TokenBlocked(mac []byte) bool {
 	found := false
-	_ = s.db.View(func(tx *bolt.Tx) error {
+	err := s.db.View(func(tx *bolt.Tx) error {
 		found = tx.Bucket(bBlockedTokens).Get(tokenKey(mac)) != nil
 		return nil
 	})
-	return found
+	return found || err != nil // fail closed: an unreadable store blocks
 }
 
-// DenyEntry is a denylist entry.
-type DenyEntry struct {
-	InstanceID string `json:"instanceId"`
-	Reason     string `json:"reason"`
-	Day        int    `json:"day"`
+// pinKey is the stored form of an opt-out key pin: SHA-256 over a label and the token MAC.
+func pinKey(mac []byte) []byte {
+	h := sha256.New()
+	h.Write([]byte("hl-optout-pin\n"))
+	h.Write(mac)
+	return h.Sum(nil)
 }
 
-// PutDeny writes a denylist entry.
-func (s *Store) PutDeny(e *DenyEntry) error {
-	return s.update(func(tx *bolt.Tx) error { return put(tx, bDenylist, []byte(e.InstanceID), e) })
+// OptOutPin remembers, for a token whose device opted out, which binding key did so. While the token is
+// unbound, a binding with any other key has to go through the challenge the device answers; otherwise a
+// second instance with a self-made key could bind the token again right after the opt-out. A pin restored
+// from an export carries no key: every new binding of that token then needs the challenge.
+type OptOutPin struct {
+	Day     int    `json:"day"`
+	KeyHash []byte `json:"keyHash,omitempty"`
 }
 
-// DeleteDeny removes a denylist entry.
-func (s *Store) DeleteDeny(id string) error {
-	return s.update(func(tx *bolt.Tx) error { return tx.Bucket(bDenylist).Delete([]byte(id)) })
+func pinDay(_, v []byte) int {
+	var p OptOutPin
+	_ = json.Unmarshal(v, &p)
+	return p.Day
 }
 
-// Denylist returns all entries.
-func (s *Store) Denylist() ([]*DenyEntry, error) {
-	var out []*DenyEntry
+// PutOptOutPin records or replaces the pin of a token.
+func (s *Store) PutOptOutPin(mac []byte, p OptOutPin) error {
+	return s.update(func(tx *bolt.Tx) error { return put(tx, bOptOutPins, pinKey(mac), p) })
+}
+
+// GetOptOutPin returns the pin of a token and whether there is one. A read error counts as pinned, so a
+// damaged store fails closed.
+func (s *Store) GetOptOutPin(mac []byte) (OptOutPin, bool) {
+	var (
+		p     OptOutPin
+		found bool
+	)
 	err := s.db.View(func(tx *bolt.Tx) error {
-		return tx.Bucket(bDenylist).ForEach(func(_, v []byte) error {
-			var e DenyEntry
-			if err := json.Unmarshal(v, &e); err != nil {
-				return err
-			}
-			out = append(out, &e)
-			return nil
-		})
+		if v := tx.Bucket(bOptOutPins).Get(pinKey(mac)); v != nil {
+			found = true
+			return json.Unmarshal(v, &p)
+		}
+		return nil
 	})
-	return out, err
+	if err != nil {
+		return OptOutPin{}, true
+	}
+	if len(p.KeyHash) != sha256.Size {
+		p.KeyHash = nil
+	}
+	return p, found
 }
