@@ -185,7 +185,7 @@ var usageClasses = []string{"alert", "silent", "liveactivity"}
 func (r *Relay) UsageReport(days int) Usage {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.flushLocked()
+	// No flush here: a metrics scrape must not cause a write. Counts not yet flushed are added from memory.
 	now := r.cfg.Now()
 	today := store.Day(now)
 	u := Usage{Granularity: "day", ActiveInstances: r.activeInstancesLocked()}
@@ -205,10 +205,10 @@ func (r *Relay) UsageReport(days int) Usage {
 	for d := today - days; d < today; d++ {
 		dp := DayPushes{Day: store.DayString(d), ByClass: map[string]int64{}}
 		for _, c := range usageClasses {
-			acc := r.st.Global(d, c, "accepted")
-			soft := r.st.Global(d, c, "soft_invalid")
-			unreg := r.st.Global(d, c, "unregistered")
-			gone := r.st.Global(d, c, "activity_gone")
+			acc := r.globalLocked(d, c, "accepted")
+			soft := r.globalLocked(d, c, "soft_invalid")
+			unreg := r.globalLocked(d, c, "unregistered")
+			gone := r.globalLocked(d, c, "activity_gone")
 			n := acc + soft + unreg + gone
 			dp.ByClass[c] = n
 			dp.Total += n
@@ -221,8 +221,8 @@ func (r *Relay) UsageReport(days int) Usage {
 	for w := store.Week(today - days); w < store.Week(today); w++ {
 		var reg, opt int64
 		for d := store.WeekStart(w); d < store.WeekStart(w)+7; d++ {
-			reg += r.st.Global(d, "instance", "registered")
-			opt += r.st.Global(d, "binding", "opt_out")
+			reg += r.globalLocked(d, "instance", "registered")
+			opt += r.globalLocked(d, "binding", "opt_out")
 		}
 		u.RegistrationsPerWeek = append(u.RegistrationsPerWeek, WeekCount{WeekOf: store.DayString(store.WeekStart(w)), N: reg})
 		u.OptOutsPerWeek = append(u.OptOutsPerWeek, WeekCount{WeekOf: store.DayString(store.WeekStart(w)), N: opt})
@@ -251,4 +251,9 @@ func (r *Relay) usageGauges() {
 		r.Metrics.Set("hlp_usage_registrations_last_week", float64(u.RegistrationsPerWeek[n-1].N))
 		r.Metrics.Set("hlp_usage_opt_outs_last_week", float64(u.OptOutsPerWeek[n-1].N))
 	}
+}
+
+// globalLocked is a global day counter: what the store holds plus what the next flush will add.
+func (r *Relay) globalLocked(day int, class, result string) int64 {
+	return r.st.Global(day, class, result) + r.global[store.GlobalKey{Day: day, Class: class, Result: result}]
 }

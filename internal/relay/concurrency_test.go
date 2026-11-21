@@ -4,8 +4,10 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"net/http"
+	"net/http/httptest"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/MBombeck/healthlog-push/internal/wire"
 )
@@ -68,5 +70,28 @@ func TestAppAnswersCostTheSameWork(t *testing.T) {
 		if wire.Verifications()-before != 1 {
 			t.Errorf("%s: %d signature checks, want exactly 1", name, wire.Verifications()-before)
 		}
+	}
+}
+
+// TestMaintenanceWritesInBatches: the daily retention deletes stale bindings in one transaction, and a
+// metrics scrape writes nothing.
+func TestMaintenanceWritesInBatches(t *testing.T) {
+	h := newHarness(t)
+	i := h.register()
+	for n := range 30 {
+		i.bind(newDevice(byte(0x80 + n))) // provisional, never delivered
+	}
+	h.r.Tick()
+	h.clk.Add(3*24*time.Hour + time.Hour)
+	before := h.st.Writes()
+	h.r.Daily()
+	if w := h.st.Writes() - before; w > 4 {
+		t.Fatalf("daily maintenance used %d write transactions for 30 stale bindings", w)
+	}
+	before = h.st.Writes()
+	rec := httptest.NewRecorder()
+	h.r.MetricsHandler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", http.NoBody))
+	if w := h.st.Writes() - before; w != 0 {
+		t.Fatalf("a metrics scrape wrote %d transactions", w)
 	}
 }

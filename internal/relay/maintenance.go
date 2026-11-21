@@ -191,28 +191,30 @@ func (r *Relay) Daily() {
 // than ProvisionalDays, and returns how many it removed.
 func (r *Relay) pruneBindingsLocked(today int) int {
 	thisWeek := store.Week(today)
-	removed := 0
+	var stale [][]byte
 	for m, b := range r.bindings {
-		stale := b.LastUsedWeek < thisWeek-store.BindingIdleWeeks
-		if b.State == store.StateProvisional && today-b.BoundDay > store.ProvisionalDays {
-			stale = true
-		}
-		if stale && r.persist(r.st.DeleteBinding([]byte(m))) {
-			r.dropBindingLocked(m)
-			removed++
+		if b.LastUsedWeek < thisWeek-store.BindingIdleWeeks || (b.State == store.StateProvisional && today-b.BoundDay > store.ProvisionalDays) {
+			stale = append(stale, []byte(m))
 		}
 	}
-	return removed
+	// One transaction for all of them, not one fsync per binding.
+	if len(stale) == 0 || !r.persist(r.st.DeleteBindings(stale)) {
+		return 0
+	}
+	for _, m := range stale {
+		r.dropBindingLocked(string(m))
+	}
+	return len(stale)
 }
 
-// pruneInstancesLocked removes suspended and revoked records after the denylist period, idle instances and
+// pruneInstancesLocked removes suspended and revoked records after the block retention, idle instances and
 // instances that never delivered, and runs the promotion rules for the rest.
 func (r *Relay) pruneInstancesLocked(today int) {
 	thisWeek := store.Week(today)
 	for id, s := range r.instances {
 		in := s.rec
 		if in.Tier == store.TierRevoked || in.Tier == store.TierSuspended {
-			// Kept as long as the denylist entry (12 months), then removed with its bindings.
+			// Kept for the block retention (12 months), then removed with its bindings.
 			if today-in.ReasonDay > store.RetainBlocks && r.persist(r.st.DeleteInstance(id)) {
 				r.dropInstanceLocked(id)
 			}

@@ -154,3 +154,16 @@ func (s *Store) RevokeInstance(in *Instance) error {
 		return deleteBindingsOf(tx, in.ID)
 	})
 }
+
+// DeleteBindings removes several bindings in one transaction.
+func (s *Store) DeleteBindings(macs [][]byte) error {
+	return s.update(func(tx *bolt.Tx) error {
+		bk := tx.Bucket(bBindings)
+		for _, m := range macs {
+			if err := bk.Delete(m); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
