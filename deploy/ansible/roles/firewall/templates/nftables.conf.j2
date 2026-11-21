@@ -1,0 +1,123 @@
+#!/usr/sbin/nft -f
+# Managed by Ansible (role firewall). Local changes are overwritten.
+#
+# Only the table below is managed. There is deliberately no `flush ruleset`,
+# so tables installed by other software (for example a VPN client) survive a
+# reload. Nothing here logs packets: drops are counted, never written with
+# addresses to any log.
+
+table inet healthlog_push
+delete table inet healthlog_push
+
+table inet healthlog_push {
+	counter in_drop {}
+	counter out_drop {}
+	counter fwd_drop {}
+	counter in_https {}
+	counter in_ssh {}
+
+{% set v4 = ssh_allowed_cidrs | reject('search', ':') | list %}
+{% set v6 = ssh_allowed_cidrs | select('search', ':') | list %}
+{% if v4 | length > 0 %}
+	set ssh_src_v4 {
+		type ipv4_addr
+		flags interval
+		elements = { {{ v4 | join(', ') }} }
+	}
+
+{% endif %}
+{% if v6 | length > 0 %}
+	set ssh_src_v6 {
+		type ipv6_addr
+		flags interval
+		elements = { {{ v6 | join(', ') }} }
+	}
+
+{% endif %}
+	# Inbound tcp/443 is redirected to the unprivileged relay port, for IPv4
+	# and IPv6. The source address is preserved.
+	chain prerouting {
+		type nat hook prerouting priority dstnat; policy accept;
+		tcp dport {{ firewall_public_port }} counter name in_https redirect to :{{ firewall_relay_port }}
+	}
+
+	chain input {
+		type filter hook input priority filter; policy drop;
+
+		iif "lo" accept
+		ct state established,related accept
+		ct state invalid drop
+
+		# The relay port only for connections that came in through the redirect.
+		tcp dport {{ firewall_relay_port }} ct status dnat accept
+
+		# IPv4 ICMP: diagnostics and path MTU discovery.
+		ip protocol icmp icmp type { echo-request, destination-unreachable, time-exceeded, parameter-problem } limit rate 50/second burst 100 packets accept
+
+		# ICMPv6 is required for IPv6 to work at all (neighbour discovery,
+		# router advertisements, packet too big).
+		icmpv6 type { destination-unreachable, packet-too-big, time-exceeded, parameter-problem, echo-request, nd-router-advert, nd-neighbor-solicit, nd-neighbor-advert } accept
+
+{% if firewall_allow_dhcp %}
+		udp sport 67 udp dport 68 accept
+		ip6 saddr fe80::/10 udp sport 547 udp dport 546 accept
+{% endif %}
+		# SSH only from the configured management sources.
+{% for ifname in ssh_allowed_interfaces %}
+		iifname "{{ ifname }}" tcp dport {{ firewall_ssh_port }} counter name in_ssh accept
+{% endfor %}
+{% if v4 | length > 0 %}
+		ip saddr @ssh_src_v4 tcp dport {{ firewall_ssh_port }} counter name in_ssh accept
+{% endif %}
+{% if v6 | length > 0 %}
+		ip6 saddr @ssh_src_v6 tcp dport {{ firewall_ssh_port }} counter name in_ssh accept
+{% endif %}
+
+		counter name in_drop drop
+	}
+
+	# Nothing is routed through this host. Docker runs without bridge NAT.
+	chain forward {
+		type filter hook forward priority filter; policy drop;
+		counter name fwd_drop drop
+	}
+
+	chain output {
+		type filter hook output priority filter; policy drop;
+
+		oif "lo" accept
+		ct state established,related accept
+		ct state invalid drop
+
+		# HTTPS: APNs, ACME (TLS-ALPN-01), image registry, signature
+		# transparency log, package repositories over TLS.
+		tcp dport 443 accept
+
+		# DNS and NTP.
+		udp dport 53 accept
+		tcp dport 53 accept
+		udp dport 123 accept
+
+		# Plain HTTP only for the package manager (Ubuntu mirrors).
+		tcp dport 80 meta skuid "_apt" accept
+
+		icmp type { echo-request, destination-unreachable, time-exceeded, parameter-problem } accept
+		icmpv6 type { destination-unreachable, packet-too-big, time-exceeded, parameter-problem, echo-request, nd-router-solicit, nd-neighbor-solicit, nd-neighbor-advert } accept
+
+{% if firewall_allow_dhcp %}
+		udp sport 68 udp dport 67 accept
+		udp sport 546 udp dport 547 accept
+{% endif %}
+{% if firewall_allow_cloud_metadata %}
+		ip daddr 169.254.169.254 tcp dport 80 accept
+{% endif %}
+{% for rule in healthlog_push_mgmt_vpn_egress %}
+		{{ rule.proto | default('udp') }} dport {{ rule.port }} accept
+{% endfor %}
+{% for r in healthlog_push_egress_receivers %}
+		{% if r.oifname is defined %}oifname "{{ r.oifname }}" {% endif %}{{ 'ip6' if ':' in (r.address | string) else 'ip' }} daddr {{ r.address }} {{ r.proto | default('tcp') }} dport {{ r.port }} accept
+{% endfor %}
+
+		counter name out_drop drop
+	}
+}

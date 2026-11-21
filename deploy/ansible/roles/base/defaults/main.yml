@@ -1,0 +1,32 @@
+---
+# Administrative accounts. Key-only; no passwords are ever set.
+# Each entry: {name: <login>, ssh_keys: [<public key line>, ...], shell: /bin/bash}
+base_admin_users: []
+
+# Accounts that exist on the image but must not keep SSH access
+# (their authorized_keys file is emptied). Root login is refused by sshd anyway.
+base_locked_users:
+  - root
+
+# Where SSH is accepted from. At least one of the two must be non-empty;
+# the play refuses to continue otherwise so nobody gets locked out.
+#   ssh_allowed_interfaces: names of a private management network or VPN
+#                           interface of your choice (for example "wg0").
+#   ssh_allowed_cidrs:      source networks (IPv4 and/or IPv6 CIDR).
+ssh_allowed_interfaces: []
+ssh_allowed_cidrs: []
+
+# Optional explicit sshd ListenAddress values (for example the address of the
+# management interface). Empty means sshd listens on all addresses and the
+# firewall restricts the source.
+base_sshd_listen_addresses: []
+base_sshd_port: 22
+
+# Two or more time sources for chrony (hostnames or addresses).
+base_chrony_sources: []
+
+# Security updates only. Reboot automatically inside this window if required.
+base_unattended_reboot: true
+base_unattended_reboot_time: "04:20"
+
+base_hostname: ""

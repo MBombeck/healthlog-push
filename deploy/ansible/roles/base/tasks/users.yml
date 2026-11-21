@@ -1,0 +1,63 @@
+---
+- name: Create admin accounts without a password
+  ansible.builtin.user:
+    name: "{{ item.name }}"
+    shell: "{{ item.shell | default('/bin/bash') }}"
+    groups: sudo
+    append: true
+    password: "!"
+    update_password: always
+  loop: "{{ base_admin_users }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Create .ssh directories
+  ansible.builtin.file:
+    path: "/home/{{ item.name }}/.ssh"
+    state: directory
+    owner: "{{ item.name }}"
+    group: "{{ item.name }}"
+    mode: "0700"
+  loop: "{{ base_admin_users }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Write authorized_keys (exclusive, only the listed keys)
+  ansible.builtin.copy:
+    dest: "/home/{{ item.name }}/.ssh/authorized_keys"
+    content: "{{ item.ssh_keys | join('\n') }}\n"
+    owner: "{{ item.name }}"
+    group: "{{ item.name }}"
+    mode: "0600"
+  loop: "{{ base_admin_users }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Allow admin accounts to use sudo without a password (they have none)
+  ansible.builtin.copy:
+    dest: /etc/sudoers.d/10-healthlog-push-admins
+    content: |
+      {% for u in base_admin_users %}
+      {{ u.name }} ALL=(ALL:ALL) NOPASSWD: ALL
+      {% endfor %}
+    owner: root
+    group: root
+    mode: "0440"
+    validate: /usr/sbin/visudo -cf %s
+
+- name: Ensure .ssh directories of locked accounts exist
+  ansible.builtin.file:
+    path: "{{ '/root' if item == 'root' else '/home/' + item }}/.ssh"
+    state: directory
+    mode: "0700"
+  loop: "{{ base_locked_users }}"
+  when: ansible_user | default('root') != item
+
+- name: Empty authorized_keys of locked accounts
+  ansible.builtin.copy:
+    dest: "{{ '/root' if item == 'root' else '/home/' + item }}/.ssh/authorized_keys"
+    content: ""
+    mode: "0600"
+    backup: true
+  loop: "{{ base_locked_users }}"
+  when: ansible_user | default('root') != item

@@ -1,0 +1,43 @@
+---
+- name: Install cosign at the pinned version (checksum verified)
+  ansible.builtin.get_url:
+    url: "https://github.com/sigstore/cosign/releases/download/{{ healthlog_push_cosign_version }}/cosign-linux-{{ healthlog_push_arch }}"
+    dest: "{{ healthlog_push_cosign_path }}"
+    checksum: "sha256:{{ healthlog_push_cosign_sha256[healthlog_push_arch] }}"
+    owner: root
+    group: root
+    mode: "0755"
+  vars:
+    healthlog_push_arch: "{{ 'arm64' if ansible_facts['architecture'] in ['aarch64', 'arm64'] else 'amd64' }}"
+
+# Any failure below aborts the play before compose is touched; the running
+# release stays as it is.
+- name: Verify the image signature (keyless, release workflow at the tag)
+  ansible.builtin.command:
+    argv:
+      - "{{ healthlog_push_cosign_path }}"
+      - verify
+      - "{{ healthlog_push_image }}"
+      - --certificate-identity
+      - "{{ healthlog_push_signing_identity | trim }}"
+      - --certificate-oidc-issuer
+      - "{{ healthlog_push_oidc_issuer }}"
+      - --output
+      - text
+  changed_when: false
+
+- name: Verify the SLSA provenance attestation
+  ansible.builtin.command:
+    argv:
+      - "{{ healthlog_push_cosign_path }}"
+      - verify-attestation
+      - "{{ healthlog_push_image }}"
+      - --type
+      - slsaprovenance
+      - --certificate-identity-regexp
+      - "{{ healthlog_push_provenance_identity_regexp | trim }}"
+      - --certificate-oidc-issuer
+      - "{{ healthlog_push_oidc_issuer }}"
+      - --certificate-github-workflow-repository
+      - "{{ healthlog_push_source_repo }}"
+  changed_when: false

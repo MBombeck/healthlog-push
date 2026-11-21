@@ -1,0 +1,30 @@
+---
+# Shared with the base role: where SSH is accepted from.
+ssh_allowed_interfaces: []
+ssh_allowed_cidrs: []
+firewall_ssh_port: "{{ base_sshd_port | default(22) }}"
+
+# Public port and the unprivileged port the relay listens on.
+firewall_public_port: 443
+firewall_relay_port: 8443
+
+# Egress needed by a private management network or VPN of your choice, for
+# example [{proto: udp, port: 51820}]. Default: nothing.
+healthlog_push_mgmt_vpn_egress: []
+
+# Log and metric receivers the host may reach, for example
+# [{address: 192.0.2.20, port: 4318, proto: tcp}] or
+# [{address: "2001:db8::20", port: 4318}]. Literal addresses or CIDRs.
+# Optional per entry: oifname (restrict to one interface). Default: nothing.
+healthlog_push_egress_receivers: []
+
+# DHCP on the public interface (IPv4 on most cloud providers).
+firewall_allow_dhcp: true
+# Link-local cloud metadata endpoint (169.254.169.254:80). Some providers'
+# cloud-init reads it on every boot.
+firewall_allow_cloud_metadata: false
+
+# Dead-man switch: when a new rule set is applied, the previous one is restored
+# automatically after this many seconds unless a fresh SSH connection from the
+# control node succeeds first.
+firewall_rollback_seconds: 120

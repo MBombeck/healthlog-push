@@ -1,0 +1,13 @@
+# Managed by Ansible (role base).
+{% for src in base_chrony_sources %}
+server {{ src }} iburst
+{% endfor %}
+minsources 1
+driftfile /var/lib/chrony/chrony.drift
+makestep 1.0 3
+rtcsync
+leapsectz right/UTC
+# Client only: never serve time, no command port on the network.
+port 0
+cmdport 0
+logdir /var/log/chrony

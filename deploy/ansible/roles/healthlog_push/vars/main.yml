@@ -1,0 +1,8 @@
+---
+healthlog_push_compose_cmd:
+  - docker
+  - compose
+  - --project-directory
+  - "{{ healthlog_push_root }}/compose"
+  - -p
+  - "{{ healthlog_push_project }}"

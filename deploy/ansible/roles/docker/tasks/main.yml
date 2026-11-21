@@ -1,0 +1,117 @@
+---
+- name: Create the keyring directory
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Download the Docker signing key to a staging path
+  ansible.builtin.get_url:
+    url: "{{ docker_apt_key_url }}"
+    dest: /etc/apt/keyrings/docker.asc.staging
+    owner: root
+    group: root
+    mode: "0644"
+    force: true
+  changed_when: false
+
+- name: Read the fingerprints of the downloaded key
+  ansible.builtin.command: gpg --show-keys --with-colons --fixed-list-mode /etc/apt/keyrings/docker.asc.staging
+  register: docker_key_info
+  changed_when: false
+
+- name: Check the key fingerprint
+  ansible.builtin.assert:
+    that:
+      - docker_primary_fpr == docker_apt_key_fingerprint
+      - docker_key_info.stdout_lines | select('match', '^pub:') | list | length == 1
+    fail_msg: >-
+      The downloaded Docker signing key does not match the pinned fingerprint
+      {{ docker_apt_key_fingerprint }}. Nothing was installed.
+    quiet: true
+  vars:
+    # Field 10 of the first fpr record is the primary key fingerprint.
+    docker_primary_fpr: >-
+      {{ ((docker_key_info.stdout_lines | select('match', '^fpr:') | first | default('')).split(':') + [''] * 10)[9] }}
+
+- name: Install the verified key
+  ansible.builtin.copy:
+    src: /etc/apt/keyrings/docker.asc.staging
+    dest: /etc/apt/keyrings/docker.asc
+    remote_src: true
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Remove the staging key
+  ansible.builtin.file:
+    path: /etc/apt/keyrings/docker.asc.staging
+    state: absent
+  changed_when: false
+
+- name: Add the Docker apt repository
+  ansible.builtin.copy:
+    dest: /etc/apt/sources.list.d/docker.sources
+    content: |
+      Types: deb
+      URIs: {{ docker_apt_repo_url }}
+      Suites: {{ ansible_facts['distribution_release'] }}
+      Components: stable
+      Architectures: {{ 'arm64' if ansible_facts['architecture'] in ['aarch64', 'arm64'] else 'amd64' }}
+      Signed-By: /etc/apt/keyrings/docker.asc
+    owner: root
+    group: root
+    mode: "0644"
+
+# daemon.json is in place before the first start, so dockerd never installs
+# iptables rules, not even once.
+- name: Create /etc/docker
+  ansible.builtin.file:
+    path: /etc/docker
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Write daemon.json
+  ansible.builtin.copy:
+    dest: /etc/docker/daemon.json
+    content: "{{ docker_daemon_config | to_nice_json }}\n"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart docker
+
+- name: Remove distribution container packages
+  ansible.builtin.apt:
+    name:
+      - docker.io
+      - docker-compose
+      - docker-compose-v2
+      - podman-docker
+      - containerd
+      - runc
+    state: absent
+
+- name: Install Docker CE
+  ansible.builtin.apt:
+    name: >-
+      {{ docker_packages if docker_ce_version | length == 0 else
+         (docker_packages | map('regex_replace', '^(docker-ce|docker-ce-cli)$', '\1=' + docker_ce_version) | list) }}
+    state: present
+    update_cache: true
+
+- name: Validate daemon.json
+  ansible.builtin.command: dockerd --validate --config-file /etc/docker/daemon.json
+  changed_when: false
+
+- name: Enable Docker
+  ansible.builtin.systemd_service:
+    name: docker.service
+    enabled: true
+    state: started
+
+- name: Apply a changed daemon configuration now
+  ansible.builtin.meta: flush_handlers

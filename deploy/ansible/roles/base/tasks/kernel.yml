@@ -1,0 +1,95 @@
+---
+# The signer holds the APNs key in memory and the relay holds the relay
+# identity key; neither may end up in a core file or in swap.
+
+- name: Disable core dumps via sysctl
+  ansible.builtin.copy:
+    dest: /etc/sysctl.d/90-healthlog-push-nocore.conf
+    content: |
+      kernel.core_pattern = |/bin/false
+      fs.suid_dumpable = 0
+      vm.swappiness = 0
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Apply sysctl
+
+- name: Disable core dumps via limits
+  ansible.builtin.copy:
+    dest: /etc/security/limits.d/90-healthlog-push-nocore.conf
+    content: |
+      * hard core 0
+      * soft core 0
+      root hard core 0
+      root soft core 0
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Create systemd drop-in directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - /etc/systemd/system.conf.d
+    - /etc/systemd/coredump.conf.d
+
+- name: Set DefaultLimitCORE=0 for every unit
+  ansible.builtin.copy:
+    dest: /etc/systemd/system.conf.d/90-healthlog-push-nocore.conf
+    content: |
+      [Manager]
+      DefaultLimitCORE=0
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reexec systemd
+
+- name: Disable systemd-coredump storage
+  ansible.builtin.copy:
+    dest: /etc/systemd/coredump.conf.d/90-healthlog-push.conf
+    content: |
+      [Coredump]
+      Storage=none
+      ProcessSizeMax=0
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Check for apport
+  ansible.builtin.stat:
+    path: /lib/systemd/system/apport.service
+  register: base_apport
+
+- name: Stop and mask apport (it rewrites core_pattern)
+  ansible.builtin.systemd_service:
+    name: apport.service
+    state: stopped
+    enabled: false
+    masked: true
+  when: base_apport.stat.exists
+
+- name: Check for active swap
+  ansible.builtin.command: swapon --show=NAME --noheadings
+  register: base_swap
+  changed_when: false
+
+- name: Turn swap off
+  ansible.builtin.command: swapoff -a
+  when: base_swap.stdout | trim | length > 0
+  changed_when: true
+
+- name: Remove swap entries from fstab
+  ansible.builtin.replace:
+    path: /etc/fstab
+    regexp: '^([^#\n]*\s+swap\s+.*)$'
+    replace: '# disabled by healthlog-push: \1'
+    backup: true
+
+- name: Remove the default swap file
+  ansible.builtin.file:
+    path: /swap.img
+    state: absent

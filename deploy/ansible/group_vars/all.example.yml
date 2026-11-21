@@ -1,0 +1,66 @@
+---
+# Copy to group_vars/all.yml (not committed) and adjust. Example values only.
+# Secrets are NOT set here; see the end of this file.
+
+# --------------------------------------------------------------- base -------
+base_hostname: push-01
+base_admin_users:
+  - name: admin
+    ssh_keys:
+      - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExampleExampleExampleExampleExampleExample admin@example.org"
+
+# SSH sources. Use a private management network or VPN of your choice and
+# name its interface, and/or list source CIDRs. At least one is required.
+ssh_allowed_interfaces:
+  - wg0
+ssh_allowed_cidrs:
+  - 198.51.100.0/24
+  - 2001:db8:100::/48
+
+base_chrony_sources:
+  - time1.example.org
+  - time2.example.org
+base_unattended_reboot: true
+base_unattended_reboot_time: "04:20"
+
+# ----------------------------------------------------------- firewall -------
+# Egress the management VPN needs (default: none).
+healthlog_push_mgmt_vpn_egress:
+  - {proto: udp, port: 51820}
+# The host can reach nothing except these log and metric receivers
+# (default: none).
+healthlog_push_egress_receivers:
+  - {address: 192.0.2.20, port: 4318, proto: tcp, oifname: wg0}
+firewall_allow_dhcp: true
+# Hetzner Cloud: cloud-init reads the metadata service on boot.
+firewall_allow_cloud_metadata: true
+
+# ------------------------------------------------------------- docker -------
+docker_ce_version: ""
+
+# ------------------------------------------------------- healthlog_push -----
+healthlog_push_image: ghcr.io/mbombeck/healthlog-push@sha256:0000000000000000000000000000000000000000000000000000000000000000
+healthlog_push_release_tag: v0.0.0
+healthlog_push_public_host: push.example.org
+healthlog_push_acme_email: ""
+healthlog_push_apns_topic: org.example.app
+healthlog_push_apns_key_id: ABCDE12345
+healthlog_push_apns_team_id: FGHIJ67890
+
+# Pinned cosign. Take the SHA-256 values from the release's checksum file.
+healthlog_push_cosign_version: v0.0.0
+healthlog_push_cosign_sha256:
+  amd64: "0000000000000000000000000000000000000000000000000000000000000000"
+  arm64: "0000000000000000000000000000000000000000000000000000000000000000"
+
+healthlog_push_export_timer_enabled: false
+healthlog_push_log_shipping_tasks: ""
+
+# ------------------------------------------------------------ secrets -------
+# Provide these at run time from your secret store, never in this file.
+# Example with an encrypted vars file passed as -e @secrets.vault.yml:
+#   healthlog_push_secret_relay_id_key: "..."
+#   healthlog_push_secret_token_mac_key: "..."
+#   healthlog_push_secret_token_mac_key_previous: ""
+#   healthlog_push_secret_acme_account_key: "..."
+#   healthlog_push_secret_apns_key_p8_b64: "..."

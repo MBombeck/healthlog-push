@@ -1,0 +1,89 @@
+---
+- name: Read the previously deployed image
+  ansible.builtin.slurp:
+    src: "{{ healthlog_push_root }}/deployed-digest"
+  register: healthlog_push_previous_raw
+  failed_when: false
+
+- name: Remember the previous image
+  ansible.builtin.set_fact:
+    healthlog_push_previous_image: >-
+      {{ (healthlog_push_previous_raw.content | b64decode | trim)
+         if (healthlog_push_previous_raw.content is defined) else '' }}
+
+- name: Deploy the verified image
+  block:
+    - name: Render .env for the new image
+      ansible.builtin.template:
+        src: env.j2
+        dest: "{{ healthlog_push_root }}/compose/.env"
+        owner: root
+        group: root
+        mode: "0600"
+      vars:
+        healthlog_push_env_image: "{{ healthlog_push_image }}"
+
+    - name: Pull the image
+      ansible.builtin.command:
+        argv: "{{ healthlog_push_compose_cmd + ['pull', '--quiet'] }}"
+      changed_when: false
+
+    - name: Start the stack
+      when: healthlog_push_start | bool
+      ansible.builtin.command:
+        argv: >-
+          {{ healthlog_push_compose_cmd + ['up', '-d', '--remove-orphans']
+             + (['--force-recreate'] if healthlog_push_secrets_changed | bool else []) }}
+      register: healthlog_push_up
+      changed_when: >-
+        'Started' in healthlog_push_up.stderr or 'Recreated' in healthlog_push_up.stderr
+        or 'Created' in healthlog_push_up.stderr
+
+    - name: Wait for relay and signer health
+      ansible.builtin.include_tasks: wait_healthy.yml
+      when: healthlog_push_start | bool
+
+  rescue:
+    - name: Report the failed deploy
+      ansible.builtin.debug:
+        msg: >-
+          Deploy of {{ healthlog_push_image }} failed. Rolling back to
+          {{ healthlog_push_previous_image if healthlog_push_previous_image | length > 0 else 'nothing (first deploy)' }}.
+
+    - name: Roll back to the previous image
+      when:
+        - healthlog_push_previous_image | length > 0
+        - healthlog_push_previous_image != healthlog_push_image
+      block:
+        - name: Render .env for the previous image
+          ansible.builtin.template:
+            src: env.j2
+            dest: "{{ healthlog_push_root }}/compose/.env"
+            owner: root
+            group: root
+            mode: "0600"
+          vars:
+            healthlog_push_env_image: "{{ healthlog_push_previous_image }}"
+
+        - name: Start the previous image
+          ansible.builtin.command:
+            argv: "{{ healthlog_push_compose_cmd + ['up', '-d', '--remove-orphans'] }}"
+          changed_when: true
+
+        - name: Wait for the previous image to report healthy
+          ansible.builtin.include_tasks: wait_healthy.yml
+
+    - name: Fail the play
+      ansible.builtin.fail:
+        msg: >-
+          {{ healthlog_push_image }} did not become healthy and was rolled back
+          (or nothing was running before). {{ healthlog_push_root }}/deployed-digest is unchanged.
+
+- name: Record the deployed image
+  when: healthlog_push_start | bool
+  ansible.builtin.copy:
+    dest: "{{ healthlog_push_root }}/deployed-digest"
+    content: "{{ healthlog_push_image }}\n"
+    owner: root
+    group: root
+    mode: "0644"

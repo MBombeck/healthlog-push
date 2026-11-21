@@ -1,0 +1,29 @@
+# Managed by Ansible (role base). Local changes are overwritten.
+Port {{ base_sshd_port }}
+{% for addr in base_sshd_listen_addresses %}
+ListenAddress {{ addr }}
+{% endfor %}
+PermitRootLogin no
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PermitEmptyPasswords no
+PubkeyAuthentication yes
+AuthenticationMethods publickey
+UsePAM yes
+X11Forwarding no
+AllowAgentForwarding no
+AllowTcpForwarding no
+PermitTunnel no
+GatewayPorts no
+MaxAuthTries 3
+MaxSessions 4
+LoginGraceTime 30
+ClientAliveInterval 300
+ClientAliveCountMax 2
+{% if ssh_allowed_interfaces | length > 0 %}
+{#- Interface sources cannot be expressed in sshd; the firewall restricts them. #}
+AllowUsers {{ base_admin_users | map(attribute='name') | join(' ') }}
+{% else %}
+AllowUsers{% for u in base_admin_users %}{% for c in ssh_allowed_cidrs %} {{ u.name }}@{{ c }}{% endfor %}{% endfor %}
+
+{% endif %}

@@ -1,0 +1,22 @@
+---
+# The relay's own healthcheck exits 0 only on {"status":"ok"} from
+# http://127.0.0.1:9464/healthz.
+- name: Wait for the relay to report status ok
+  ansible.builtin.command:
+    argv: "{{ healthlog_push_compose_cmd + ['exec', '-T', 'relay', '/healthlog-push', 'healthcheck'] }}"
+  register: healthlog_push_relay_health
+  until: healthlog_push_relay_health.rc == 0
+  retries: "{{ healthlog_push_health_retries }}"
+  delay: "{{ healthlog_push_health_delay }}"
+  changed_when: false
+
+- name: Wait for the signer to report healthy
+  ansible.builtin.command:
+    argv: "{{ healthlog_push_compose_cmd + ['ps', '--format', 'json', 'signer'] }}"
+  register: healthlog_push_signer_ps
+  until: >-
+    healthlog_push_signer_ps.rc == 0 and
+    (healthlog_push_signer_ps.stdout_lines | first | default('{}') | from_json).Health | default('') == 'healthy'
+  retries: "{{ healthlog_push_health_retries }}"
+  delay: "{{ healthlog_push_health_delay }}"
+  changed_when: false

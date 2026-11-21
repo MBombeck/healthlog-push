@@ -1,0 +1,44 @@
+---
+# Your backup tool reads these two lists. Only the daily export is backed up.
+# The database, the ACME cache and every secret are excluded: the database
+# refills itself, the certificate is reissued in seconds, secrets come from
+# the secret store.
+- name: Write the backup include list
+  ansible.builtin.copy:
+    dest: "{{ healthlog_push_config_dir }}/backup-include.list"
+    content: |
+      {{ healthlog_push_root }}/export
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Write the backup exclude list
+  ansible.builtin.copy:
+    dest: "{{ healthlog_push_config_dir }}/backup-exclude.list"
+    content: |
+      {{ healthlog_push_root }}/secrets
+      {{ healthlog_push_root }}/data
+      {{ healthlog_push_root }}/acme
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Read back the include list
+  ansible.builtin.slurp:
+    src: "{{ healthlog_push_config_dir }}/backup-include.list"
+  register: healthlog_push_backup_include
+
+- name: Refuse an include list that reaches secrets, data or the ACME cache
+  ansible.builtin.assert:
+    that:
+      - healthlog_push_backup_lines | select('search', '(acme|secrets|data)') | list | length == 0
+      - healthlog_push_backup_lines | reject('equalto', healthlog_push_root + '/export') | list | length == 0
+      - healthlog_push_backup_lines | length == 1
+    fail_msg: >-
+      {{ healthlog_push_config_dir }}/backup-include.list must contain exactly
+      {{ healthlog_push_root }}/export and nothing that reaches acme, secrets or data.
+    quiet: true
+  vars:
+    healthlog_push_backup_lines: >-
+      {{ (healthlog_push_backup_include.content | b64decode).splitlines()
+         | map('trim') | reject('equalto', '') | reject('match', '^#') | list }}

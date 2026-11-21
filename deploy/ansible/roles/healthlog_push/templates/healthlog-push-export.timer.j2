@@ -1,0 +1,11 @@
+# Managed by Ansible (role healthlog_push).
+[Unit]
+Description=Daily healthlog-push registry export
+
+[Timer]
+OnCalendar={{ healthlog_push_export_timer_oncalendar }}
+RandomizedDelaySec=15m
+Persistent=true
+
+[Install]
+WantedBy=timers.target

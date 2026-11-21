@@ -1,0 +1,7 @@
+---
+# ssh_allowed_* and healthlog_push_*_egress* are shared on purpose between the
+# base, firewall and healthlog_push roles, so they carry no single role prefix.
+skip_list:
+  - var-naming[no-role-prefix]
+exclude_paths:
+  - examples/

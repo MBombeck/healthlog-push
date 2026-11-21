@@ -1,0 +1,49 @@
+---
+- name: Install the export service and timer
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "/etc/systemd/system/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - healthlog-push-export.service
+    - healthlog-push-export.timer
+  when: healthlog_push_export_timer_enabled | bool
+
+- name: Enable the export timer
+  ansible.builtin.systemd_service:
+    name: healthlog-push-export.timer
+    enabled: true
+    state: started
+    daemon_reload: true
+  when: healthlog_push_export_timer_enabled | bool
+
+- name: Check for a previously installed timer
+  ansible.builtin.stat:
+    path: /etc/systemd/system/healthlog-push-export.timer
+  register: healthlog_push_timer_file
+  when: not (healthlog_push_export_timer_enabled | bool)
+
+- name: Disable and remove a timer that is no longer wanted
+  when:
+    - not (healthlog_push_export_timer_enabled | bool)
+    - healthlog_push_timer_file.stat.exists | default(false)
+  block:
+    - name: Stop the export timer
+      ansible.builtin.systemd_service:
+        name: healthlog-push-export.timer
+        enabled: false
+        state: stopped
+
+    - name: Remove the unit files
+      ansible.builtin.file:
+        path: "/etc/systemd/system/{{ item }}"
+        state: absent
+      loop:
+        - healthlog-push-export.service
+        - healthlog-push-export.timer
+
+    - name: Reload systemd
+      ansible.builtin.systemd_service:
+        daemon_reload: true

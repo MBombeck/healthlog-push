@@ -1,0 +1,29 @@
+---
+docker_apt_repo_url: https://download.docker.com/linux/ubuntu
+docker_apt_key_url: https://download.docker.com/linux/ubuntu/gpg
+# Published fingerprint of the Docker release signing key. The play aborts if
+# the downloaded key does not carry exactly this fingerprint.
+docker_apt_key_fingerprint: 9DC858229FC7DD38854AE2D88D81803C0EBFCD88
+
+# Optional exact package versions, for example "5:29.0.0-1~ubuntu.24.04~noble".
+# Empty installs the current version from the repository.
+docker_ce_version: ""
+
+docker_packages:
+  - docker-ce
+  - docker-ce-cli
+  - containerd.io
+  - docker-compose-plugin
+
+# daemon.json, per the runtime contract. Docker does not touch the firewall;
+# nftables (role firewall) is the only rule set on the host.
+docker_daemon_config:
+  iptables: false
+  ip6tables: false
+  userland-proxy: false
+  live-restore: true
+  no-new-privileges: true
+  log-driver: json-file
+  log-opts:
+    max-size: "10m"
+    max-file: "3"

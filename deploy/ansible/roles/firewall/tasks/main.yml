@@ -1,0 +1,49 @@
+---
+- name: Refresh network facts
+  ansible.builtin.setup:
+    gather_subset:
+      - "!all"
+      - "!min"
+      - network
+
+- name: Check that SSH stays reachable
+  ansible.builtin.assert:
+    that:
+      - (ssh_allowed_interfaces | length > 0) or (ssh_allowed_cidrs | length > 0)
+      - ssh_allowed_interfaces | difference(ansible_facts['interfaces']) | length == 0
+    fail_msg: >-
+      SSH needs at least one source, and every name in ssh_allowed_interfaces
+      must exist on the host now (missing:
+      {{ ssh_allowed_interfaces | difference(ansible_facts['interfaces']) }}).
+      Bring the management interface up first, or allow a CIDR for the bootstrap run.
+    quiet: true
+
+- name: Check receiver and VPN entries
+  ansible.builtin.assert:
+    that:
+      - healthlog_push_egress_receivers | rejectattr('address', 'defined') | list | length == 0
+      - healthlog_push_egress_receivers | rejectattr('port', 'defined') | list | length == 0
+      - healthlog_push_mgmt_vpn_egress | rejectattr('port', 'defined') | list | length == 0
+      - (healthlog_push_mgmt_vpn_egress + healthlog_push_egress_receivers) | map(attribute='proto', default='tcp') | difference(['tcp', 'udp']) | length == 0
+    fail_msg: Every egress entry needs address (receivers) and port; proto is tcp or udp.
+    quiet: true
+
+- name: Render the rule set (validated with nft -c before it is installed)
+  ansible.builtin.template:
+    src: nftables.conf.j2
+    dest: /etc/nftables.conf
+    owner: root
+    group: root
+    mode: "0644"
+    backup: true
+    validate: /usr/sbin/nft -c -f %s
+  register: firewall_conf
+  notify: Apply nftables
+
+- name: Enable nftables at boot
+  ansible.builtin.systemd_service:
+    name: nftables.service
+    enabled: true
+
+- name: Apply the rule set now
+  ansible.builtin.meta: flush_handlers

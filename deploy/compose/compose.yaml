@@ -1,0 +1,150 @@
+---
+# healthlog-push: relay and signer on one host.
+#
+# The image MUST be referenced by digest (ghcr.io/...@sha256:<64 hex>). The
+# Ansible role asserts this and verifies the signature and the provenance
+# before it ever runs `docker compose up`. Do not edit HLP_IMAGE by hand on a
+# running host; deploy through the role so the verification cannot be skipped.
+#
+# Host layout (see docs/migration.md and deploy/ansible/README.md):
+#   ${HLP_ROOT}/data             relay rw   bbolt db + admin socket, not backed up
+#   ${HLP_ROOT}/export           relay rw   registry.json, the only backed-up path
+#   ${HLP_ROOT}/acme             relay rw   TLS cert + key, never backed up or copied
+#   ${HLP_ROOT}/secrets/relay    relay ro   relay_id_key, token_mac_key[_previous], acme_account_key
+#   ${HLP_ROOT}/secrets/signer   signer ro  apns.p8
+
+name: healthlog-push
+
+x-hardening: &hardening
+  image: ${HLP_IMAGE:?HLP_IMAGE must be set to ghcr.io/...@sha256:<digest>}
+  read_only: true
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  restart: unless-stopped
+  stop_grace_period: 30s
+  ulimits:
+    core:
+      soft: 0
+      hard: 0
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+      labels: com.docker.compose.service
+
+services:
+  signer:
+    <<: *hardening
+    command: ["signer"]
+    user: "65533:65530"
+    network_mode: none
+    mem_limit: 32m
+    memswap_limit: 32m
+    pids_limit: 32
+    environment:
+      HLP_APNS_KEY_FILE: /run/secrets/signer/apns.p8
+      HLP_APNS_KEY_ID: ${HLP_APNS_KEY_ID:?HLP_APNS_KEY_ID must be set}
+      HLP_APNS_TEAM_ID: ${HLP_APNS_TEAM_ID:?HLP_APNS_TEAM_ID must be set}
+      HLP_JWT_DIR: /run/jwt
+      HLP_JWT_REFRESH_DIR: /run/jwt-refresh
+    volumes:
+      - type: bind
+        source: ${HLP_ROOT:-/srv/healthlog-push}/secrets/signer
+        target: /run/secrets/signer
+        read_only: true
+      - type: volume
+        source: jwt
+        target: /run/jwt
+      - type: volume
+        source: jwt-refresh
+        target: /run/jwt-refresh
+        read_only: true
+    healthcheck:
+      test: ["CMD", "/healthlog-push", "healthcheck", "--signer"]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  relay:
+    <<: *hardening
+    command: ["relay"]
+    user: "65532:65530"
+    # Host networking: the relay listens on :8443 without any capability.
+    # nftables redirects tcp/443 to 8443 (v4 and v6, source preserved) and
+    # accepts 8443 only for redirected connections.
+    network_mode: host
+    mem_limit: 256m
+    memswap_limit: 256m
+    cpus: 1.0
+    pids_limit: 256
+    depends_on:
+      signer:
+        condition: service_started
+    environment:
+      HLP_PUBLIC_HOST: ${HLP_PUBLIC_HOST:?HLP_PUBLIC_HOST must be set}
+      HLP_LISTEN: ${HLP_LISTEN:-:8443}
+      HLP_TLS_MODE: ${HLP_TLS_MODE:-acme}
+      HLP_TLS_CERT_FILE: ${HLP_TLS_CERT_FILE:-}
+      HLP_TLS_KEY_FILE: ${HLP_TLS_KEY_FILE:-}
+      HLP_ACME_CACHE_DIR: /acme
+      HLP_ACME_ACCOUNT_KEY_FILE: /run/secrets/relay/acme_account_key
+      HLP_ACME_DIRECTORY: ${HLP_ACME_DIRECTORY:-https://acme-v02.api.letsencrypt.org/directory}
+      HLP_ACME_EMAIL: ${HLP_ACME_EMAIL:-}
+      HLP_DATA_DIR: /data
+      HLP_EXPORT_DIR: /export
+      HLP_SECRETS_DIR: /run/secrets/relay
+      HLP_JWT_DIR: /run/jwt
+      HLP_JWT_REFRESH_DIR: /run/jwt-refresh
+      HLP_APNS_URL: ${HLP_APNS_URL:-https://api.push.apple.com}
+      HLP_APNS_TOPIC: ${HLP_APNS_TOPIC:?HLP_APNS_TOPIC must be set}
+      HLP_APNS_ENVIRONMENT: production
+      HLP_METRICS_LISTEN: 127.0.0.1:9464
+      HLP_ADMIN_SOCKET: /data/admin.sock
+      HLP_IMAGE_DIGEST: ${HLP_IMAGE_DIGEST:?HLP_IMAGE_DIGEST must be set}
+    volumes:
+      - type: bind
+        source: ${HLP_ROOT:-/srv/healthlog-push}/data
+        target: /data
+      - type: bind
+        source: ${HLP_ROOT:-/srv/healthlog-push}/export
+        target: /export
+      - type: bind
+        source: ${HLP_ROOT:-/srv/healthlog-push}/acme
+        target: /acme
+      - type: bind
+        source: ${HLP_ROOT:-/srv/healthlog-push}/secrets/relay
+        target: /run/secrets/relay
+        read_only: true
+      - type: volume
+        source: jwt
+        target: /run/jwt
+        read_only: true
+      - type: volume
+        source: jwt-refresh
+        target: /run/jwt-refresh
+    healthcheck:
+      test: ["CMD", "/healthlog-push", "healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+
+volumes:
+  # JWT handoff: signer writes `token`, relay reads it.
+  jwt:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: "size=1m,mode=0770,uid=65533,gid=65530"
+  # Refresh request: relay writes the empty marker `refresh`, signer reads it.
+  jwt-refresh:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: "size=1m,mode=0770,uid=65532,gid=65530"

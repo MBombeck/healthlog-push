@@ -1,0 +1,83 @@
+---
+- name: Create the base directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner }}"
+    group: "{{ item.group }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - {path: "{{ healthlog_push_root }}", owner: root, group: root, mode: "0755"}
+    - {path: "{{ healthlog_push_root }}/compose", owner: root, group: root, mode: "0750"}
+    - {path: "{{ healthlog_push_root }}/data", owner: "{{ healthlog_push_relay_uid }}", group: "{{ healthlog_push_gid }}", mode: "0700"}
+    - {path: "{{ healthlog_push_root }}/export", owner: "{{ healthlog_push_relay_uid }}", group: "{{ healthlog_push_gid }}", mode: "0750"}
+    - {path: "{{ healthlog_push_root }}/acme", owner: "{{ healthlog_push_relay_uid }}", group: "{{ healthlog_push_gid }}", mode: "0700"}
+    - {path: "{{ healthlog_push_root }}/secrets", owner: root, group: root, mode: "0700"}
+    - {path: "{{ healthlog_push_root }}/secrets/relay", owner: "{{ healthlog_push_relay_uid }}", group: root, mode: "0500"}
+    - {path: "{{ healthlog_push_root }}/secrets/signer", owner: "{{ healthlog_push_signer_uid }}", group: root, mode: "0500"}
+    - {path: "{{ healthlog_push_config_dir }}", owner: root, group: root, mode: "0755"}
+  loop_control:
+    label: "{{ item.path }}"
+
+# The APNs key goes to the signer path only; the relay never sees it.
+- name: Write the relay secret files
+  ansible.builtin.copy:
+    dest: "{{ healthlog_push_root }}/secrets/relay/{{ item.name }}"
+    content: "{{ item.value }}"
+    owner: "{{ healthlog_push_relay_uid }}"
+    group: root
+    mode: "0400"
+    backup: false
+  loop:
+    - {name: relay_id_key, value: "{{ healthlog_push_secret_relay_id_key }}"}
+    - {name: token_mac_key, value: "{{ healthlog_push_secret_token_mac_key }}"}
+    - {name: acme_account_key, value: "{{ healthlog_push_secret_acme_account_key }}"}
+  no_log: true
+  diff: false
+  register: healthlog_push_relay_secrets
+
+- name: Write or remove the previous token MAC key
+  ansible.builtin.copy:
+    dest: "{{ healthlog_push_root }}/secrets/relay/token_mac_key_previous"
+    content: "{{ healthlog_push_secret_token_mac_key_previous }}"
+    owner: "{{ healthlog_push_relay_uid }}"
+    group: root
+    mode: "0400"
+    backup: false
+  when: healthlog_push_secret_token_mac_key_previous | length > 0
+  no_log: true
+  diff: false
+  register: healthlog_push_prev_mac
+
+- name: Remove a retired previous token MAC key
+  ansible.builtin.file:
+    path: "{{ healthlog_push_root }}/secrets/relay/token_mac_key_previous"
+    state: absent
+  when: healthlog_push_secret_token_mac_key_previous | length == 0
+  register: healthlog_push_prev_mac_removed
+
+- name: Write the APNs key for the signer
+  ansible.builtin.copy:
+    dest: "{{ healthlog_push_root }}/secrets/signer/apns.p8"
+    content: "{{ healthlog_push_secret_apns_key_p8_b64 | b64decode }}"
+    owner: "{{ healthlog_push_signer_uid }}"
+    group: root
+    mode: "0400"
+    backup: false
+  no_log: true
+  diff: false
+  register: healthlog_push_signer_secret
+
+- name: Remember whether a secret changed (forces a container restart)
+  ansible.builtin.set_fact:
+    healthlog_push_secrets_changed: >-
+      {{ healthlog_push_relay_secrets.changed or healthlog_push_prev_mac.changed
+         or healthlog_push_prev_mac_removed.changed or healthlog_push_signer_secret.changed }}
+
+- name: Install the compose file from the repository
+  ansible.builtin.copy:
+    src: "{{ healthlog_push_compose_src }}"
+    dest: "{{ healthlog_push_root }}/compose/compose.yaml"
+    owner: root
+    group: root
+    mode: "0640"

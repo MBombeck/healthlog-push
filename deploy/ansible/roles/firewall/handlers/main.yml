@@ -1,0 +1,48 @@
+---
+# Handlers run in the order they are listed here. Together they form a
+# dead-man switch: arm a timed restore, load the new rules, prove that a fresh
+# SSH connection still works, then disarm.
+
+- name: Clear a stale rollback unit
+  ansible.builtin.command: systemctl reset-failed healthlog-push-nft-rollback.timer healthlog-push-nft-rollback.service
+  changed_when: false
+  failed_when: false
+  listen: Apply nftables
+
+- name: Arm firewall rollback
+  ansible.builtin.command:
+    argv:
+      - systemd-run
+      - --unit=healthlog-push-nft-rollback
+      - --on-active={{ firewall_rollback_seconds }}
+      - /bin/sh
+      - -c
+      - "{{ firewall_rollback_cmd }}"
+  vars:
+    firewall_rollback_cmd: >-
+      {% if firewall_conf.backup_file is defined %}cp {{ firewall_conf.backup_file }} /etc/nftables.conf
+      && nft -f /etc/nftables.conf{% else %}nft delete table inet healthlog_push{% endif %}
+  changed_when: true
+  listen: Apply nftables
+
+- name: Reload nftables
+  ansible.builtin.systemd_service:
+    name: nftables.service
+    state: reloaded
+  listen: Apply nftables
+
+- name: Open a fresh SSH connection from the control node
+  ansible.builtin.wait_for:
+    host: "{{ ansible_host | default(inventory_hostname) }}"
+    port: "{{ ansible_port | default(firewall_ssh_port) }}"
+    timeout: 30
+    search_regex: OpenSSH
+  delegate_to: localhost
+  become: false
+  listen: Apply nftables
+
+- name: Disarm firewall rollback
+  ansible.builtin.systemd_service:
+    name: healthlog-push-nft-rollback.timer
+    state: stopped
+  listen: Apply nftables

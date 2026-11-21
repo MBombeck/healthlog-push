@@ -1,0 +1,64 @@
+---
+- name: Check preconditions
+  ansible.builtin.assert:
+    that:
+      - ansible_facts['distribution'] == 'Ubuntu'
+      - base_admin_users | length > 0
+      - base_admin_users | rejectattr('ssh_keys', 'defined') | list | length == 0
+      - base_admin_users | map(attribute='ssh_keys') | map('length') | min > 0
+      - (ssh_allowed_interfaces | length > 0) or (ssh_allowed_cidrs | length > 0)
+      - base_chrony_sources | length >= 2
+    fail_msg: >-
+      Set base_admin_users (each with at least one SSH key), at least one of
+      ssh_allowed_interfaces / ssh_allowed_cidrs (otherwise SSH would be closed
+      for everyone), and at least two base_chrony_sources.
+    quiet: true
+
+- name: Check that the connecting account keeps access after hardening
+  ansible.builtin.assert:
+    that:
+      - ansible_user | default('root') == 'root' or ansible_user in (base_admin_users | map(attribute='name'))
+    fail_msg: >-
+      ansible_user {{ ansible_user | default('') }} is not in base_admin_users and
+      would lose access when AllowUsers is applied.
+    quiet: true
+
+- name: Warn when bootstrapping as root
+  ansible.builtin.debug:
+    msg: >-
+      Connected as root. Root login is disabled by this role; run every later
+      play as one of base_admin_users.
+  when: ansible_user | default('root') == 'root'
+
+- name: Set the hostname
+  ansible.builtin.hostname:
+    name: "{{ base_hostname }}"
+  when: base_hostname | length > 0
+
+- name: Install base packages
+  ansible.builtin.apt:
+    name:
+      - chrony
+      - unattended-upgrades
+      - gnupg
+      - ca-certificates
+      - curl
+      - nftables
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Admin accounts
+  ansible.builtin.include_tasks: users.yml
+
+- name: SSH daemon
+  ansible.builtin.include_tasks: sshd.yml
+
+- name: Core dumps and swap
+  ansible.builtin.include_tasks: kernel.yml
+
+- name: Time
+  ansible.builtin.include_tasks: chrony.yml
+
+- name: Security updates
+  ansible.builtin.include_tasks: updates.yml

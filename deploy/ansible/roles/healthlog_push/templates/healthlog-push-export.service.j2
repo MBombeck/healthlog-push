@@ -1,0 +1,9 @@
+# Managed by Ansible (role healthlog_push).
+[Unit]
+Description=healthlog-push registry export (belt and braces, the relay also exports daily)
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/docker compose --project-directory {{ healthlog_push_root }}/compose -p {{ healthlog_push_project }} exec -T relay /healthlog-push admin export

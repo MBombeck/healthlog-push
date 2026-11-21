@@ -1,0 +1,31 @@
+---
+- name: Enable periodic unattended upgrades
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/20auto-upgrades
+    content: |
+      APT::Periodic::Update-Package-Lists "1";
+      APT::Periodic::Unattended-Upgrade "1";
+      APT::Periodic::AutocleanInterval "7";
+    owner: root
+    group: root
+    mode: "0644"
+
+# Security pocket only. Docker CE and the relay image are updated on purpose,
+# never automatically.
+- name: Restrict unattended upgrades to security updates
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/52healthlog-push-unattended
+    content: |
+      Unattended-Upgrade::Allowed-Origins {};
+      Unattended-Upgrade::Origins-Pattern {
+              "origin=Ubuntu,archive=${distro_codename}-security,label=Ubuntu";
+              "origin=UbuntuESMApps,archive=${distro_codename}-apps-security";
+              "origin=UbuntuESM,archive=${distro_codename}-infra-security";
+      };
+      Unattended-Upgrade::Remove-Unused-Dependencies "true";
+      Unattended-Upgrade::Automatic-Reboot "{{ base_unattended_reboot | ternary('true', 'false') }}";
+      Unattended-Upgrade::Automatic-Reboot-WithUsers "true";
+      Unattended-Upgrade::Automatic-Reboot-Time "{{ base_unattended_reboot_time }}";
+    owner: root
+    group: root
+    mode: "0644"

@@ -1,0 +1,22 @@
+---
+- name: Preflight checks
+  ansible.builtin.include_tasks: preflight.yml
+
+- name: Directories and secret files
+  ansible.builtin.include_tasks: layout.yml
+
+- name: Backup include and exclude lists
+  ansible.builtin.include_tasks: backup.yml
+
+- name: Install cosign and verify the release
+  ansible.builtin.include_tasks: verify.yml
+
+- name: Deploy with health gate and rollback
+  ansible.builtin.include_tasks: deploy.yml
+
+- name: Optional export timer
+  ansible.builtin.include_tasks: export_timer.yml
+
+- name: Optional log shipping hook
+  ansible.builtin.include_tasks: "{{ healthlog_push_log_shipping_tasks }}"
+  when: healthlog_push_log_shipping_tasks | length > 0

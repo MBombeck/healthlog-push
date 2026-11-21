@@ -1,0 +1,73 @@
+---
+# ---------------------------------------------------------------- release ---
+# Image pinned by digest. A tag is not accepted.
+healthlog_push_image: ""
+# Git tag the image was released from (vX.Y.Z). Part of the signing identity.
+healthlog_push_release_tag: ""
+# Source repository whose release workflow signs the image.
+healthlog_push_source_repo: MBombeck/healthlog-push
+healthlog_push_oidc_issuer: https://token.actions.githubusercontent.com
+healthlog_push_signing_identity: >-
+  https://github.com/{{ healthlog_push_source_repo }}/.github/workflows/release.yml@refs/tags/{{ healthlog_push_release_tag }}
+healthlog_push_provenance_identity_regexp: >-
+  ^https://github.com/slsa-framework/slsa-github-generator/.github/workflows/generator_container_slsa3.yml@refs/tags/v[0-9.]+$
+
+# ----------------------------------------------------------------- cosign ---
+# Pinned cosign release and the SHA-256 of the binary for the host
+# architecture (from the release's checksum file, checked once by hand).
+healthlog_push_cosign_version: ""
+healthlog_push_cosign_sha256:
+  amd64: ""
+  arm64: ""
+healthlog_push_cosign_path: /usr/local/bin/cosign
+
+# ---------------------------------------------------------------- runtime ---
+healthlog_push_root: /srv/healthlog-push
+healthlog_push_config_dir: /etc/healthlog-push
+healthlog_push_project: healthlog-push
+# The compose file shipped in this repository is the only source.
+healthlog_push_compose_src: "{{ playbook_dir }}/../compose/compose.yaml"
+
+healthlog_push_public_host: push.example.org
+healthlog_push_listen: ":8443"
+healthlog_push_tls_mode: acme
+healthlog_push_acme_directory: https://acme-v02.api.letsencrypt.org/directory
+healthlog_push_acme_email: ""
+healthlog_push_apns_url: https://api.push.apple.com
+healthlog_push_apns_topic: ""
+healthlog_push_apns_key_id: ""
+healthlog_push_apns_team_id: ""
+
+healthlog_push_relay_uid: 65532
+healthlog_push_signer_uid: 65533
+healthlog_push_gid: 65530
+
+# ---------------------------------------------------------------- secrets ---
+# Supplied from your secret store at run time (for example through a lookup
+# plugin or an encrypted vars file). Never commit values. Every task that
+# touches them runs with no_log.
+#   relay_id_key, token_mac_key, acme_account_key: file contents as written by
+#     `healthlog-push keygen relay-id|token-mac|acme-account`.
+#   token_mac_key_previous: optional, only during a MAC key rotation.
+#   apns_key_p8_b64: the APNs .p8 file, base64 encoded.
+healthlog_push_secret_relay_id_key: ""
+healthlog_push_secret_token_mac_key: ""
+healthlog_push_secret_token_mac_key_previous: ""
+healthlog_push_secret_acme_account_key: ""
+healthlog_push_secret_apns_key_p8_b64: ""
+
+# ----------------------------------------------------------------- deploy ---
+# false: verify, write files, render .env and pull, but do not start the
+# containers (used when preparing a new host, see docs/migration.md).
+healthlog_push_start: true
+healthlog_push_health_retries: 30
+healthlog_push_health_delay: 5
+
+# --------------------------------------------------------------- optional ---
+# Path to a task file (on the control node) included after a successful
+# deploy, for example to configure a log shipper. See examples/log-shipper.md.
+healthlog_push_log_shipping_tasks: ""
+
+# Belt-and-braces export. The relay writes the export daily by itself.
+healthlog_push_export_timer_enabled: false
+healthlog_push_export_timer_oncalendar: "*-*-* 03:17:00"

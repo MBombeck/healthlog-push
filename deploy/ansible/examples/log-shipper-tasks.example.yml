@@ -1,0 +1,20 @@
+---
+# Example task file for healthlog_push_log_shipping_tasks. It only places a
+# configuration file; installing the shipper itself is up to you.
+- name: Create the log shipper config directory
+  ansible.builtin.file:
+    path: /etc/healthlog-push/log-shipper
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: Write the drop expressions for the log shipper
+  ansible.builtin.copy:
+    dest: /etc/healthlog-push/log-shipper/drop-addresses.txt
+    content: |
+      (^|[^0-9.])(25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])([.](25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])){3}([^0-9.]|$)
+      (?i)(^|[^0-9a-f:])(([0-9a-f]{1,4}:){3,7}[0-9a-f]{0,4}|[0-9a-f]{0,4}(:[0-9a-f]{1,4})*::([0-9a-f]{1,4}(:[0-9a-f]{1,4})*)?)([^0-9a-f:]|$)
+    owner: root
+    group: root
+    mode: "0644"

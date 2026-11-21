@@ -1,0 +1,11 @@
+---
+# Copy to inventory.yml (not committed) and adjust. Example values only.
+all:
+  children:
+    healthlog_push:
+      hosts:
+        push-01:
+          # Address the control node uses: the public address for the
+          # bootstrap run, later the management network address.
+          ansible_host: 203.0.113.10
+          ansible_user: admin
