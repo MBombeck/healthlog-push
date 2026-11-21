@@ -96,6 +96,8 @@ ones in `cmd/healthlog-push/main.go`.
 | `HLP_APNS_ENVIRONMENT` | `production` | comma-separated list of served environments; only `production` and `sandbox` are accepted, any other value stops the relay at start |
 | `HLP_MIN_CLIENT_VERSION` | none | refuse instance requests whose `HL-Client` version is lower, for example `1.49.0` (`426 min_server_version`); the compose file passes it from `.env`, and a value that is not `major.minor.patch` stops the relay at start |
 | `HLP_IMAGE_DIGEST` | empty | shown at `/version`; the compose file requires it |
+| `HLP_REGISTRATION_MODE` | `invite` | registration mode of a store that has none yet: `invite`, `closed` or `open`; applied and stored before the first request is accepted. A mode set later with `admin registration` is stored and wins (see [Registration](#registration)); any other value stops the relay at start |
+| `HLP_APPARMOR_RELAY`, `HLP_APPARMOR_SIGNER` | `docker-default` | AppArmor profile per container, read by the compose file only (see [AppArmor](#apparmor)) |
 
 ### Signer (`healthlog-push signer`)
 
@@ -134,6 +136,43 @@ With `HLP_TLS_MODE=files`, mount the certificate and key into the relay containe
 point `HLP_TLS_CERT_FILE` and `HLP_TLS_KEY_FILE` at them. They are read at start only: restart the relay
 after every renewal. TLS 1.3 is the minimum in both modes; only a TLS-ALPN-01 validation handshake in
 `acme` mode, one that offers no ALPN protocol other than `acme-tls/1`, may use TLS 1.2.
+
+### Registration
+
+A new relay accepts no registration without a one-time code: it starts in `invite` (or in what
+`HLP_REGISTRATION_MODE` says) and stores that mode before the listener takes its first request, so there is no
+moment in which anyone could register. Register your own servers with codes:
+
+```sh
+docker compose exec relay /healthlog-push admin invite
+```
+
+To let any HealthLog server register, open it on purpose; the registration limits still apply:
+
+```sh
+docker compose exec relay /healthlog-push admin registration open
+```
+
+The stored mode survives restarts and updates; `HLP_REGISTRATION_MODE` only decides the first one.
+
+### AppArmor
+
+`deploy/apparmor/` holds one profile per container. They allow what the relay and the signer do and nothing
+else: the relay reads its own secrets but not the APNs key, writes only `/data`, `/acme`, `/export` and the
+refresh marker, and has no capability; the signer has no network rule at all and writes only the provider
+token. Without them Docker applies its own `docker-default` profile. To use them on an AppArmor host:
+
+```sh
+install -m 0644 deploy/apparmor/healthlog-push-relay deploy/apparmor/healthlog-push-signer /etc/apparmor.d/
+apparmor_parser -r -W /etc/apparmor.d/healthlog-push-relay /etc/apparmor.d/healthlog-push-signer
+grep healthlog-push /sys/kernel/security/apparmor/profiles   # both "(enforce)"
+```
+
+then set `HLP_APPARMOR_RELAY=healthlog-push-relay` and `HLP_APPARMOR_SIGNER=healthlog-push-signer` in `.env`
+and recreate the containers. `docker inspect -f '{{.AppArmorProfile}}' <container>` shows the profile in use.
+A profile name the kernel has not loaded makes `docker compose up` fail; the Ansible role checks this before
+it touches the running containers. To try a change first, load it with `apparmor_parser -C -r` (complain) and
+look for `apparmor="ALLOWED"` lines in the audit log while you use the relay.
 
 ## Firewall
 

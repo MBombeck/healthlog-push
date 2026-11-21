@@ -1,0 +1,75 @@
+# AppArmor profile for the relay container (deploy/compose/compose.yaml, service relay).
+#
+# Paths are those inside the container. Load on the host with
+#   apparmor_parser -r -W /etc/apparmor.d/healthlog-push-relay
+# and set HLP_APPARMOR_RELAY=healthlog-push-relay (docs/self-hosting.md, "AppArmor").
+#
+# The relay reads its own secrets (never the signer's), the CA roots and the resolver files, writes the
+# store and the admin socket in /data, the certificate cache in /acme, the export in /export and the
+# refresh marker in /run/jwt-refresh, and reads the provider token from /run/jwt. It needs TCP and UDP
+# for TLS, ACME, APNs, DNS and the loopback metrics listener, and no capability at all.
+abi <abi/3.0>,
+
+#include <tunables/global>
+
+profile healthlog-push-relay flags=(attach_disconnected,mediate_deleted) {
+  #include <abstractions/base>
+
+  network inet stream,
+  network inet6 stream,
+  network inet dgram,
+  network inet6 dgram,
+  network netlink raw,
+  network unix stream,
+  deny network raw,
+  deny network packet,
+
+  # The container runtime stops the container; Go signals its own threads.
+  signal (receive) peer=unconfined,
+  signal (send, receive) peer=healthlog-push-relay,
+  # The admin socket: the relay listens, `docker compose exec relay /healthlog-push admin` connects.
+  unix (create, bind, listen, accept, getattr, setattr, getopt, setopt, shutdown) type=stream,
+  unix (connect, send, receive) type=stream peer=(label=healthlog-push-relay),
+
+  /healthlog-push mrix,
+
+  /etc/ssl/certs/ r,
+  /etc/ssl/certs/** r,
+  /etc/hosts r,
+  /etc/resolv.conf r,
+  /etc/nsswitch.conf r,
+  /etc/localtime r,
+  /usr/share/zoneinfo/** r,
+
+  /run/secrets/relay/ r,
+  /run/secrets/relay/* r,
+  deny /run/secrets/signer/** rwklx,
+
+  /data/ r,
+  /data/** rwk,
+  /acme/ r,
+  /acme/** rwk,
+  /export/ r,
+  /export/** rwk,
+  /run/jwt/ r,
+  /run/jwt/token r,
+  /run/jwt-refresh/ r,
+  /run/jwt-refresh/refresh rw,
+
+  @{PROC}/sys/net/core/somaxconn r,
+  @{PROC}/@{pid}/cgroup r,
+  @{PROC}/@{pid}/mountinfo r,
+  @{PROC}/@{pid}/stat r,
+  /sys/kernel/mm/transparent_hugepage/hpage_pmd_size r,
+  /sys/fs/cgroup/ r,
+  /sys/fs/cgroup/** r,
+
+  deny @{PROC}/@{pid}/mem rw,
+  deny @{PROC}/sysrq-trigger rw,
+  deny @{PROC}/kcore r,
+  deny /sys/firmware/** rw,
+  deny mount,
+  deny umount,
+  deny pivot_root,
+  deny ptrace,
+}

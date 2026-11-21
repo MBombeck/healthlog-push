@@ -29,7 +29,7 @@ that can write to one storage location reserved for this host.
 
 **Sandboxing.** The relay and the component that holds the Apple signing key run in separate containers as
 unprivileged users, with a read-only root filesystem, all Linux capabilities dropped (the relay listens on an unprivileged port and the host firewall
-forwards port 443 to it), no privilege escalation, the default seccomp filter and AppArmor profiles. The small in-memory volumes the two
+forwards port 443 to it), no privilege escalation, the default seccomp filter and an AppArmor profile of its own for each container (`deploy/apparmor/`). The small in-memory volumes the two
 containers share are mounted `noexec`, `nosuid` and `nodev`. The signing component
 has no network access at all; the relay never sees the signing key, only short-lived tokens.
 

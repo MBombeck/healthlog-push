@@ -43,6 +43,25 @@
       ansible.builtin.include_tasks: wait_healthy.yml
       when: healthlog_push_start | bool
 
+    - name: Read the AppArmor profile of each container
+      when: healthlog_push_start | bool
+      ansible.builtin.shell:
+        cmd: >-
+          set -o pipefail;
+          {{ healthlog_push_compose_cmd | map('quote') | join(' ') }} ps -q {{ item.service }}
+          | xargs docker inspect --format '{{ '{{' }}.AppArmorProfile{{ '}}' }}'
+        executable: /bin/bash
+      loop:
+        - {service: relay, profile: "{{ healthlog_push_apparmor_relay }}"}
+        - {service: signer, profile: "{{ healthlog_push_apparmor_signer }}"}
+      loop_control:
+        label: "{{ item.service }}"
+      register: healthlog_push_apparmor_running
+      changed_when: false
+      failed_when: >-
+        healthlog_push_apparmor_running.rc != 0
+        or (healthlog_push_apparmor_running.stdout | trim) != item.profile
+
   rescue:
     - name: Report the failed deploy
       ansible.builtin.debug:

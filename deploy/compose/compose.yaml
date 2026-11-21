@@ -40,6 +40,11 @@ services:
     <<: *hardening
     command: ["signer"]
     user: "65533:65530"
+    # docker-default is Docker's own profile, the same as not naming one. A host that loads the profiles in
+    # deploy/apparmor/ sets HLP_APPARMOR_SIGNER=healthlog-push-signer (docs/self-hosting.md, "AppArmor").
+    security_opt:
+      - no-new-privileges:true
+      - apparmor=${HLP_APPARMOR_SIGNER:-docker-default}
     network_mode: none
     mem_limit: 32m
     memswap_limit: 32m
@@ -74,6 +79,9 @@ services:
     <<: *hardening
     command: ["relay"]
     user: "65532:65530"
+    security_opt:
+      - no-new-privileges:true
+      - apparmor=${HLP_APPARMOR_RELAY:-docker-default}
     # Host networking: the relay listens on :8443 without any capability.
     # nftables redirects tcp/443 to 8443 (v4 and v6, source preserved) and
     # accepts 8443 only for redirected connections.
@@ -90,6 +98,8 @@ services:
       # Fingerprint of the secret files; a change recreates the container (not read by the program).
       HLP_SECRETS_REV: ${HLP_SECRETS_REV:-}
       HLP_MIN_CLIENT_VERSION: ${HLP_MIN_CLIENT_VERSION:-}
+      # Mode of a store that has none yet: invite (default) or closed; open only on purpose.
+      HLP_REGISTRATION_MODE: ${HLP_REGISTRATION_MODE:-invite}
       # Keep the Go heap below the container limit so the runtime collects before the kernel kills.
       GOMEMLIMIT: 220MiB
       HLP_LISTEN: ${HLP_LISTEN:-:8443}

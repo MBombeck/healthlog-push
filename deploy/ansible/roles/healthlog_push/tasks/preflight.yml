@@ -35,3 +35,40 @@
     fail_msg: One or more secrets are empty. Supply them from your secret store.
     quiet: true
   no_log: true
+
+- name: Check the registration mode and the AppArmor profile names
+  ansible.builtin.assert:
+    that:
+      - healthlog_push_registration_mode in ['open', 'invite', 'closed']
+      - healthlog_push_apparmor_relay is match('^[a-z0-9][a-z0-9._-]*$')
+      - healthlog_push_apparmor_signer is match('^[a-z0-9][a-z0-9._-]*$')
+    fail_msg: >-
+      healthlog_push_registration_mode must be open, invite or closed; the AppArmor
+      profile names must be plain profile names.
+    quiet: true
+
+- name: Read the loaded AppArmor profiles
+  when: >-
+    healthlog_push_apparmor_relay not in ['docker-default', 'unconfined']
+    or healthlog_push_apparmor_signer not in ['docker-default', 'unconfined']
+  block:
+    - name: Read /sys/kernel/security/apparmor/profiles
+      ansible.builtin.slurp:
+        src: /sys/kernel/security/apparmor/profiles
+      register: healthlog_push_apparmor_loaded
+
+    - name: Check that the named profiles are loaded in enforce mode
+      ansible.builtin.assert:
+        that:
+          - >-
+            (healthlog_push_apparmor_relay ~ ' (enforce)') in healthlog_push_apparmor_profiles
+            or healthlog_push_apparmor_relay in ['docker-default', 'unconfined']
+          - >-
+            (healthlog_push_apparmor_signer ~ ' (enforce)') in healthlog_push_apparmor_profiles
+            or healthlog_push_apparmor_signer in ['docker-default', 'unconfined']
+        fail_msg: >-
+          The AppArmor profiles {{ healthlog_push_apparmor_relay }} and {{ healthlog_push_apparmor_signer }}
+          must be loaded in enforce mode before the deploy (apparmor_parser -r), or set docker-default.
+        quiet: true
+      vars:
+        healthlog_push_apparmor_profiles: "{{ (healthlog_push_apparmor_loaded.content | b64decode).splitlines() }}"

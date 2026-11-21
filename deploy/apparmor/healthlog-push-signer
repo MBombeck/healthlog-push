@@ -1,0 +1,53 @@
+# AppArmor profile for the signer container (deploy/compose/compose.yaml, service signer).
+#
+# Paths are those inside the container. Load on the host with
+#   apparmor_parser -r -W /etc/apparmor.d/healthlog-push-signer
+# and set HLP_APPARMOR_SIGNER=healthlog-push-signer (docs/self-hosting.md, "AppArmor").
+#
+# The signer has no network (compose: network_mode none; here: no network rule at all). It reads the APNs
+# key, writes the provider token into /run/jwt (temporary file, then rename) and only looks at the time
+# of the refresh marker in /run/jwt-refresh. It needs no capability.
+abi <abi/3.0>,
+
+#include <tunables/global>
+
+profile healthlog-push-signer flags=(attach_disconnected,mediate_deleted) {
+  #include <abstractions/base>
+
+  deny network inet,
+  deny network inet6,
+  deny network raw,
+  deny network packet,
+
+  signal (receive) peer=unconfined,
+  signal (send, receive) peer=healthlog-push-signer,
+
+  /healthlog-push mrix,
+
+  /etc/localtime r,
+  /usr/share/zoneinfo/** r,
+
+  /run/secrets/signer/ r,
+  /run/secrets/signer/apns.p8 r,
+  /run/jwt/ r,
+  /run/jwt/token rw,
+  /run/jwt/.token-* rw,
+  /run/jwt-refresh/ r,
+  /run/jwt-refresh/refresh r,
+
+  @{PROC}/@{pid}/cgroup r,
+  @{PROC}/@{pid}/mountinfo r,
+  @{PROC}/@{pid}/stat r,
+  /sys/kernel/mm/transparent_hugepage/hpage_pmd_size r,
+  /sys/fs/cgroup/ r,
+  /sys/fs/cgroup/** r,
+
+  deny @{PROC}/@{pid}/mem rw,
+  deny @{PROC}/sysrq-trigger rw,
+  deny @{PROC}/kcore r,
+  deny /sys/firmware/** rw,
+  deny mount,
+  deny umount,
+  deny pivot_root,
+  deny ptrace,
+}

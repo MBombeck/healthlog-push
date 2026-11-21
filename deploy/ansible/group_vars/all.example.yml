@@ -47,11 +47,15 @@ healthlog_push_apns_topic: org.example.app
 healthlog_push_apns_key_id: ABCDE12345
 healthlog_push_apns_team_id: FGHIJ67890
 
-# Pinned cosign. Take the SHA-256 values from the release's checksum file.
-healthlog_push_cosign_version: v0.0.0
-healthlog_push_cosign_sha256:
-  amd64: "0000000000000000000000000000000000000000000000000000000000000000"
-  arm64: "0000000000000000000000000000000000000000000000000000000000000000"
+# cosign is pinned in the role defaults (version and SHA-256 per architecture). Override both together
+# only after checking the binaries against their .sigstore.json bundles.
+# healthlog_push_cosign_version: v3.1.4
+
+# Registration mode of a new store (invite is the default; open only on purpose).
+healthlog_push_registration_mode: invite
+# AppArmor: after loading deploy/apparmor/ on the host (see docs/self-hosting.md, "AppArmor").
+# healthlog_push_apparmor_relay: healthlog-push-relay
+# healthlog_push_apparmor_signer: healthlog-push-signer
 
 healthlog_push_export_timer_enabled: false
 healthlog_push_log_shipping_tasks: ""

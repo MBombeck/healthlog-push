@@ -26,10 +26,10 @@ By hand, the order is the same:
    cosign verify "$IMAGE" \
      --certificate-identity "https://github.com/MBombeck/healthlog-push/.github/workflows/release.yml@refs/tags/$TAG" \
      --certificate-oidc-issuer https://token.actions.githubusercontent.com
-   cosign verify-attestation "$IMAGE" --type slsaprovenance \
-     --certificate-identity-regexp '^https://github.com/slsa-framework/slsa-github-generator/.github/workflows/generator_container_slsa3.yml@refs/tags/v[0-9.]+$' \
+   cosign verify-attestation "$IMAGE" --type slsaprovenance1 \
+     --certificate-identity "https://github.com/MBombeck/healthlog-push/.github/workflows/provenance.yml@refs/tags/$TAG" \
      --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-     --certificate-github-workflow-repository MBombeck/healthlog-push
+     --certificate-github-workflow-repository MBombeck/healthlog-push > /dev/null
    ```
 
 3. **Note the running image** for the rollback: `cat /srv/healthlog-push/deployed-digest`.
@@ -98,7 +98,7 @@ docker compose exec relay /healthlog-push admin stats
     "queue": 0,
     "breaker": "closed",
     "dbWritable": true,
-    "registration": "open",
+    "registration": "invite",
     "pauses": null,
     "notice": null,
     "globalLimitPerMinute": 600,
@@ -181,7 +181,10 @@ docker compose exec relay /healthlog-push admin resume          # removes every 
 
 ### registration and invite
 
-`open` (default), `invite` or `closed`. `closed` answers new registrations with `503 registration_paused`;
+`open`, `invite` or `closed`. A new store starts in `HLP_REGISTRATION_MODE` (default `invite`), which the
+relay stores before it accepts the first request; from then on the stored mode counts, and only this
+command changes it, so a restart never reopens registration. To let anyone register, set
+`admin registration open` on purpose. `closed` answers new registrations with `503 registration_paused`;
 `invite` requires a one-time code in the registration body's `invite` field, otherwise `403
 invite_required`. A key that is already registered gets its existing id back in every mode.
 

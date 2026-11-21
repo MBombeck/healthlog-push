@@ -169,9 +169,9 @@ Order inside the role:
 2. Write directories, secret files, the compose file and the backup lists.
 3. Install cosign at the pinned version; the download must match the pinned SHA-256.
 4. `cosign verify <image> --certificate-identity https://github.com/MBombeck/healthlog-push/.github/workflows/release.yml@refs/tags/<tag> --certificate-oidc-issuer https://token.actions.githubusercontent.com`
-5. `cosign verify-attestation <image> --type slsaprovenance --certificate-identity-regexp '<generator workflow>' --certificate-oidc-issuer ... --certificate-github-workflow-repository MBombeck/healthlog-push`
+5. `cosign verify-attestation <image> --type slsaprovenance1 --certificate-identity https://github.com/MBombeck/healthlog-push/.github/workflows/provenance.yml@refs/tags/<tag> --certificate-oidc-issuer https://token.actions.githubusercontent.com --certificate-github-workflow-repository MBombeck/healthlog-push` (cosign 3, pinned in `defaults/main.yml` with the SHA-256 of both architectures; releases before v1.0.1 carry the older provenance format and do not pass this step)
 6. Only now: render `.env` with the new image and `HLP_SECRETS_REV`, a SHA-256 fingerprint of all secrets, `docker compose pull`, `docker compose up -d`. Because the fingerprint is part of the compose environment of both containers, compose recreates them whenever a secret differs from what they were started with, also when an earlier run wrote the secret files and then failed.
-7. Wait until `docker compose exec relay /healthlog-push healthcheck` exits 0 (status `ok`) and the signer reports healthy.
+7. Wait until `docker compose exec relay /healthlog-push healthcheck` exits 0 (status `ok`) and the signer reports healthy, then check that each container runs under the AppArmor profile set in `healthlog_push_apparmor_relay` and `healthlog_push_apparmor_signer`.
 8. Write the image to `/srv/healthlog-push/deployed-digest`.
 
 A failure in steps 3 to 5 aborts before compose is touched. A failure in
