@@ -117,30 +117,6 @@ func ChallengePayload(challenge string) []byte {
 	return []byte(`{"aps":{"content-available":1},"c":"` + challenge + `"}`)
 }
 
-type laState struct {
-	Status          string `json:"status"`
-	CountdownTarget int    `json:"countdownTarget"`
-	Confirmed       bool   `json:"confirmed"`
-	PendingConfirm  bool   `json:"pendingConfirm"`
-	IsOverdue       bool   `json:"isOverdue"`
-	TimeFormatRaw   string `json:"timeFormatRaw"`
-}
-
-// LiveActivityEndPayload is the fixed Live Activity end with a constant content state; only the
-// timestamps come from the relay clock.
-func LiveActivityEndPayload(now time.Time) []byte {
-	type aps struct {
-		Timestamp    int64   `json:"timestamp"`
-		Event        string  `json:"event"`
-		DismissalDay int64   `json:"dismissal-date"`
-		ContentState laState `json:"content-state"`
-	}
-	b, _ := json.Marshal(struct {
-		APS aps `json:"aps"`
-	}{aps{now.Unix(), "end", now.Unix(), laState{Status: "taken", TimeFormatRaw: "AUTO"}}})
-	return b
-}
-
 // Push is one request to Apple.
 type Push struct {
 	Token      []byte

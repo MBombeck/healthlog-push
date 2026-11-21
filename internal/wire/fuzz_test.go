@@ -40,6 +40,9 @@ func FuzzPushItems(f *testing.F) {
 	f.Add([]byte(`{"items":[{"ref":"r1","token":"` + hex.EncodeToString(tok(1)) + `","env":"production","class":"alert","ttlSeconds":60,"envelope":"` +
 		EncodeB64(env) + `","collapse":"` + strings.Repeat("A", 22) + `"}]}`))
 	f.Add([]byte(`{"items":[{"class":"liveactivity","activity":{"statement":{}}}]}`))
+	f.Add([]byte(`{"items":[{"ref":"r","token":"` + hex.EncodeToString(tok(1)) + `","env":"production","class":"liveactivity","ttlSeconds":60,` +
+		`"activity":{"event":"update","token":"` + hex.EncodeToString(tok(2)) + `","bindingKey":"","statement":{},"signature":"",` +
+		`"state":{"status":"due","countdownTarget":0,"isOverdue":false,"confirmed":false,"pendingConfirm":false,"timeFormatRaw":"AUTO"}}}]}`))
 	f.Fuzz(func(t *testing.T, b []byte) {
 		pb, err := ParsePushBody(b)
 		if err != nil {
@@ -60,6 +63,9 @@ func FuzzPushItems(f *testing.F) {
 				t.Fatal("alert without collapse accepted")
 			}
 			_ = it.VerifyActivity(testHost, "6f1c2a4e-1b9d-4c3e-8a7f-0d2b5e9c1a37", 1795000000)
+			if it.State != nil && it.State.Check(1795000000) && !oneOf(*it.State.Status, StateStatuses) {
+				t.Fatal("content state outside the template accepted")
+			}
 		}
 	})
 }

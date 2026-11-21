@@ -57,16 +57,28 @@ func (r *Relay) handlePush(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	now := r.cfg.Now()
-	r.mu.Lock()
-	if !r.stillThere(s) {
-		r.mu.Unlock()
-		r.fail(w, req, http.StatusUnauthorized, errBody{Error: "unknown_instance"})
-		return
-	}
-	if e, status := r.requestGateLocked(s, now); e != nil {
-		r.mu.Unlock()
+	results, entries, status, e := r.admitBatch(s, pb, now)
+	if e != nil {
 		r.fail(w, req, status, *e)
 		return
+	}
+	r.collectResults(pb, entries, results)
+	r.mu.Lock()
+	n := r.currentNotice(now)
+	r.mu.Unlock()
+	r.reply(w, req, http.StatusOK, pushResp{Results: results, Notice: n, RelayTime: now.Unix()})
+}
+
+// admitBatch admits the items of one batch under the lock, released by defer, so that no panic can leave
+// the relay locked.
+func (r *Relay) admitBatch(s *instState, pb *wire.PushBody, now time.Time) ([]ItemResult, []*idemEntry, int, *errBody) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !r.stillThere(s) {
+		return nil, nil, http.StatusUnauthorized, &errBody{Error: "unknown_instance"}
+	}
+	if e, status := r.requestGateLocked(s, now); e != nil {
+		return nil, nil, status, e
 	}
 	results := make([]ItemResult, len(pb.Items))
 	entries := make([]*idemEntry, len(pb.Items))
@@ -80,12 +92,7 @@ func (r *Relay) handlePush(w http.ResponseWriter, req *http.Request) {
 		seen[p.Ref] = true
 		results[i], entries[i] = r.admitLocked(s, p, now)
 	}
-	r.mu.Unlock()
-	r.collectResults(pb, entries, results)
-	r.mu.Lock()
-	n := r.currentNotice(now)
-	r.mu.Unlock()
-	r.reply(w, req, http.StatusOK, pushResp{Results: results, Notice: n, RelayTime: now.Unix()})
+	return results, entries, 0, nil
 }
 
 // collectResults waits, within pushWait for the whole batch, for every item that went to the queue and
@@ -204,7 +211,14 @@ func (r *Relay) buildPush(it *wire.Item, now time.Time) *apns.Push {
 		p.Payload = apns.SilentPayload(it.Envelope)
 	case wire.ClassLiveActivity:
 		p.Token = it.LAToken
-		p.Payload = apns.LiveActivityEndPayload(now)
+		switch it.Event {
+		case wire.EventStart:
+			p.Payload = apns.LiveActivityStartPayload(now, it.State)
+		case wire.EventUpdate:
+			p.Payload = apns.LiveActivityUpdatePayload(now, it.State)
+		default:
+			p.Payload = apns.LiveActivityEndPayload(now)
+		}
 	}
 	return p
 }

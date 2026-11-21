@@ -180,7 +180,7 @@ func TestPayloadTemplatesOnlyInAPNs(t *testing.T) {
 		for _, s := range []string{`"aps"`, `"mutable-content"`, `"loc-key"`, `"content-available"`} {
 			if strings.Contains(f.src, s) {
 				n++
-				if f.path != "internal/apns/apns.go" {
+				if !strings.HasPrefix(f.path, "internal/apns/") || strings.HasSuffix(f.path, "_test.go") {
 					t.Errorf("%s contains APNs payload key %s", f.path, s)
 				}
 			}

@@ -35,6 +35,15 @@ export function build() {
     ui: { thread: "medication-cm_test_med_1", level: "passive" },
   };
   const silentJson = { v: 1, t: "MEDICATION_INTAKE_SYNC", id: id(2), iat: NOW, exp: NOW + 3600, d: { syncedAt: "2026-11-21T07:12:00.000Z" } };
+  // DATA_CHANGED and HEALTHKIT_CATCH_UP are silent with a lifetime of 1 h; SECURITY_ALERT is an alert with
+  // a lifetime of 6 h and may be time-sensitive.
+  const dataChangedJson = { v: 1, t: "DATA_CHANGED", id: id(4), iat: NOW, exp: NOW + 3600, d: { scope: ["measurements"], changedAt: "2026-11-21T07:12:00.000Z" } };
+  const catchUpJson = { v: 1, t: "HEALTHKIT_CATCH_UP", id: id(5), iat: NOW, exp: NOW + 3600, d: { since: "2026-11-20T07:12:00.000Z" } };
+  const securityJson = {
+    v: 1, t: "SECURITY_ALERT", id: id(6), iat: NOW, exp: NOW + 21600, d: { kind: "new_sign_in" },
+    n: { title: "New sign-in", body: "Your account was signed in on a new device." },
+    ui: { thread: "security", level: "time-sensitive" },
+  };
   const maxBody = (() => {
     const base = { v: 1, t: "X", id: id(9), iat: NOW, exp: NOW + 60, n: { body: "" } };
     const fixed = Buffer.byteLength(JSON.stringify(base), "utf8");
@@ -61,6 +70,9 @@ export function build() {
   const envelopes = [
     E("alert", sAlert.envelope, "ok", {}, alertJson),
     E("silent", sSilent.envelope, "ok", { expectedClass: "silent" }, silentJson),
+    E("silentDataChanged", S({ pushClass: "silent", json: dataChangedJson }).envelope, "ok", { expectedClass: "silent" }, dataChangedJson),
+    E("silentHealthKitCatchUp", S({ pushClass: "silent", json: catchUpJson }).envelope, "ok", { expectedClass: "silent" }, catchUpJson),
+    E("alertSecurity", S({ pushClass: "alert", json: securityJson }).envelope, "ok", {}, securityJson),
     E("previousSender", seal({ pkR, skS: skSprev, apnsToken, skE, pushClass: "alert", json: alertJson }).envelope, "ok", { trustedSenders: [hex(pkS), hex(pkSprev)] }, alertJson),
     E("previousRecipientKey", seal({ pkR: pkR2, skS, apnsToken, skE, pushClass: "alert", json: alertJson }).envelope, "ok", { recipientKeys: [hex(skR), hex(skR2)] }, alertJson),
     E("exactBucketMultibyteEnd", S({ pushClass: "alert", json: maxBody }).envelope, "ok", {}, maxBody),
@@ -125,6 +137,9 @@ export function build() {
     st("challenge", bindKey, join("hl-challenge-v1", HOST, b64u(Buffer.alloc(32, 0x63)), tokenTag)),
     st("activity", bindKey, join("hl-activity-v1", HOST, instanceId, tokenTag, laTokenTag, NOW)),
     st("selfRead", bindKey, join("hl-selfread-v1", HOST, tokenTag, NOW)),
+    st("laStart", bindKey, join("hl-la-start-v1", HOST, instanceId, tokenTag, laTokenTag, NOW)),
+    st("laConsent", bindKey, join("hl-la-consent-v1", HOST, instanceId, tokenTag, "2026-11-21", NOW)),
+    st("laWithdraw", bindKey, join("hl-la-withdraw-v1", HOST, instanceId, tokenTag, NOW)),
     st("response", relayKey, join("hl-relay-resp-v2", HOST, "POST", "/v1/push", nonce, 200, bodyHash), { body }),
     st("responseAppEndpoint", relayKey, join("hl-relay-resp-v2", HOST, "DELETE", "/v1/bindings/self", nonce, 204, hex(sha(Buffer.alloc(0)))), { body: "" }),
     st("responseWithoutNonce", relayKey, join("hl-relay-resp-v2", HOST, "GET", "/healthz", "-", 200, hex(sha(Buffer.from('{"status":"ok"}')))), { body: '{"status":"ok"}' }),
@@ -143,6 +158,9 @@ export function build() {
     { name: "responseOtherMethod", of: "response", text: join("hl-relay-resp-v2", HOST, "GET", "/v1/push", nonce, 200, bodyHash) },
     { name: "responseOtherPath", of: "response", text: join("hl-relay-resp-v2", HOST, "POST", "/v1/status", nonce, 200, bodyHash) },
     { name: "responseAppReplayedOntoOtherRequest", of: "responseAppEndpoint", text: join("hl-relay-resp-v2", HOST, "DELETE", "/v1/bindings/self", b64u(Buffer.alloc(16, 0x50)), 204, hex(sha(Buffer.alloc(0)))) },
+    { name: "laStartAsActivity", of: "laStart", text: join("hl-activity-v1", HOST, instanceId, tokenTag, laTokenTag, NOW) },
+    { name: "laConsentOtherVersion", of: "laConsent", text: join("hl-la-consent-v1", HOST, instanceId, tokenTag, "2026-12-01", NOW) },
+    { name: "laWithdrawAsUnbind", of: "laWithdraw", text: join("hl-unbind-v1", HOST, instanceId, tokenTag, NOW) },
     { name: "activityTokenSwapped", of: "activity", text: join("hl-activity-v1", HOST, instanceId, tokenTag, hex(tokenTagOf(unhex("3e".repeat(32)))), NOW) },
     { name: "unbindOtherInstance", of: "unbind", text: join("hl-unbind-v1", HOST, "00000000-0000-4000-8000-000000000000", tokenTag, NOW) },
   ];

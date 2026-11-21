@@ -43,15 +43,23 @@ func (c *charge) undo() {
 }
 
 // chargeFor lists the windows an item of class c from instance s to device dq counts against.
-func (r *Relay) chargeFor(s *instState, b *store.Binding, dq *devQuota, c wire.Class) *charge {
+func (r *Relay) chargeFor(s *instState, b *store.Binding, dq *devQuota, it *wire.Item) *charge {
 	ch := &charge{windows: []*limits.Window{&s.pushDay, &s.pushMin, &dq.all}, binding: b}
-	switch c {
+	switch it.Class {
 	case wire.ClassAlert:
 		ch.alerts = dq.alerts
 	case wire.ClassSilent:
 		ch.windows = append(ch.windows, &dq.silentHour)
 	case wire.ClassLiveActivity:
-		ch.windows = append(ch.windows, &dq.laDay)
+		switch it.Event {
+		case wire.EventStart:
+			ch.windows = append(ch.windows, &dq.laStartDay)
+		case wire.EventUpdate:
+			aq := r.activity(it.LAToken)
+			ch.windows = append(ch.windows, &aq.hour, &aq.day)
+		default:
+			ch.windows = append(ch.windows, &dq.laDay)
+		}
 	}
 	if s.rec.Tier == store.TierProbation {
 		ch.windows = append(ch.windows, &r.probationMin)
@@ -85,7 +93,7 @@ func (r *Relay) limitsLocked(s *instState, b *store.Binding, m string, it *wire.
 	if res, ok := r.poolLimits(s, it, now); !ok {
 		return nil, res
 	}
-	ch := r.chargeFor(s, b, dq, it.Class)
+	ch := r.chargeFor(s, b, dq, it)
 	ch.book(now)
 	if it.Class == wire.ClassAlert {
 		r.dirty[m] = true
@@ -115,6 +123,22 @@ func (r *Relay) deviceGate(s *instState, b *store.Binding, dq *devQuota, it *wir
 		if b.State == store.StateProvisional || !bytes.Equal(b.KeyHash, keyHash(it.BindingKey)) || !it.VerifyActivity(r.cfg.Host, s.rec.ID, now.Unix()) {
 			return itemErr(it.Ref, http.StatusForbidden, "activity_refused"), false
 		}
+		return activityGate(b, it, now)
+	}
+	return ItemResult{}, true
+}
+
+// activityGate applies the rules of Live Activity start and update: the device's separate consent, and a
+// content state inside the closed template.
+func activityGate(b *store.Binding, it *wire.Item, now time.Time) (ItemResult, bool) {
+	if it.Event != wire.EventStart && it.Event != wire.EventUpdate {
+		return ItemResult{}, true
+	}
+	if b.LAConsentVersion == "" {
+		return itemErr(it.Ref, http.StatusForbidden, "liveactivity_consent_required"), false
+	}
+	if !it.State.Check(now.Unix()) {
+		return itemErr(it.Ref, http.StatusUnprocessableEntity, "invalid_item"), false
 	}
 	return ItemResult{}, true
 }
@@ -174,6 +198,29 @@ func (r *Relay) deviceLimits(b *store.Binding, dq *devQuota, it *wire.Item, now 
 			return itemRetry(ref, http.StatusTooManyRequests, "device_quota", "device", dq.silentHour.RetryAfter(now)), false
 		}
 	case wire.ClassLiveActivity:
+		return r.activityLimits(dq, it, half, now)
+	}
+	return ItemResult{}, true
+}
+
+// activityLimits applies the Live Activity limits: ends and starts per device and day, updates per
+// activity and hour and day (scope "activity").
+func (r *Relay) activityLimits(dq *devQuota, it *wire.Item, half bool, now time.Time) (ItemResult, bool) {
+	ref, dl := it.Ref, r.cfg.Limits.Device
+	switch it.Event {
+	case wire.EventStart:
+		if dq.laStartDay.Count(now) >= halve(dl.LiveActivityStartDay, half) {
+			return itemRetry(ref, http.StatusTooManyRequests, "device_quota", "device", dq.laStartDay.RetryAfter(now)), false
+		}
+	case wire.EventUpdate:
+		aq := r.activity(it.LAToken)
+		if aq.hour.Count(now) >= dl.ActivityUpdateHour {
+			return itemRetry(ref, http.StatusTooManyRequests, "device_quota", "activity", aq.hour.RetryAfter(now)), false
+		}
+		if aq.day.Count(now) >= dl.ActivityUpdateDay {
+			return itemRetry(ref, http.StatusTooManyRequests, "device_quota", "activity", aq.day.RetryAfter(now)), false
+		}
+	default:
 		if dq.laDay.Count(now) >= halve(dl.LiveActivityDay, half) {
 			return itemRetry(ref, http.StatusTooManyRequests, "device_quota", "device", dq.laDay.RetryAfter(now)), false
 		}

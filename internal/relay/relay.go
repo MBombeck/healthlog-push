@@ -39,15 +39,6 @@ type instState struct {
 	pending       store.DayCounters // not yet flushed
 }
 
-type devQuota struct {
-	all        limits.Window
-	alerts     *limits.Bucket
-	silentHour limits.Window
-	laDay      limits.Window
-	throttled  map[wire.Class]time.Time
-	app        *limits.Bucket // verified app-direct calls for this token
-}
-
 type idemEntry struct {
 	res  *ItemResult // nil while in flight
 	done chan struct{}
@@ -80,6 +71,8 @@ type Relay struct {
 	idemOrder     []string
 	nonceTotal    int
 	conflicts     map[string]*pendingConflict
+	activities    map[string]*activityQuota // per Live Activity update token MAC, cleared daily
+	lastTick      time.Time
 	recentOptOuts map[string]int64 // token MAC and instance id to the opt-out statement time, for ten minutes
 	challengeDay  map[string]int   // token MAC and instance id to the day of its last challenge
 	control       Control
@@ -158,8 +151,8 @@ func New(cfg Config, st *store.Store, sender Sender) (*Relay, error) {
 		instances: map[string]*instState{}, byKey: map[string]string{}, bindings: map[string]*store.Binding{},
 		byInst: map[string]map[string]struct{}{}, dirtyInst: map[string]bool{}, dirty: map[string]bool{},
 		devs: map[string]*devQuota{}, idem: map[string]*idemEntry{}, conflicts: map[string]*pendingConflict{},
-		recentOptOuts: map[string]int64{},
-		challengeDay:  map[string]int{}, breaker: NewBreaker(), regs: limits.NewRegistrations(cfg.Registrations, now),
+		recentOptOuts: map[string]int64{}, activities: map[string]*activityQuota{},
+		challengeDay: map[string]int{}, breaker: NewBreaker(), regs: limits.NewRegistrations(cfg.Registrations, now),
 		appDirect: limits.NewBucket(100, 20, now), halfUntil: now.Truncate(fullDay).Add(fullDay), dbWritable: true,
 		lastDay: store.Day(now), summary: newSummary(now), global: map[store.GlobalKey]int64{},
 		pools: pools{probationMin: limits.Window{Size: time.Minute}, standardMin: limits.Window{Size: time.Minute},
@@ -286,21 +279,6 @@ func (r *Relay) counts(id string) (active, provisional int) {
 		}
 	}
 	return
-}
-
-func (r *Relay) dev(m string) *devQuota {
-	d := r.devs[m]
-	if d == nil {
-		now := r.cfg.Now()
-		dl := r.cfg.Limits.Device
-		d = &devQuota{
-			all: limits.Window{Size: fullDay}, alerts: limits.NewBucket(dl.AlertBurst, dl.AlertPerHour/3600, now),
-			silentHour: limits.Window{Size: time.Hour}, laDay: limits.Window{Size: fullDay}, throttled: map[wire.Class]time.Time{},
-			app: limits.NewBucket(10, 10.0/3600, now),
-		}
-		r.devs[m] = d
-	}
-	return d
 }
 
 func (r *Relay) setDBError(err error) {

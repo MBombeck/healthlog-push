@@ -262,6 +262,23 @@ func ActivityText(host, instanceID string, tokenTag, laTokenTag []byte, iat int6
 	return join("hl-activity-v1", host, instanceID, hex.EncodeToString(tokenTag), hex.EncodeToString(laTokenTag), itoa(iat))
 }
 
+// LAStartText is signed by the device binding key over a push-to-start token: the instance may start Live
+// Activities on this device through the relay with that token.
+func LAStartText(host, instanceID string, tokenTag, startTokenTag []byte, iat int64) string {
+	return join("hl-la-start-v1", host, instanceID, hex.EncodeToString(tokenTag), hex.EncodeToString(startTokenTag), itoa(iat))
+}
+
+// LAConsentText is signed by the device binding key when the person allows Live Activity start and update
+// over the relay, a consent separate from the relay consent.
+func LAConsentText(host, instanceID string, tokenTag []byte, textVersion string, iat int64) string {
+	return join("hl-la-consent-v1", host, instanceID, hex.EncodeToString(tokenTag), textVersion, itoa(iat))
+}
+
+// LAWithdrawText is signed by the device binding key to withdraw that consent directly at the relay.
+func LAWithdrawText(host, instanceID string, tokenTag []byte, iat int64) string {
+	return join("hl-la-withdraw-v1", host, instanceID, hex.EncodeToString(tokenTag), itoa(iat))
+}
+
 // SelfReadText is signed by the device binding key to read its own binding.
 func SelfReadText(host string, tokenTag []byte, iat int64) string {
 	return join("hl-selfread-v1", host, hex.EncodeToString(tokenTag), itoa(iat))

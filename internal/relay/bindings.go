@@ -81,6 +81,9 @@ func (r *Relay) bindLocked(s *instState, b *wire.Bind, now time.Time) (int, *bin
 	nb := newBinding(id, kh, b.Seq, b.Env, b.Consent, today)
 	if same {
 		nb.State, nb.LastSuccessDay, nb.AlertsToday, nb.AlertsDay = cur.State, cur.LastSuccessDay, cur.AlertsToday, cur.AlertsDay
+		if bytes.Equal(cur.KeyHash, kh) { // the Live Activity consent belongs to the key that signed it
+			nb.LAConsentVersion, nb.LAConsentDay = cur.LAConsentVersion, cur.LAConsentDay
+		}
 	}
 	if !r.storeBindingLocked(s, m, cur, nb) {
 		e := errStorage(storageRetry)
@@ -286,6 +289,9 @@ type selfReadResp struct {
 	LastUsedWeekOf string `json:"lastUsedWeekOf"`
 	ConsentVersion string `json:"consentVersion"`
 	ConsentDay     string `json:"consentDay"`
+	// The separate Live Activity consent, absent when not given.
+	LAConsentVersion string `json:"liveActivityConsentVersion,omitempty"`
+	LAConsentDay     string `json:"liveActivityConsentDay,omitempty"`
 }
 
 // handleSelfRead implements GET /v1/bindings/self: the device reads everything the relay holds about its
@@ -317,5 +323,6 @@ func (r *Relay) handleSelfRead(w http.ResponseWriter, req *http.Request) {
 	r.reply(w, req, http.StatusOK, selfReadResp{
 		Kind: "device", InstanceID: b.InstanceID, State: b.State, Env: b.Env, BoundDay: store.DayString(b.BoundDay),
 		LastUsedWeekOf: store.DayString(store.WeekStart(b.LastUsedWeek)), ConsentVersion: b.ConsentVersion, ConsentDay: b.ConsentDay,
+		LAConsentVersion: b.LAConsentVersion, LAConsentDay: b.LAConsentDay,
 	})
 }

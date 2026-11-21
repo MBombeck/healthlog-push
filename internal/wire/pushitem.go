@@ -1,14 +1,14 @@
 package wire
 
-import (
-	"bytes"
-	"crypto/ed25519"
-)
+import "crypto/ed25519"
 
-// Activity is the Live Activity part of a liveactivity push item.
+// Activity is the Live Activity part of a liveactivity push item. Event is start, update or end (end when
+// absent); State is required for start and update and refused for end.
 type Activity struct {
-	Token      string `json:"token"`
-	BindingKey string `json:"bindingKey"`
+	Event      string        `json:"event,omitempty"`
+	State      *ContentState `json:"state,omitempty"`
+	Token      string        `json:"token"`
+	BindingKey string        `json:"bindingKey"`
 	Statement  struct {
 		InstanceID string `json:"instanceId"`
 		TokenTag   string `json:"tokenTag"`
@@ -61,6 +61,8 @@ type Item struct {
 	Envelope   []byte
 	Collapse   string
 	LAToken    []byte
+	Event      string        // Live Activity only: start, update or end
+	State      *ContentState // Live Activity start and update only
 	BindingKey ed25519.PublicKey
 	actIat     int64
 	actSig     []byte
@@ -106,48 +108,6 @@ func ValidateItem(p *PushItem) (*Item, error) {
 	}
 	it.Envelope, it.Collapse = env, p.Collapse
 	return it, nil
-}
-
-// validateActivity checks the shape of the activity statement of a liveactivity item for device token tok
-// and fills the activity fields of it. The signature is checked later, by VerifyActivity.
-func validateActivity(a *Activity, tok []byte, it *Item) error {
-	la, err := ParseToken(a.Token)
-	if err != nil {
-		return err
-	}
-	pk, err := ParsePublicKey(a.BindingKey)
-	if err != nil {
-		return err
-	}
-	sig, err := ParseSignature(a.Signature)
-	if err != nil {
-		return err
-	}
-	tag, err := ParseTokenTag(a.Statement.TokenTag)
-	if err != nil || !bytes.Equal(tag, TokenTag(tok)) {
-		return ErrInvalid
-	}
-	laTag, err := ParseTokenTag(a.Statement.LATokenTag)
-	if err != nil || !bytes.Equal(laTag, TokenTag(la)) {
-		return ErrInvalid
-	}
-	if !ValidInstanceID(a.Statement.InstanceID) {
-		return ErrInvalid
-	}
-	it.LAToken, it.BindingKey, it.actIat, it.actSig, it.actTag = la, pk, a.Statement.Iat, sig, tag
-	return nil
-}
-
-// ActivityMaxAge bounds how old an activity statement may be when the end is sent: the activity lifetime
-// (8 h) plus the class deadline (4 h).
-const ActivityMaxAge = 12 * 3600
-
-// VerifyActivity checks the activity statement for instanceID: signature, age and not in the future.
-func (it *Item) VerifyActivity(host, instanceID string, now int64) bool {
-	if it.Class != ClassLiveActivity || it.actIat > now+ClockSkew || now-it.actIat > ActivityMaxAge {
-		return false
-	}
-	return Verify(it.BindingKey, ActivityText(host, instanceID, it.actTag, TokenTag(it.LAToken), it.actIat), it.actSig)
 }
 
 // ReceiptsBody is the body of POST /v1/receipts: counts only, no ids.

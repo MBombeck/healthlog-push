@@ -31,6 +31,11 @@ type DeviceLimits struct {
 	AlertDay        int     `json:"alertPerDay"`
 	SilentHour      int64   `json:"silentPerHour"`
 	LiveActivityDay int64   `json:"liveActivityEndPerDay"`
+	// Live Activity start and update (only with the device's Live Activity consent): starts per device and
+	// day, updates per activity and hour and per activity and day.
+	LiveActivityStartDay int64 `json:"liveActivityStartPerDay"`
+	ActivityUpdateHour   int64 `json:"activityUpdatesPerHour"`
+	ActivityUpdateDay    int64 `json:"activityUpdatesPerDay"`
 }
 
 // Limits is the full limit configuration.
@@ -51,7 +56,8 @@ var DefaultLimits = Limits{
 		InvalidTokensDay: 20, ChallengesDay: 20, BadSignatureBurst: 30},
 	Standard: TierLimits{Devices: 50, Provisional: 20, NewBindingsDay: 100, RequestsMinute: 60, PushesDay: 10000, PushesMinute: 120,
 		InvalidTokensDay: 100, ChallengesDay: 20, BadSignatureBurst: 60},
-	Device:           DeviceLimits{AllDay: 300, AlertBurst: 20, AlertPerHour: 6, AlertDay: 100, SilentHour: 6, LiveActivityDay: 12},
+	Device: DeviceLimits{AllDay: 300, AlertBurst: 20, AlertPerHour: 6, AlertDay: 100, SilentHour: 6, LiveActivityDay: 12,
+		LiveActivityStartDay: 12, ActivityUpdateHour: 12, ActivityUpdateDay: 48},
 	ProbationPoolMin: 600, GlobalMin: 600, GlobalMax: 6000, StandardDevicesUp: 80, StandardDevicesMax: 150,
 }
 

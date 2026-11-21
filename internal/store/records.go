@@ -39,6 +39,10 @@ type Binding struct {
 	ConsentDay     string `json:"consentDay"`
 	AlertsToday    int    `json:"alertsToday,omitempty"`
 	AlertsDay      int    `json:"alertsDay,omitempty"`
+	// LAConsentVersion and LAConsentDay record the device's separate, signed consent to Live Activity start
+	// and update over the relay; empty means no consent.
+	LAConsentVersion string `json:"laConsentVersion,omitempty"`
+	LAConsentDay     string `json:"laConsentDay,omitempty"`
 }
 
 // PutInstance writes an instance and its key index.

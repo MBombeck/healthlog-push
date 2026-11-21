@@ -85,6 +85,10 @@ func (r *Relay) Tick() {
 			delete(r.conflicts, ch)
 		}
 	}
+	if newDay := store.Day(now); newDay != store.Day(r.lastTick) {
+		r.activities = map[string]*activityQuota{} // per-activity update windows never span more than a day
+	}
+	r.lastTick = now
 	for k, t := range r.recentOptOuts {
 		if now.Unix()-t > 2*wire.ClockSkew {
 			delete(r.recentOptOuts, k)
