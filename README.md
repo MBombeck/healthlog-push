@@ -264,6 +264,13 @@ published in the release notes of the release that ships it, before the relay sw
 [docs/operations.md](docs/operations.md), "Relay identity key", and [docs/key-ceremony.md](docs/key-ceremony.md)
 for how the keys are made and kept).
 
+| Key | Ed25519 public key (base64url) |
+|---|---|
+| `current` | `IU8JGZzcE-O4gp4q2BL2o6YYNJeHyDg8MNmAGL5_Ypo` |
+| `next` | `kPhnCqIwrF_cyQIFTAgCHrWnPavdWkcwMB35oi_wCH0` |
+
+The same values are in [`keys/push.healthlog.dev.json`](keys/push.healthlog.dev.json).
+
 | Key | Public key (unpadded base64url Ed25519) | Since |
 |---|---|---|
 | `current` | to be published with the first release | |
