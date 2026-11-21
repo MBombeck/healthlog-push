@@ -1,6 +1,7 @@
 package relay
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"encoding/json"
 	"io"
@@ -201,9 +202,12 @@ func (r *Relay) auth(w http.ResponseWriter, req *http.Request, limit int64) (*in
 	now := r.cfg.Now()
 	id := req.Header.Get("HL-Instance")
 	r.mu.Lock()
-	known := r.instances[id] != nil
+	var key []byte
+	if s := r.instances[id]; s != nil {
+		key = s.rec.PublicKey
+	}
 	r.mu.Unlock()
-	if !wire.ValidInstanceID(id) || !known {
+	if !wire.ValidInstanceID(id) || key == nil {
 		r.fail(w, req, http.StatusUnauthorized, errBody{Error: "unknown_instance"})
 		return nil, nil, false
 	}
@@ -219,6 +223,8 @@ func (r *Relay) auth(w http.ResponseWriter, req *http.Request, limit int64) (*in
 	}
 	nonce, nerr := wire.ParseNonce(req.Header.Get("HL-Nonce"))
 	sig, serr := wire.ParseSignature(req.Header.Get("HL-Signature"))
+	// Verified outside the lock: a flood of bad signatures must not serialise the relay.
+	valid := nerr == nil && serr == nil && wire.Verify(key, wire.RequestText(r.cfg.Host, id, req.Method, req.RequestURI, ts, nonce, body), sig)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s := r.instances[id]
@@ -226,7 +232,7 @@ func (r *Relay) auth(w http.ResponseWriter, req *http.Request, limit int64) (*in
 		r.fail(w, req, http.StatusUnauthorized, errBody{Error: "unknown_instance"})
 		return nil, nil, false
 	}
-	if nerr != nil || serr != nil || !wire.Verify(s.rec.PublicKey, wire.RequestText(r.cfg.Host, id, req.Method, req.RequestURI, ts, nonce, body), sig) {
+	if !valid || !bytes.Equal(s.rec.PublicKey, key) { // a rotation in between invalidates the old key
 		// The bucket only limits how often failures are counted; it never refuses anyone.
 		if s.badSig.Allow(now) {
 			r.Metrics.Inc("hlp_auth_failures_total", "reason", "bad_signature")
@@ -249,6 +255,11 @@ func (r *Relay) auth(w http.ResponseWriter, req *http.Request, limit int64) (*in
 	r.rollInstanceDay(s, now)
 	return s, body, true
 }
+
+// stillThere reports whether s is still the live record of its instance. Handlers that release the lock
+// after auth and take it again check this first: a concurrent deletion must not be undone by a later write.
+// Caller holds r.mu.
+func (r *Relay) stillThere(s *instState) bool { return r.instances[s.rec.ID] == s }
 
 // admitRequestLocked applies, to a verified request of instance s, the tier, the request rate and the
 // nonce rules, and records the nonce.

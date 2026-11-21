@@ -30,6 +30,10 @@ func (r *Relay) handleReceipts(w http.ResponseWriter, req *http.Request) {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if !r.stillThere(s) {
+		r.fail(w, req, http.StatusUnauthorized, errBody{Error: "unknown_instance"})
+		return
+	}
 	now := r.cfg.Now()
 	if !s.lastReceipt.IsZero() && now.Sub(s.lastReceipt) < receiptInterval {
 		r.fail(w, req, http.StatusTooManyRequests, errBody{Error: "instance_rate", Scope: "instance", RetryAfter: jitter(receiptInterval - now.Sub(s.lastReceipt))})

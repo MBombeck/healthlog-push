@@ -36,6 +36,10 @@ func (r *Relay) handleBind(w http.ResponseWriter, req *http.Request) {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if !r.stillThere(s) {
+		r.fail(w, req, http.StatusUnauthorized, errBody{Error: "unknown_instance"})
+		return
+	}
 	status, resp, e := r.bindLocked(s, b, now)
 	if e != nil {
 		r.fail(w, req, status, *e)
@@ -191,6 +195,10 @@ func (r *Relay) handleUnbindByInstance(w http.ResponseWriter, req *http.Request)
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if !r.stillThere(s) {
+		r.fail(w, req, http.StatusUnauthorized, errBody{Error: "unknown_instance"})
+		return
+	}
 	m := r.tokenMAC(tok)
 	if b := r.bindings[m]; b != nil && b.InstanceID == s.rec.ID {
 		if !r.persist(r.st.DeleteBinding([]byte(m))) {

@@ -58,6 +58,11 @@ func (r *Relay) handlePush(w http.ResponseWriter, req *http.Request) {
 	}
 	now := r.cfg.Now()
 	r.mu.Lock()
+	if !r.stillThere(s) {
+		r.mu.Unlock()
+		r.fail(w, req, http.StatusUnauthorized, errBody{Error: "unknown_instance"})
+		return
+	}
 	if e, status := r.requestGateLocked(s, now); e != nil {
 		r.mu.Unlock()
 		r.fail(w, req, status, *e)

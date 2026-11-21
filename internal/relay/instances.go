@@ -38,7 +38,7 @@ func (r *Relay) handleRegister(w http.ResponseWriter, req *http.Request) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	// A known key gets its existing id back (idempotent, and the recovery path after a lost database).
-	if id, ok := r.byKey[string(reg.PublicKey)]; ok {
+	if id, ok := r.byKey[string(reg.PublicKey)]; ok && r.instances[id] != nil {
 		s := r.instances[id]
 		switch s.rec.Tier {
 		case store.TierRevoked:
@@ -113,6 +113,10 @@ func (r *Relay) handleRotate(w http.ResponseWriter, req *http.Request) {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if !r.stillThere(s) {
+		r.fail(w, req, http.StatusUnauthorized, errBody{Error: "unknown_instance"})
+		return
+	}
 	today := store.Day(now)
 	if s.rec.RotatedDay == today {
 		r.fail(w, req, http.StatusTooManyRequests, errBody{Error: "instance_rate", Scope: "instance", RetryAfter: jitter(time.Hour)})
@@ -142,6 +146,10 @@ func (r *Relay) handleDeleteInstance(w http.ResponseWriter, req *http.Request) {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if !r.stillThere(s) {
+		r.fail(w, req, http.StatusUnauthorized, errBody{Error: "unknown_instance"})
+		return
+	}
 	id := s.rec.ID
 	if !r.persist(r.st.DeleteInstance(id)) {
 		r.fail(w, req, http.StatusServiceUnavailable, errStorage(0))
@@ -190,6 +198,10 @@ func (r *Relay) handleStatus(w http.ResponseWriter, req *http.Request) {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if !r.stillThere(s) {
+		r.fail(w, req, http.StatusUnauthorized, errBody{Error: "unknown_instance"})
+		return
+	}
 	now := r.cfg.Now()
 	tl := r.tierLimits(s.rec)
 	a, p := r.counts(s.rec.ID)
