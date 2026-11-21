@@ -48,6 +48,51 @@ func TestRegistrationModes(t *testing.T) {
 	}
 }
 
+// A new store refuses registration before any admin command: without a configured mode it starts in
+// invite, and the mode is stored before the first request can arrive.
+func TestFreshStoreRefusesRegistration(t *testing.T) {
+	h := newHarness(t, func(c *Config) { c.Registration = "" })
+	_, k, _ := ed25519.GenerateKey(rand.Reader)
+	if rp := (&instance{h: h, key: k}).registerRaw(""); rp.Status != 403 || rp.str("error") != "invite_required" {
+		t.Fatalf("fresh store, no admin command: %d %s", rp.Status, rp.Raw)
+	}
+	var c Control
+	if err := h.st.GetControl(&c); err != nil || c.Registration != RegInvite {
+		t.Fatalf("stored mode %q, %v", c.Registration, err)
+	}
+	if st := h.r.Stats(); st.Registration != RegInvite {
+		t.Fatalf("stats: %q", st.Registration)
+	}
+
+	h2 := newHarness(t, func(c *Config) { c.Registration = RegClosed })
+	_, k2, _ := ed25519.GenerateKey(rand.Reader)
+	if rp := (&instance{h: h2, key: k2}).registerRaw(""); rp.Status != 503 || rp.str("error") != "registration_paused" {
+		t.Fatalf("configured closed: %d %s", rp.Status, rp.Raw)
+	}
+}
+
+// The configured mode only seeds a store that has none; a mode set by the operator survives a restart.
+func TestStoredRegistrationModeWins(t *testing.T) {
+	h := newHarness(t, func(c *Config) { c.Registration = RegInvite })
+	if err := h.r.SetRegistration(RegClosed); err != nil {
+		t.Fatal(err)
+	}
+	cfg := h.r.cfg
+	cfg.Registration = RegOpen
+	r2, err := New(cfg, h.st, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r2.Close()
+	if r2.control.Registration != RegClosed {
+		t.Fatalf("restart reopened registration: %q", r2.control.Registration)
+	}
+	cfg.Registration = "ajar"
+	if _, err := New(cfg, h.st, nil); err == nil {
+		t.Fatal("unknown mode accepted")
+	}
+}
+
 func TestProvisionalAndInstanceRetention(t *testing.T) {
 	h := newHarness(t)
 	i := h.register()

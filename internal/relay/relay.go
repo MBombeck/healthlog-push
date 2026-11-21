@@ -161,8 +161,8 @@ func New(cfg Config, st *store.Store, sender Sender) (*Relay, error) {
 	if err := st.GetControl(&r.control); err != nil && !errors.Is(err, store.ErrNotFound) {
 		return nil, err
 	}
-	if r.control.Registration == "" {
-		r.control.Registration = RegOpen
+	if err := r.initRegistration(cfg.Registration); err != nil {
+		return nil, err
 	}
 	ins, err := st.Instances()
 	if err != nil {

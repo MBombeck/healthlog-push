@@ -104,7 +104,7 @@ func (r *Relay) Resume() error {
 
 // SetRegistration sets the registration mode.
 func (r *Relay) SetRegistration(mode string) error {
-	if !slices.Contains([]string{RegOpen, RegInvite, RegClosed}, mode) {
+	if !validRegistration(mode) {
 		return errors.New("mode must be open|invite|closed")
 	}
 	r.mu.Lock()
@@ -112,6 +112,34 @@ func (r *Relay) SetRegistration(mode string) error {
 	r.control.Registration = mode
 	logx.Event("admin.registration", logx.Str(logx.KState, mode))
 	return r.saveControl()
+}
+
+// initRegistration settles the registration mode before any request is served. A store without a stored
+// mode takes the configured one (invite when none is configured) and stores it, so the mode is never open by
+// accident in the moments between the first start and the first admin command. A stored mode is kept.
+func (r *Relay) initRegistration(configured string) error {
+	if configured != "" && !validRegistration(configured) {
+		return errors.New("registration mode must be open|invite|closed")
+	}
+	if r.control.Registration != "" {
+		if !validRegistration(r.control.Registration) {
+			return errors.New("stored registration mode is not open|invite|closed")
+		}
+		if configured != "" && configured != r.control.Registration {
+			logx.Event("relay.registration_mode_kept", logx.Str(logx.KState, r.control.Registration))
+		}
+		return nil
+	}
+	if configured == "" {
+		configured = RegInvite
+	}
+	r.control.Registration = configured
+	logx.Event("relay.registration_mode_set", logx.Str(logx.KState, configured))
+	return r.saveControl()
+}
+
+func validRegistration(mode string) bool {
+	return slices.Contains([]string{RegOpen, RegInvite, RegClosed}, mode)
 }
 
 // NewInvite creates a one-time registration code valid for 7 days and returns it.

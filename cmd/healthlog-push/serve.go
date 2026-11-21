@@ -102,9 +102,13 @@ func relayConfig(host string, id ed25519.PrivateKey, macKeys [][]byte, exportDir
 			return relay.Config{}, errors.New("HLP_MIN_CLIENT_VERSION must look like 1.49.0")
 		}
 	}
+	reg := os.Getenv("HLP_REGISTRATION_MODE")
+	if reg != "" && reg != relay.RegOpen && reg != relay.RegInvite && reg != relay.RegClosed {
+		return relay.Config{}, fmt.Errorf("HLP_REGISTRATION_MODE: %q is not open, invite or closed", reg)
+	}
 	return relay.Config{
 		Host: host, Identity: id, MACKeys: macKeys, Environments: envs, ExportDir: exportDir, MinClient: minClient,
-		Version: buildinfo.Version, Commit: buildinfo.Commit, ImageDigest: os.Getenv("HLP_IMAGE_DIGEST"),
+		Version: buildinfo.Version, Commit: buildinfo.Commit, ImageDigest: os.Getenv("HLP_IMAGE_DIGEST"), Registration: reg,
 	}, nil
 }
 

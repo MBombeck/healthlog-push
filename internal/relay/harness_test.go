@@ -176,7 +176,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		Topic: "dev.example.app", Tokens: tokens}
 	_, idKey, _ := ed25519.GenerateKey(rand.Reader)
 	cfg := Config{Host: host, Identity: idKey, MACKeys: [][]byte{bytes.Repeat([]byte{7}, 32)}, Workers: 8, Now: clk.Now,
-		ExportDir: dir, Registrations: limits.RegistrationLimits{PerNarrowDay: 1000, PerWideDay: 1000, GlobalHour: 1000, GlobalDay: 1000}}
+		ExportDir: dir, Registration: RegOpen, Registrations: limits.RegistrationLimits{PerNarrowDay: 1000, PerWideDay: 1000, GlobalHour: 1000, GlobalDay: 1000}}
 	// Request and push rates are raised so tests can issue many calls inside one fake minute; the tests of
 	// those limits pass withDefaultLimits.
 	fast := DefaultLimits

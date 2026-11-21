@@ -75,6 +75,10 @@ type Config struct {
 	Commit       string             // source commit, shown at /version
 	ImageDigest  string             // container image digest, shown at /version
 	Now          func() time.Time   // the clock; nil means time.Now
+	// Registration is the registration mode a store without a stored mode starts in (a new store, or one
+	// on which no mode was ever set): open, invite or closed. Empty means invite. A stored mode, set with
+	// `admin registration`, always wins, so a restart never reopens what an operator closed.
+	Registration string
 	// Registrations overrides the registration limits; zero means limits.DefaultRegistrationLimits.
 	Registrations limits.RegistrationLimits
 	// ProviderTokenOK reports whether the signer's JWT is available; nil means it is not checked.
