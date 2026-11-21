@@ -217,7 +217,9 @@ budget do not; see the known limitations in [docs/threat-model.md](docs/threat-m
 ## Verifying releases
 
 Releases are built by `.github/workflows/release.yml` from a `vX.Y.Z` tag. The image is signed keyless
-with cosign, carries an SPDX SBOM attestation and SLSA provenance. Verify before you run it:
+with cosign, carries an SPDX SBOM attestation and SLSA provenance, all in the Sigstore bundle format that
+cosign 3 reads without extra flags. Verify before you run it (v1.0.0 differs, see
+[docs/release-verification.md](docs/release-verification.md#v100)):
 
 ```sh
 IMAGE=ghcr.io/mbombeck/healthlog-push@sha256:<digest>
@@ -227,10 +229,10 @@ cosign verify "$IMAGE" \
   --certificate-identity "https://github.com/MBombeck/healthlog-push/.github/workflows/release.yml@refs/tags/$TAG" \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 
-cosign verify-attestation "$IMAGE" --type slsaprovenance \
-  --certificate-identity-regexp '^https://github.com/slsa-framework/slsa-github-generator/.github/workflows/generator_container_slsa3.yml@refs/tags/v[0-9.]+$' \
+cosign verify-attestation "$IMAGE" --type slsaprovenance1 \
+  --certificate-identity "https://github.com/MBombeck/healthlog-push/.github/workflows/provenance.yml@refs/tags/$TAG" \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  --certificate-github-workflow-repository MBombeck/healthlog-push
+  --certificate-github-workflow-repository MBombeck/healthlog-push > /dev/null
 
 cosign verify-attestation "$IMAGE" --type spdxjson \
   --certificate-identity "https://github.com/MBombeck/healthlog-push/.github/workflows/release.yml@refs/tags/$TAG" \

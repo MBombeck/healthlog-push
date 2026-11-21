@@ -1,0 +1,49 @@
+name: Provenance
+
+# Reusable workflow: it signs the SLSA v1 build provenance of an image that the calling workflow built. Its
+# own path is the identity in the signing certificate, so no step of the build job can produce a
+# provenance that verifies under it, and the build job never holds the provenance signing identity.
+on:
+  workflow_call:
+    inputs:
+      image:
+        description: image name without tag or digest
+        required: true
+        type: string
+      digest:
+        description: sha256:<hex> of the image index
+        required: true
+        type: string
+
+permissions: {}
+
+jobs:
+  attest:
+    name: Attest build provenance
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      id-token: write
+      attestations: write
+      packages: write
+    steps:
+      - name: Check inputs
+        env:
+          IMAGE: ${{ inputs.image }}
+          DIGEST: ${{ inputs.digest }}
+        run: |
+          printf '%s' "$IMAGE" | grep -Eq '^ghcr\.io/[a-z0-9._/-]+$' || { echo "::error::bad image $IMAGE"; exit 1; }
+          printf '%s' "$DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$' || { echo "::error::bad digest $DIGEST"; exit 1; }
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      # The bundle (Sigstore bundle v0.3, predicate https://slsa.dev/provenance/v1) is pushed next to the
+      # signature in the registry's referrers, where `cosign verify-attestation` finds it without flags.
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ inputs.image }}
+          subject-digest: ${{ inputs.digest }}
+          push-to-registry: true
+          create-storage-record: false

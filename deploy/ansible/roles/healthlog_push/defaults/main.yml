@@ -9,16 +9,19 @@ healthlog_push_source_repo: MBombeck/healthlog-push
 healthlog_push_oidc_issuer: https://token.actions.githubusercontent.com
 healthlog_push_signing_identity: >-
   https://github.com/{{ healthlog_push_source_repo }}/.github/workflows/release.yml@refs/tags/{{ healthlog_push_release_tag }}
-healthlog_push_provenance_identity_regexp: >-
-  ^https://github.com/slsa-framework/slsa-github-generator/.github/workflows/generator_container_slsa3.yml@refs/tags/v[0-9.]+$
+# The release workflow's reusable provenance workflow at the same tag (SLSA v1, Sigstore bundle).
+healthlog_push_provenance_identity: >-
+  https://github.com/{{ healthlog_push_source_repo }}/.github/workflows/provenance.yml@refs/tags/{{ healthlog_push_release_tag }}
 
 # ----------------------------------------------------------------- cosign ---
-# Pinned cosign release and the SHA-256 of the binary for the host
-# architecture (from the release's checksum file, checked once by hand).
-healthlog_push_cosign_version: ""
+# Pinned cosign release and the SHA-256 of cosign-linux-<arch>. The values are those of the release's
+# binaries, each checked with `cosign verify-blob` against its .sigstore.json bundle (identity
+# keyless@projectsigstore.iam.gserviceaccount.com, issuer https://accounts.google.com). cosign 3 reads the
+# signature and the attestations in the Sigstore bundle format the release workflow writes.
+healthlog_push_cosign_version: v3.1.4
 healthlog_push_cosign_sha256:
-  amd64: ""
-  arm64: ""
+  amd64: 424e2c97d0b45fd7a6b608a87f090f35633f4c23ece5f092d48bba11aaf4bbfa
+  arm64: ade83b7aac62e131cacfe96d958948b2150cc9efec46a570a2649b8e27dedad2
 healthlog_push_cosign_path: /usr/local/bin/cosign
 
 # ---------------------------------------------------------------- runtime ---
@@ -38,6 +41,14 @@ healthlog_push_apns_key_id: ""
 healthlog_push_apns_team_id: ""
 # Oldest HealthLog server version the relay accepts (for example 1.49.0); empty accepts all.
 healthlog_push_min_client_version: ""
+# Registration mode of a new store (open, invite, closed). The relay applies it before it accepts the first
+# request; a mode stored later with `admin registration` wins. Opening registration is a deliberate step.
+healthlog_push_registration_mode: invite
+# AppArmor profile per container. docker-default is what Docker applies anyway. To confine the containers
+# further, load the profiles from deploy/apparmor/ on the host and set healthlog-push-relay and
+# healthlog-push-signer; the role refuses to start with a profile the kernel has not loaded.
+healthlog_push_apparmor_relay: docker-default
+healthlog_push_apparmor_signer: docker-default
 
 healthlog_push_relay_uid: 65532
 healthlog_push_signer_uid: 65533

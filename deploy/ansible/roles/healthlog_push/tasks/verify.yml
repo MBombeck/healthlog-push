@@ -33,11 +33,13 @@
       - verify-attestation
       - "{{ healthlog_push_image }}"
       - --type
-      - slsaprovenance
-      - --certificate-identity-regexp
-      - "{{ healthlog_push_provenance_identity_regexp | trim }}"
+      - slsaprovenance1
+      - --certificate-identity
+      - "{{ healthlog_push_provenance_identity | trim }}"
       - --certificate-oidc-issuer
       - "{{ healthlog_push_oidc_issuer }}"
       - --certificate-github-workflow-repository
       - "{{ healthlog_push_source_repo }}"
+      - --output
+      - text
   changed_when: false

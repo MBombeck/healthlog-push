@@ -11,27 +11,33 @@ The workflow `.github/workflows/release.yml` runs for a tag `vX.Y.Z` that points
 |---|---|---|
 | Multi-arch image (linux/amd64, linux/arm64) | `ghcr.io/mbombeck/healthlog-push:vX.Y.Z` | cosign keyless, identity `https://github.com/MBombeck/healthlog-push/.github/workflows/release.yml@refs/tags/vX.Y.Z` |
 | SPDX SBOM | attestation on the image digest, type `spdxjson` | same identity |
-| SLSA build provenance | attestation on the image digest, type `slsaprovenance` | the SLSA GitHub generator's reusable workflow |
+| SLSA v1 build provenance | attestation on the image digest, type `slsaprovenance1` | the reusable workflow `.github/workflows/provenance.yml` at the same tag (GitHub's `attest-build-provenance`) |
 | Linux binaries and `SHA256SUMS` | GitHub release | `SHA256SUMS.sigstore.json` bundle, same identity as the image |
 
 BuildKit runs pinned by digest, there is no emulation step, and the SBOM is generated in a job that has no
-signing rights; only a separate job with `id-token: write` attests it.
+signing rights; only a separate job with `id-token: write` attests it. The provenance is signed in a reusable
+workflow whose own path is the certificate identity, so nothing in the build job can produce a provenance that
+verifies. Signature, SBOM and provenance are Sigstore bundles in the registry's referrers (on GHCR the
+`sha256-<digest>` tag), the format cosign 3 reads by default.
 
 ## Checking a release
+
+With cosign 3 (tested with v3.1.4), from v1.0.1 on, no format flag:
 
 ```sh
 TAG=vX.Y.Z
 IMAGE=ghcr.io/mbombeck/healthlog-push
-DIGEST=$(crane digest "$IMAGE:$TAG")
+DIGEST=$(crane digest "$IMAGE:$TAG")   # or the digest from the release notes
 ID="https://github.com/MBombeck/healthlog-push/.github/workflows/release.yml@refs/tags/$TAG"
+PROV="https://github.com/MBombeck/healthlog-push/.github/workflows/provenance.yml@refs/tags/$TAG"
 ISSUER=https://token.actions.githubusercontent.com
 
 cosign verify "$IMAGE@$DIGEST" --certificate-identity "$ID" --certificate-oidc-issuer "$ISSUER"
 cosign verify-attestation "$IMAGE@$DIGEST" --type spdxjson \
-  --certificate-identity "$ID" --certificate-oidc-issuer "$ISSUER"
-cosign verify-attestation "$IMAGE@$DIGEST" --type slsaprovenance \
-  --certificate-identity-regexp '^https://github.com/slsa-framework/slsa-github-generator/.github/workflows/generator_container_slsa3.yml@refs/tags/v[0-9.]+$' \
-  --certificate-github-workflow-repository MBombeck/healthlog-push --certificate-oidc-issuer "$ISSUER"
+  --certificate-identity "$ID" --certificate-oidc-issuer "$ISSUER" > /dev/null
+cosign verify-attestation "$IMAGE@$DIGEST" --type slsaprovenance1 \
+  --certificate-identity "$PROV" --certificate-oidc-issuer "$ISSUER" \
+  --certificate-github-workflow-repository MBombeck/healthlog-push > /dev/null
 
 # binaries
 cosign verify-blob SHA256SUMS --bundle SHA256SUMS.sigstore.json \
@@ -39,9 +45,32 @@ cosign verify-blob SHA256SUMS --bundle SHA256SUMS.sigstore.json \
 shasum -a 256 -c SHA256SUMS
 ```
 
+The provenance is also stored as a GitHub artifact attestation, so
+`gh attestation verify oci://$IMAGE@$DIGEST --repo MBombeck/healthlog-push --signer-workflow MBombeck/healthlog-push/.github/workflows/provenance.yml`
+checks it a second way.
+
+### v1.0.0
+
+v1.0.0 got its provenance from the SLSA GitHub generator (v2.1.0), which writes the older format (an `.att`
+tag, predicate `https://slsa.dev/provenance/v0.2`) under the generator's own identity. Signature, SBOM and
+binaries verify with the commands above. A plain `cosign verify-attestation` finds only the bundles in the
+referrers, none of which is the provenance, and fails with "no matching CertificateIdentity"; the provenance
+of v1.0.0 needs the legacy lookup:
+
+```sh
+cosign verify-attestation "$IMAGE@$DIGEST" --new-bundle-format=false --type slsaprovenance \
+  --certificate-identity-regexp '^https://github.com/slsa-framework/slsa-github-generator/.github/workflows/generator_container_slsa3.yml@refs/tags/v[0-9.]+$' \
+  --certificate-github-workflow-repository MBombeck/healthlog-push --certificate-oidc-issuer "$ISSUER" > /dev/null
+```
+
+Checked on 2026-11-21 with cosign v3.1.4 against
+`ghcr.io/mbombeck/healthlog-push@sha256:29c0efbf4014b9d6d84ec26465180787583a696d23302670b88bf2f8bafff46b`
+(v1.0.0): signature, SBOM and checksum bundle verified; plain provenance lookup refused; the legacy command
+above verified.
+
 The hosted relay shows the digest it runs at `https://push.healthlog.dev/version`. That answer comes from
-the relay itself, so it proves nothing on its own; the deployment role refuses to start any digest that
-fails the first two commands above.
+the relay itself, so it proves nothing on its own; the deployment role refuses to start any digest whose
+signature or provenance fails the commands above.
 
 ## Local rehearsal
 
@@ -74,7 +103,7 @@ binary rebuild: identical
 ```
 
 What the rehearsal cannot show: the keyless certificate identity, the transparency log entries, and the
-SLSA generator's own signature. Those are checked with the commands above after the first real tag.
+provenance workflow's own signature. Those are checked with the commands above after the first real tag.
 
 ## Before the first tag
 

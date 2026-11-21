@@ -53,7 +53,7 @@ when it signs.
 | `docker/setup-qemu-action`, `docker/setup-buildx-action`, `docker/build-push-action`, `docker/login-action` | `ci.yml`, `release.yml` | multi-arch image builds (amd64, arm64) and the push to GHCR |
 | `sigstore/cosign-installer` | `release.yml` | keyless signing of the image, the SBOM attestation and the binaries' checksum file |
 | `anchore/sbom-action` | `release.yml` | SPDX SBOM of the released image |
-| `slsa-framework/slsa-github-generator` v2.1.0 | `release.yml` | SLSA provenance for the image |
+| `actions/attest-build-provenance` v4.2.2 | `provenance.yml` (called by `release.yml`) | SLSA v1 provenance for the image, Sigstore bundle in the registry |
 | `github/codeql-action` | `codeql.yml` | CodeQL analysis of the Go code |
 | `ossf/scorecard-action`, `actions/upload-artifact` | `scorecard.yml` | OpenSSF Scorecard |
 | Dependabot | `.github/dependabot.yml` | weekly updates for Go modules, GitHub Actions and Docker base images |

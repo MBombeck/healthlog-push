@@ -125,22 +125,21 @@ jobs:
           REF: ${{ needs.image.outputs.image }}@${{ needs.image.outputs.digest }}
         run: cosign attest --yes --type spdxjson --predicate sbom.spdx.json "$REF"
 
+  # SLSA v1 build provenance, signed in the reusable workflow provenance.yml: its path, not release.yml, is
+  # the certificate identity, so the build job cannot produce a provenance that verifies. The bundle goes
+  # into the registry's referrers next to the signature and the SBOM, where a current cosign finds it with
+  # no format flag (the SLSA generator's legacy `.att` tag needed `--new-bundle-format=false`).
   provenance:
     name: SLSA provenance
     needs: image
     permissions:
-      actions: read
       id-token: write
+      attestations: write
       packages: write
-    # Reusable workflows from slsa-github-generator must be referenced by tag,
-    # not by commit SHA: the generator verifies its own ref when it signs.
-    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_container_slsa3.yml@v2.1.0
+    uses: ./.github/workflows/provenance.yml
     with:
       image: ${{ needs.image.outputs.image }}
       digest: ${{ needs.image.outputs.digest }}
-      registry-username: ${{ github.actor }}
-    secrets:
-      registry-password: ${{ secrets.GITHUB_TOKEN }}
 
   github-release:
     name: Binaries and GitHub release
