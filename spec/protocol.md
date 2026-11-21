@@ -223,7 +223,7 @@ Instance-authenticated. The instance forwards what the app produced, unchanged, 
   "bindingKey": "<base64url 32>",
   "statement": { "instanceId": "6f1c2a4e-...", "tokenTag": "<hex 32>", "kind": "device", "seq": 7, "iat": 1795000000 },
   "signature": "<base64url 64>",
-  "consent": { "textVersion": "2026-12-01", "day": "2026-12-01" }
+  "consent": { "textVersion": "2026-11-21", "day": "2026-11-21" }
 }
 ```
 
@@ -379,10 +379,10 @@ The device reads everything the relay holds about its binding. Inputs travel in 
   "instanceId": "6f1c2a4e-1b9d-4c3e-8a7f-0d2b5e9c1a37",
   "state": "active",
   "env": "production",
-  "boundDay": "2026-12-01",
+  "boundDay": "2026-11-21",
   "lastUsedWeekOf": "2026-11-26",
-  "consentVersion": "2026-12-01",
-  "consentDay": "2026-12-01"
+  "consentVersion": "2026-11-21",
+  "consentDay": "2026-11-21"
 }
 ```
 
@@ -408,9 +408,9 @@ Instance-authenticated. Body at most 128 KiB.
   "items": [
     { "ref": "01JTESTVECT000000000000001", "token": "<hex>", "env": "production", "class": "alert",
       "ttlSeconds": 7200, "envelope": "<base64url, 1434 characters>", "collapse": "<22 characters>" },
-    { "ref": "sync-2026-12-01T07", "token": "<hex>", "env": "production", "class": "silent",
+    { "ref": "sync-2026-11-21T07", "token": "<hex>", "env": "production", "class": "silent",
       "ttlSeconds": 3600, "envelope": "<base64url, 1434 characters>" },
-    { "ref": "end-cm_med_1-2026-12-01", "token": "<hex>", "env": "production", "class": "liveactivity",
+    { "ref": "end-cm_med_1-2026-11-21", "token": "<hex>", "env": "production", "class": "liveactivity",
       "ttlSeconds": 3600,
       "activity": { "token": "<hex>", "bindingKey": "<base64url 32>",
                     "statement": { "instanceId": "...", "tokenTag": "<hex 32>", "laTokenTag": "<hex 32>", "iat": 1795000000 },
@@ -833,7 +833,7 @@ Instance-authenticated, empty body. `200`:
               "challengesPerDay": 20, "badSignatureBurst": 60 },
   "devices": { "active": 3, "provisional": 0, "limit": 50 },
   "notice": { "id": "planned_maintenance", "level": "planned", "until": 1795600000 },
-  "keyRotatedDay": "2026-12-01",
+  "keyRotatedDay": "2026-11-21",
   "relayTime": 1795000000,
   "registration": "open"
 }

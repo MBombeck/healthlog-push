@@ -90,6 +90,9 @@ parses nothing from the relay; its only input is the modification time of an emp
 
 ## Root on the host
 
+The measures that make this harder on the hosted relay (sandboxing, kernel settings, egress limits, audit
+trail) are described in [hardening.md](hardening.md).
+
 Root on the host has everything, including the APNs key file. The separation into two containers does not
 help against that. The countermeasures are outside the code: a single-purpose host, key-only administrative
 access over a private management network, no provider snapshots, secrets only from a secret store, core

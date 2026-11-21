@@ -86,7 +86,8 @@ they have seen. They cannot read any data, and the HealthLog app is built to tak
 notification it could not decrypt and verify. A compromised relay process can forge relay responses; of the
 APNs credentials it only ever holds a provider token valid for at most one hour. DNS or TLS takeover turns into an outage rather than a
 takeover, because responses are signed. Nobody can prove which code runs on a server they do not control.
-The full analysis, including the known limitations, is in [docs/threat-model.md](docs/threat-model.md).
+The full analysis, including the known limitations, is in [docs/threat-model.md](docs/threat-model.md). How
+the host of the hosted relay is hardened is in [docs/hardening.md](docs/hardening.md).
 
 ## Self-hosting quick guide
 
@@ -276,6 +277,7 @@ locally. Dependencies and the policy for adding one: [docs/dependencies.md](docs
 - [docs/self-hosting.md](docs/self-hosting.md): running your own relay for your own app build
 - [docs/api.md](docs/api.md): API reference with examples; the contract is `spec/protocol.md` and `spec/relay-api.yaml`
 - [docs/threat-model.md](docs/threat-model.md): assets, actors, limitations, tests
+- [docs/hardening.md](docs/hardening.md): how the hosted relay's host is hardened
 - [docs/privacy.md](docs/privacy.md) and [docs/terms.md](docs/terms.md): the texts of the hosted relay
 - [docs/migration.md](docs/migration.md): moving the relay to a new host
 - [docs/dependencies.md](docs/dependencies.md): every module and why it is there

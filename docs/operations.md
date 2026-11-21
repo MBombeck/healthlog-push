@@ -503,6 +503,10 @@ check that `admin stats` shows the imported instances.
 
 ## Hosting and certifications
 
-This section is a placeholder. The hosted relay runs on a dedicated Hetzner Cloud server operated by
-Hetzner Online GmbH in a data centre in Germany or Finland. The wording of this section, including any
-statement about certifications, is pending verification. No certification is claimed.
+The hosted relay runs on a dedicated Hetzner Cloud server (CX23) operated by Hetzner Online GmbH in
+Falkenstein, Germany (location fsn1). The certification wording for users is section 13 of
+[privacy.md](privacy.md#13-hosting-and-certifications); keep both in step and re-check the sources there at
+least once a year (ISO/IEC 27001 certificate, BSI C5 Type 2 attestation period, sub-processor list). Before
+the notice may say that processing is governed by a concluded data processing agreement, confirm in the
+Hetzner customer account that the agreement under Art. 28 GDPR has been concluded; until then the notice
+only says it is available under Hetzner's standard terms. Host hardening: [hardening.md](hardening.md).

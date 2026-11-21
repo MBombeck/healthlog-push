@@ -62,7 +62,7 @@ func bindBody(dev ed25519.PrivateKey, host, inst string, token []byte, seq, iat 
 	b, _ := json.Marshal(BindBody{
 		Token: hex.EncodeToString(token), Env: "production", BindingKey: EncodeB64(ed25519.PublicKey(dev[32:])), Statement: st,
 		Signature: EncodeB64(ed25519.Sign(dev, []byte(BindText(host, inst, tag, "device", seq, iat)))),
-		Consent:   Consent{TextVersion: "2026-12-01", Day: "2026-12-01"},
+		Consent:   Consent{TextVersion: "2026-11-21", Day: "2026-11-21"},
 	})
 	return b
 }

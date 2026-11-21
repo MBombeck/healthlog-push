@@ -57,7 +57,7 @@ func TestEndToEndAlert(t *testing.T) {
 		t.Errorf("binding not active after accepted push: %s", h.state(d))
 	}
 	sr := h.selfRead(d)
-	if sr.Status != 200 || sr.str("state") != "active" || sr.str("instanceId") != i.id || sr.str("consentVersion") != "2026-12-01" {
+	if sr.Status != 200 || sr.str("state") != "active" || sr.str("instanceId") != i.id || sr.str("consentVersion") != "2026-11-21" {
 		t.Errorf("self read: %d %s", sr.Status, sr.Raw)
 	}
 }

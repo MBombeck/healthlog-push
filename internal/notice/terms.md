@@ -1,6 +1,6 @@
 # Terms of the HealthLog push relay
 
-Version 1.0, 2026-11-21. Served at https://push.healthlog.dev/terms.
+Version 1.0, 2026-11-21 (terms version `2026-11-21`). Served at https://push.healthlog.dev/terms.
 
 These terms apply to the hosted relay at push.healthlog.dev. The operator of a HealthLog server accepts them
 when switching the relay on for that server.

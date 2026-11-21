@@ -199,7 +199,7 @@ HL-Signature: <86 base64url>
 
 {"token":"<64 hex>","env":"production","bindingKey":"<43 base64url>",
  "statement":{"instanceId":"6f1c2a4e-8b3d-4c5e-9a7f-0d1e2f3a4b5c","tokenTag":"<32 hex>","kind":"device","seq":3,"iat":1794999990},
- "signature":"<86 base64url>","consent":{"textVersion":"relay-2026-11","day":"2026-11-21"}}
+ "signature":"<86 base64url>","consent":{"textVersion":"2026-11-21","day":"2026-11-21"}}
 ```
 
 ```http
@@ -302,7 +302,7 @@ HL-Signature: <86 base64url>
 ```
 
 ```json
-{"kind":"device","instanceId":"6f1c2a4e-8b3d-4c5e-9a7f-0d1e2f3a4b5c","state":"active","env":"production","boundDay":"2026-11-02","lastUsedWeekOf":"2026-11-16","consentVersion":"relay-2026-11","consentDay":"2026-11-02"}
+{"kind":"device","instanceId":"6f1c2a4e-8b3d-4c5e-9a7f-0d1e2f3a4b5c","state":"active","env":"production","boundDay":"2026-11-02","lastUsedWeekOf":"2026-11-16","consentVersion":"2026-11-21","consentDay":"2026-11-02"}
 ```
 
 `lastUsedWeekOf` is the Monday of the week of last use. Refusal: `404 binding_unknown`.

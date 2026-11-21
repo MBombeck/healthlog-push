@@ -299,7 +299,7 @@ func (d *device) bindBody(instID string, iat int64) wire.BindBody {
 		Token: d.hex(), Env: "production", BindingKey: wire.EncodeB64(ed25519.PublicKey(d.key[32:])),
 		Statement: wire.Statement{InstanceID: instID, TokenTag: hex.EncodeToString(tag), Kind: "device", Seq: d.seq, Iat: iat},
 		Signature: wire.EncodeB64(ed25519.Sign(d.key, []byte(wire.BindText(host, instID, tag, "device", d.seq, iat)))),
-		Consent:   wire.Consent{TextVersion: "2026-12-01", Day: "2026-12-01"},
+		Consent:   wire.Consent{TextVersion: "2026-11-21", Day: "2026-11-21"},
 	}
 }
 
