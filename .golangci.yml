@@ -1,0 +1,133 @@
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  default: none
+  enable:
+    - bodyclose
+    - copyloopvar
+    - depguard
+    - errcheck
+    - errorlint
+    - forbidigo
+    - gocritic
+    - gosec
+    - govet
+    - ineffassign
+    - misspell
+    - nilerr
+    - noctx
+    - revive
+    - staticcheck
+    - unconvert
+    - unused
+    - usestdlibvars
+
+  settings:
+    depguard:
+      rules:
+        hpke-only-through-our-implementation:
+          list-mode: lax
+          files:
+            - "$all"
+            - "!**/spec/**_test.go"
+          deny:
+            - pkg: crypto/hpke
+              desc: "only allowed in spec cross-check tests"
+            - pkg: github.com/cloudflare/circl
+              desc: "only allowed in spec cross-check tests"
+
+    errcheck:
+      check-type-assertions: true
+
+    forbidigo:
+      analyze-types: true
+      forbid:
+        - pattern: ^fmt\.Print.*$
+          msg: "use the structured logger; printing is only allowed in cmd/ and tests"
+        - pattern: ^log\.Print.*$
+          msg: "use the structured logger (log/slog)"
+
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - style
+        - performance
+      disabled-checks:
+        - hugeParam
+        - unnamedResult
+        - whyNoLint
+
+    gosec:
+      excludes:
+        - G104 # duplicates errcheck
+
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment
+        - shadow
+
+    misspell:
+      locale: US
+
+    revive:
+      rules:
+        - name: blank-imports
+        - name: context-as-argument
+        - name: context-keys-type
+        - name: dot-imports
+        - name: empty-block
+        - name: error-naming
+        - name: error-return
+        - name: error-strings
+        - name: errorf
+        - name: increment-decrement
+        - name: indent-error-flow
+        - name: range
+        - name: receiver-naming
+        - name: redefines-builtin-id
+        - name: superfluous-else
+        - name: time-naming
+        - name: unexported-return
+        - name: unreachable-code
+        - name: var-declaration
+        - name: var-naming
+        - name: use-any
+        - name: defer
+        - name: identical-branches
+
+  exclusions:
+    generated: strict
+    presets:
+      - std-error-handling
+    rules:
+      - path: ^cmd/
+        linters:
+          - forbidigo
+      - path: _test\.go$
+        linters:
+          - forbidigo
+          - gosec
+          - noctx
+          - bodyclose
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    gofmt:
+      simplify: true
+    goimports:
+      local-prefixes:
+        - github.com/MBombeck/healthlog-push
+  exclusions:
+    generated: strict

@@ -1,0 +1,35 @@
+# Build output
+/bin/
+/dist/
+/healthlog-push
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test output
+*.test
+*.out
+coverage*.txt
+coverage*.html
+
+# Go workspace
+go.work
+go.work.sum
+
+# Local data and secrets
+.env
+.env.*
+*.db
+*.p8
+
+# Editors and OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+!deploy/compose/.env.example
+
+# Local deployment inventories
+deploy/ansible/inventory.yml
+deploy/ansible/group_vars/all.yml

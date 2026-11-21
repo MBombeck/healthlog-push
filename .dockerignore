@@ -1,0 +1,20 @@
+# Only what the build needs goes into the context.
+.git
+.github
+.gitignore
+.dockerignore
+.editorconfig
+.golangci.yml
+Dockerfile
+*.md
+docs/
+deploy/
+scripts/
+dist/
+bin/
+coverage*
+*.out
+*.test
+**/testdata/fuzz/
+.env
+.env.*

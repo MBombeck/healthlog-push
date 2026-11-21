@@ -1,0 +1,69 @@
+name: Bug report
+description: Something in the relay, the signer or the spec does not work as documented.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Security problems do not belong here; see SECURITY.md.
+        Do not post instance ids, device tokens, keys, registry exports or real host names. Replace them with placeholders.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Output of `healthlog-push version`, or the image tag and digest.
+      placeholder: v0.1.0, sha256:...
+    validations:
+      required: true
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - relay
+        - signer
+        - admin command
+        - spec or vectors
+        - container image or release artefacts
+        - documentation
+    validations:
+      required: true
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: Where does it happen?
+      options:
+        - my own instance
+        - the hosted relay (push.healthlog.dev)
+        - local build or tests
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. ...
+        2. ...
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Relevant log lines with identifiers and tokens removed.
+      render: text
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I removed instance ids, tokens, keys and host data from this report.
+          required: true

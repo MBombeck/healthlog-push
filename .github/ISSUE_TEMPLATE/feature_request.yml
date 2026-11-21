@@ -1,0 +1,36 @@
+name: Feature request
+description: Suggest a change to the relay, the signer or the spec.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The relay is small on purpose. Proposals that keep it small, auditable and dependency-light have the best chance.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you trying to do, and what stops you today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: How could the relay or the spec solve it?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: dropdown
+    id: spec-impact
+    attributes:
+      label: Does this change the wire protocol or the spec?
+      options:
+        - "no"
+        - "yes"
+        - not sure
+    validations:
+      required: true
