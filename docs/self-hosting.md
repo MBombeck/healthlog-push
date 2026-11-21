@@ -20,7 +20,8 @@ So:
 
 - A small Linux host with a public IPv4 and preferably IPv6 address, Docker with the compose plugin, and a
   DNS name for it (`push.example.org` below). 256 MB of memory for the relay and 32 MB for the signer are
-  the limits set in `deploy/compose/compose.yaml`.
+  the limits set in `deploy/compose/compose.yaml`; the compose file also sets `GOMEMLIMIT=220MiB` for the
+  relay so that the Go runtime collects before the kernel would kill it.
 - An APNs authentication key (`.p8`) from your Apple developer account, with its key id and your team id.
   Create it with the environment scope **"Sandbox & Production"**, so the same key serves development builds
   and TestFlight or App Store builds. A key limited to one environment fails on the other with
@@ -105,7 +106,7 @@ ones in `cmd/healthlog-push/main.go`.
 | `HLP_APNS_KEY_FILE` | `/run/secrets/signer/apns.p8` | the APNs key |
 | `HLP_APNS_KEY_ID` or `HLP_APNS_KEY_ID_FILE` | required | key id from the Apple developer account |
 | `HLP_APNS_TEAM_ID` or `HLP_APNS_TEAM_ID_FILE` | required | your team id |
-| `HLP_JWT_DIR`, `HLP_JWT_REFRESH_DIR` | as above | the shared tmpfs volumes |
+| `HLP_JWT_DIR`, `HLP_JWT_REFRESH_DIR` | as above | the shared tmpfs volumes (1 MB each, mounted `noexec`, `nosuid`, `nodev`) |
 
 The limits (`DefaultLimits`, `DefaultRegistrationLimits`) are compiled in; there is no variable for them in
 this version. Per-instance device limits can be raised with `admin limits`.
@@ -130,8 +131,8 @@ The same APNs key is used for both, which is why it needs the "Sandbox & Product
 
 With `HLP_TLS_MODE=files`, mount the certificate and key into the relay container in the override file and
 point `HLP_TLS_CERT_FILE` and `HLP_TLS_KEY_FILE` at them. They are read at start only: restart the relay
-after every renewal. TLS 1.3 is the minimum in both modes; only the TLS-ALPN-01 validation handshake in
-`acme` mode may use TLS 1.2.
+after every renewal. TLS 1.3 is the minimum in both modes; only a TLS-ALPN-01 validation handshake in
+`acme` mode, one that offers no ALPN protocol other than `acme-tls/1`, may use TLS 1.2.
 
 ## Firewall
 
@@ -159,7 +160,8 @@ table inet hlp {
 ```
 
 Outbound, the relay needs tcp/443 (APNs, ACME, the image registry), DNS and NTP. Restrict the rest if you
-can. The full rule set with egress filtering is `deploy/ansible/roles/firewall/templates/nftables.conf.j2`.
+can. The full rule set with egress filtering is `deploy/ansible/roles/firewall/templates/nftables.conf.j2`;
+it limits outbound traffic by port, not by destination.
 Keep administrative access on a private management network or VPN of your choice rather than on the public
 interface.
 
@@ -177,7 +179,8 @@ curl -s https://push.example.org/healthz
 curl -s https://push.example.org/version
 ```
 
-`healthcheck` exits 0 only when `/healthz` reports `"status":"ok"`. Day-to-day operation, admin commands and
+`healthcheck` exits 0 only when `/healthz` reports `"status":"ok"`, which depends only on the relay's own
+facts (a usable provider token, a writable store); `breaker` and `delivery` are shown but do not change it. Day-to-day operation, admin commands and
 key rotation: [operations.md](operations.md).
 
 ## Building the app against your relay

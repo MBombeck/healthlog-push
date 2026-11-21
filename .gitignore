@@ -33,3 +33,8 @@ go.work.sum
 # Local deployment inventories
 deploy/ansible/inventory.yml
 deploy/ansible/group_vars/all.yml
+
+# Secret material that must never be committed
+secrets.vault.yml
+*.pem
+*.key

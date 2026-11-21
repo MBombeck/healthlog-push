@@ -12,9 +12,17 @@ characters), public keys 32 bytes (43 characters).
 
 ## Conventions
 
-- TLS 1.3 only. JSON bodies, decoded strictly: unknown fields, trailing data or a wrong type give
-  `422 invalid_item`. Bodies are limited to 128 KiB for `POST /v1/push` and 4 KiB for everything else
-  (`413 too_large`).
+- TLS 1.3 (TLS 1.2 only for a certificate validation handshake that offers nothing but `acme-tls/1`). JSON
+  bodies, decoded strictly: unknown fields, trailing data or a wrong type give `422 invalid_item`.
+- `HL-Nonce` (16 random bytes, base64url, 22 characters, fresh for every request) is mandatory on every
+  `/v1` request, including registration and the app's direct calls; without a valid one the relay answers
+  `400 nonce_required`. Only `GET /healthz` and `GET /version` may omit it.
+- `POST` and `DELETE` must declare their body length in `Content-Length` (`0` for no body); a body of unknown
+  length gets `411 length_required`. Bodies are limited to 128 KiB for `POST /v1/push` and 4 KiB for
+  everything else (`413 too_large`, checked against the declared length before the body is read). When the
+  bodies in flight across all connections would exceed 32 MiB, the relay answers `503 overloaded`.
+- Response bodies are at most 64 KiB. A client refuses a response body over 256 KiB without reading on.
+- At most 16 concurrent streams per HTTP/2 connection.
 - Binary values are unpadded base64url. Device and activity tokens are hex (32 to 100 bytes). Token tags
   are lowercase hex of `SHA-256("hl-push-token" || token)[0:16]`.
 - Signed texts are fields joined with a single `\n`, no trailing newline. Times are Unix seconds and must be
@@ -43,8 +51,11 @@ hl-relay-v1
 <lowercase hex SHA-256 of the body; of the empty string for no body>
 ```
 
-The relay checks, in this order: body size, known instance, time window (and not before the relay's own
-start), bad-signature budget, signature, tier, request rate, nonce replay, minimum client version.
+Before any endpoint runs, the relay checks the nonce header and the declared body length. Then, in this
+order: known instance and time window (and not before the relay's own start) from the headers, the body,
+signature, tier, request rate, nonce replay, minimum client version. The signature is always verified: failed
+attempts by others never cause a valid request to be refused. The per-instance `badSignatureBurst` bucket
+only limits how often failures are counted in the metrics.
 
 ### Response signing
 
@@ -52,15 +63,20 @@ Every response except `/privacy`, `/terms` and `/` has `HL-Relay-Signature`: an 
 relay identity key over
 
 ```
-hl-relay-resp-v1
+hl-relay-resp-v2
 <host>
-<HL-Nonce of the request, or "-" if it had none or it was malformed>
+<METHOD of the request>
+<raw path with query, as sent>
+<HL-Nonce of the request>
 <HTTP status>
-<lowercase hex SHA-256 of the body>
+<lowercase hex SHA-256 of the body; of the empty string for no body>
 ```
 
-Verify it against the pinned keys (`current`, `next`) and treat a missing or wrong signature as a transport
-error.
+Rebuild the text from your own request (method, raw path, nonce) and the response (status, raw body), verify
+it against the pinned keys (`current`, `next`), and treat a missing or wrong signature as a transport error.
+The nonce is `-` only for `/healthz` and `/version` called without one, and for the `400 nonce_required`
+refusal; a client that sent a nonce treats a response bound to `-` as a transport error. The full rules are in
+[spec/statements.md](../spec/statements.md#hl-relay-resp-v2).
 
 ### Error envelope
 
@@ -71,15 +87,18 @@ error.
 `error` is always present. `scope` (`device`, `instance`, `tier`, `global`), `retryAfter` (seconds, spread
 by plus or minus 30 %), `relayTime` (on `stale_timestamp`), `reason` (suspension reason or conflict detail)
 and `limits` appear when they apply. A refusal of a whole request with a retry hint also sets the
-`Retry-After` header.
+`Retry-After` header, but that header is not signed: take retry hints only from the signed `retryAfter` and
+cap them at 86,400 seconds.
 
 | Status | `error` values |
 |---|---|
+| 400 | `nonce_required` |
 | 401 | `unknown_instance`, `bad_signature`, `stale_timestamp`, `replayed` |
 | 403 | `instance_revoked`, `instance_suspended`, `invite_required`, `binding_refused`, `challenge_refused`, `activity_refused` (item) |
 | 404 | `binding_unknown`, `not_found` |
 | 409 | `binding_conflict`, `key_in_use` |
 | 410 | `unregistered` (item) |
+| 411 | `length_required` |
 | 413 | `too_large`, `too_many_items` |
 | 422 | `invalid_item`, `env_unsupported` |
 | 426 | `min_server_version` |
@@ -115,7 +134,8 @@ HL-Relay-Signature: <86 base64url>
 
 Add `"invite":"<code>"` while registration is invite-only. Refusals: `401 stale_timestamp` with
 `relayTime`, `401 bad_signature`, `403 invite_required`, `403 instance_suspended` or `instance_revoked` for
-a known key, `503 registration_paused` (closed, or registration limits reached).
+a known key, `503 registration_paused` (closed, or registration limits reached). In invite mode the code is
+spent only when the registration succeeds.
 
 ### POST /v1/instances/self/rotate
 
@@ -215,7 +235,8 @@ HTTP/1.1 201 Created
   days gives
   `409 {"error":"binding_conflict","reason":"challenge_sent"}`: the relay sends a challenge push to the
   token (see the next endpoint). `reason` is `challenge_quota` when the token already had a challenge today
-  or the instance used its 20 for the day.
+  or the instance used its 20 for the day, and `challenge_unsent` (with `retryAfter`) when the challenge push
+  could not be queued; the quota is then given back.
 - Refusals: `403 binding_refused` (bad device signature, statement for another instance, `seq` not higher,
   pair or token blocked), `422 env_unsupported`, `429 binding_quota` with limits,
   `503 storage_unavailable`.
@@ -250,6 +271,7 @@ Signed text: `hl-challenge-v1\n<host>\n<challenge>\n<hex token tag>`, by the app
 ```http
 POST /v1/bindings/challenge HTTP/1.1
 Content-Type: application/json
+HL-Nonce: q8Jr2mXc0Lw7Vd1sT5yNbA
 
 {"bindingKey":"<43 base64url>","challenge":"<43 base64url>","tokenTag":"<32 hex>","signature":"<86 base64url>"}
 ```
@@ -261,8 +283,9 @@ HTTP/1.1 200 OK
 ```
 
 The new key replaces the old binding; the previous holder gets `404 binding_unknown` on its next push.
-Refusal: `403 challenge_refused` for an unknown or expired challenge, a different key or token, or a bad
-signature.
+Refusals: `403 challenge_refused` for an unknown or expired challenge, a different key or token, a bad
+signature, or an instance that is gone, suspended or revoked or a blocked pair; `429 binding_quota` when the
+instance's binding quotas (see `POST /v1/bindings`) do not allow the new binding.
 
 ### DELETE /v1/bindings/self (app)
 
@@ -274,6 +297,7 @@ Signed text: `hl-unbind-v1\n<host>\n<instance id>\n<hex token tag>\n<iat>`.
 ```http
 DELETE /v1/bindings/self HTTP/1.1
 Content-Type: application/json
+HL-Nonce: q8Jr2mXc0Lw7Vd1sT5yNbA
 
 {"token":"<64 hex>","bindingKey":"<43 base64url>",
  "statement":{"instanceId":"6f1c2a4e-8b3d-4c5e-9a7f-0d1e2f3a4b5c","tokenTag":"<32 hex>","iat":1795000000},
@@ -295,6 +319,7 @@ Signed text: `hl-selfread-v1\n<host>\n<hex token tag>\n<iat>`.
 
 ```http
 GET /v1/bindings/self HTTP/1.1
+HL-Nonce: q8Jr2mXc0Lw7Vd1sT5yNbA
 HL-Token: <64 hex>
 HL-Binding-Key: <43 base64url>
 HL-Iat: 1795000000
@@ -307,8 +332,10 @@ HL-Signature: <86 base64url>
 
 `lastUsedWeekOf` is the Monday of the week of last use. Refusal: `404 binding_unknown`.
 
-The three app endpoints share one relay-wide bucket (100, refilling 20 per second); over it they answer
-`429 global`.
+The three app endpoints parse and verify first. Only failed attempts are charged to one relay-wide bucket
+(100, refilling 20 per second); once it is empty, further failures answer `429 global`, scope `global`. A
+correctly signed call is never charged there; it is limited per device token instead (bucket of 10,
+refilling 10 per hour, `429 device_quota`, scope `device`).
 
 ## Push
 
@@ -372,7 +399,7 @@ Item results:
 | 404 | `binding_unknown` | the token is not bound to this instance |
 | 410 | `unregistered` | Apple reports the token as gone; the binding was deleted |
 | 422 | `invalid_item` | malformed item, duplicate `ref`, or `env` differs from the binding |
-| 429 | `device_quota`, `instance_quota`, `instance_rate`, `binding_quota`, `global` | a limit, with `scope` and `retryAfter` |
+| 429 | `device_quota`, `instance_quota`, `instance_rate`, `binding_quota`, `global` | a limit, with `scope` and `retryAfter`. `binding_quota` with scope `device`: a soft-invalid binding on the day it failed (one probe push a day); with scope `instance`: a provisional binding that does not fit, or any non-active binding while the instance is over its invalid-token budget |
 | 502 | `apns_rejected` | Apple refused the request (reason in `reason`); nothing was deleted |
 | 503 | `apns_unavailable`, `relay_misconfigured`, `maintenance`, `queue_full` | transient; retry within the push's lifetime |
 
@@ -384,8 +411,10 @@ sent again. Transient results are not kept, so a retry really retries.
 ### POST /v1/receipts
 
 Counts only: of the pushes the relay accepted more than six hours ago, how many a device confirmed through
-the envelope receipt. Once per instance per 50 minutes; `confirmed` must not exceed `accepted`, and
-`accepted` is at most 100,000. The sums across instances drive the `delivery` field of `/healthz`.
+the envelope receipt. Accepted once per instance per 45 minutes (report every 55 minutes); `confirmed`
+must not exceed `accepted`, and `accepted` is at most 100,000. Only `standard` instances count, and each
+reported `accepted` is capped at what the relay itself accepted for that instance in the last three days
+(today and the two days before). The sums drive the display-only `delivery` field of `/healthz`.
 
 ```http
 POST /v1/receipts HTTP/1.1
@@ -402,13 +431,15 @@ HL-Signature: <86 base64url>
 HTTP/1.1 204 No Content
 ```
 
-Refusal: `429 instance_rate` when sent again within 50 minutes.
+Refusal: `429 instance_rate` when sent again within 45 minutes.
 
 ## Public pages
 
 ### GET /healthz
 
-Signed; `200` when `status` is `ok`, otherwise `503`. No time stamps.
+Signed; `200` when `status` is `ok`, otherwise `503`. No time stamps. `status` depends only on the relay's
+own facts (`down` without a usable provider token or after Apple rejected a renewed one, `degraded` when the
+store is not writable); `breaker` and `delivery` are display only. A nonce is optional here.
 
 ```json
 {"status":"ok","db_writable":true,"apns_recent":true,"breaker":"closed","delivery":"ok"}

@@ -1,0 +1,11 @@
+# The vectors and the reference implementation under spec/ contain synthetic key material made of repeated
+# bytes on purpose; they are test data, not secrets.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "synthetic test vectors"
+paths = [
+  '''^spec/vectors/''',
+  '''^spec/tools/''',
+]

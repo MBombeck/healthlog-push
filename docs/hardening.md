@@ -13,14 +13,15 @@ encrypted envelopes and the delivery metadata described in the privacy notice.
 selected Level 2 settings. The latest audit with the Ubuntu Security Guide (21 November 2026) scored 93.3 % for Level 1 Server against the full profile, and 97.9 % against our documented tailoring, which switches off only the rules we deliberately do not follow. An independent check with OpenSCAP and the ComplianceAsCode content had measured 70.7 % on the stock image. Every rule we do not
 follow is listed with its reason in our operations notes; the main ones are named below.
 
-**Network.** The only public port is 443, served by the relay itself with TLS 1.3 (TLS 1.2 is accepted only for
-the certificate authority's validation handshake) and a certificate that only the
+**Network.** The only public port is 443, served by the relay itself with TLS 1.3 (TLS 1.2 is offered only to a
+handshake that asks for nothing but the certificate authority's validation protocol) and a certificate that only the
 relay's own certificate account may obtain (CAA). There is no public SSH. Administrative access is possible only over
-a private management network, with keys; there is no password login and no root login. Outbound traffic is limited
-per service: the relay may only open connections on port 443 (to Apple's push service and the certificate
-authority). The host cannot reach any other system except the endpoints that receive its logs and metrics, and those
-accept writes only. This holds even if someone gains full control of the host: the restriction is enforced outside
-the machine as well as on it.
+a private management network, with keys; there is no password login and no root login. Outbound connections are
+limited to ports 443, 53 and 123 plus the log and metric receivers and the management network; plain HTTP only for
+the package manager. The limit is by port, not by destination and not per service: any process on the host may open
+a connection on port 443 to any address. The cloud metadata endpoint is reachable only for root. The log and metric
+receivers accept writes only. The outbound limit is also enforced outside the machine, so it holds even if someone
+gains full control of the host.
 
 **No keys to anything else.** The host holds no credentials for our other systems: no deployment keys, no cloud or
 DNS tokens, no access to our password manager. The only credentials on it are the relay's own keys and a backup key
@@ -28,21 +29,27 @@ that can write to one storage location reserved for this host.
 
 **Sandboxing.** The relay and the component that holds the Apple signing key run in separate containers as
 unprivileged users, with a read-only root filesystem, all Linux capabilities dropped (the relay listens on an unprivileged port and the host firewall
-forwards port 443 to it), no privilege escalation, the default seccomp filter and AppArmor profiles. The signing component
+forwards port 443 to it), no privilege escalation, the default seccomp filter and AppArmor profiles. The small in-memory volumes the two
+containers share are mounted `noexec`, `nosuid` and `nodev`. The signing component
 has no network access at all; the relay never sees the signing key, only short-lived tokens.
 
 **Kernel.** Kernel lockdown (integrity mode), restricted kernel pointers and logs, unprivileged BPF disabled, no IP
 forwarding, strict reverse-path filtering, core dumps disabled, unused filesystems and USB storage blocked.
 
 **Updates.** Security updates install automatically every day, including extended security maintenance for the
-wider package set. Kernel security fixes are applied to the running kernel through live patching; full kernel updates
-take effect in a weekly maintenance window with an automatic reboot.
+wider package set. Kernel security fixes are applied to the running kernel through live patching. When an update needs a reboot,
+the host reboots automatically at a fixed early-morning time (04:20 UTC by default), checked daily; there is no
+weekly window.
 
 **Monitoring.** An audit trail records changes to accounts, sudo use, SSH configuration, the relay's key files,
 container configuration and the firewall. File integrity is checked continuously, container images are scanned for
 known vulnerabilities, and availability is checked from outside. None of this records the IP addresses of relay
 users: the relay writes no access log, the system does not log martian packets, and the intrusion detection only
 reads system and SSH logs. A community blocklist of known attacking addresses is applied at the firewall.
+
+**What the published code covers.** The kernel measures (apart from disabling core dumps), the audit trail, file
+integrity checking, image scanning, live patching and the address blocklist belong to the operator's host baseline
+and are not part of the published Ansible role, so they cannot be verified from this repository.
 
 **Backups.** Only a daily export of registered instances, the denylist and the blocks (device opt-outs and
 operator token blocks, as keyed hashes) is backed up, encrypted, to a separate

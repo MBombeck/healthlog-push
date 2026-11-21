@@ -45,6 +45,7 @@ services:
     memswap_limit: 32m
     pids_limit: 32
     environment:
+      HLP_SECRETS_REV: ${HLP_SECRETS_REV:-}
       HLP_APNS_KEY_FILE: /run/secrets/signer/apns.p8
       HLP_APNS_KEY_ID: ${HLP_APNS_KEY_ID:?HLP_APNS_KEY_ID must be set}
       HLP_APNS_TEAM_ID: ${HLP_APNS_TEAM_ID:?HLP_APNS_TEAM_ID must be set}
@@ -86,6 +87,10 @@ services:
         condition: service_started
     environment:
       HLP_PUBLIC_HOST: ${HLP_PUBLIC_HOST:?HLP_PUBLIC_HOST must be set}
+      # Fingerprint of the secret files; a change recreates the container (not read by the program).
+      HLP_SECRETS_REV: ${HLP_SECRETS_REV:-}
+      # Keep the Go heap below the container limit so the runtime collects before the kernel kills.
+      GOMEMLIMIT: 220MiB
       HLP_LISTEN: ${HLP_LISTEN:-:8443}
       HLP_TLS_MODE: ${HLP_TLS_MODE:-acme}
       HLP_TLS_CERT_FILE: ${HLP_TLS_CERT_FILE:-}
@@ -140,11 +145,11 @@ volumes:
     driver_opts:
       type: tmpfs
       device: tmpfs
-      o: "size=1m,mode=0770,uid=65533,gid=65530"
+      o: "size=1m,mode=0770,uid=65533,gid=65530,noexec,nosuid,nodev"
   # Refresh request: relay writes the empty marker `refresh`, signer reads it.
   jwt-refresh:
     driver: local
     driver_opts:
       type: tmpfs
       device: tmpfs
-      o: "size=1m,mode=0770,uid=65532,gid=65530"
+      o: "size=1m,mode=0770,uid=65532,gid=65530,noexec,nosuid,nodev"

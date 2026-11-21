@@ -68,6 +68,17 @@
   diff: false
   register: healthlog_push_signer_secret
 
+- name: Fingerprint the secrets
+  # The fingerprint goes into .env and the compose environment, so compose recreates the containers
+  # whenever a secret differs from what the running containers were started with, even if an earlier run
+  # wrote the files and then failed.
+  ansible.builtin.set_fact:
+    healthlog_push_secrets_rev: >-
+      {{ [healthlog_push_secret_relay_id_key, healthlog_push_secret_token_mac_key,
+          healthlog_push_secret_token_mac_key_previous, healthlog_push_secret_acme_account_key,
+          healthlog_push_secret_apns_key_p8_b64] | join('|') | hash('sha256') }}
+  no_log: true
+
 - name: Remember whether a secret changed (forces a container restart)
   ansible.builtin.set_fact:
     healthlog_push_secrets_changed: >-

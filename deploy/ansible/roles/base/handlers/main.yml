@@ -9,7 +9,6 @@
   loop:
     - ssh.socket
     - ssh.service
-  failed_when: false
 
 - name: Apply sysctl
   ansible.builtin.command: sysctl --system

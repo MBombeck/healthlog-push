@@ -14,7 +14,7 @@ copies that exact file to the host; there is no second copy.
 
 | Role | Does |
 |---|---|
-| `base` | Admin accounts with SSH keys only, sshd hardening (no passwords, no root login, `AllowUsers`), core dumps off (sysctl, limits, systemd, systemd-coredump, apport masked), swap off and removed from fstab, chrony with two or more sources, unattended upgrades for the security pocket only with an automatic reboot window. |
+| `base` | Admin accounts with SSH keys only, sshd hardening (no passwords, no root login, `AllowUsers`), core dumps off (sysctl, limits, systemd, systemd-coredump, apport masked), swap off and removed from fstab, chrony with two or more sources, unattended upgrades for the security pocket only, checked daily, with an automatic reboot at a fixed early-morning time (`base_unattended_reboot_time`, default `04:20`, host time UTC) when an update needs one. The SSH restart handler fails the run if the restart fails. |
 | `firewall` | nftables `inet` table: inbound 443 redirected to 8443 (IPv4 and IPv6), ICMP and ICMPv6, SSH from the configured management sources, default drop; egress limited to the list below, default drop. Validated with `nft -c -f` before it is installed and applied behind a dead-man switch. |
 | `docker` | Docker CE from the official apt repository; the signing key is accepted only with the pinned fingerprint. `daemon.json` is written before the first start (`iptables: false`, `ip6tables: false`, `userland-proxy: false`, `live-restore: true`, json-file 10m x 3). |
 | `healthlog_push` | Directories and owners, secret files, backup lists, cosign at a pinned version and checksum, signature and provenance verification, compose deploy with a health gate and automatic rollback, optional export timer, optional log shipping hook. |
@@ -118,9 +118,12 @@ Egress:
 | tcp/80 for uid `_apt` only | Ubuntu mirrors |
 | `healthlog_push_mgmt_vpn_egress` | whatever your management VPN needs (default: nothing) |
 | `healthlog_push_egress_receivers` | your log and metric receivers, by address and port (default: nothing) |
-| 169.254.169.254 tcp/80 | only when `firewall_allow_cloud_metadata` |
+| 169.254.169.254 tcp/80 | only when `firewall_allow_cloud_metadata`, and only for uid 0 |
 | ICMP, ICMPv6 | errors, echo, neighbour discovery |
 | everything else | dropped and counted |
+
+The limit is by port, not by destination: tcp/443, DNS and NTP are open to any address for every process on
+the host.
 
 No rule logs packets. Drops go to named counters only:
 `nft list counters table inet healthlog_push`.
@@ -167,7 +170,7 @@ Order inside the role:
 3. Install cosign at the pinned version; the download must match the pinned SHA-256.
 4. `cosign verify <image> --certificate-identity https://github.com/MBombeck/healthlog-push/.github/workflows/release.yml@refs/tags/<tag> --certificate-oidc-issuer https://token.actions.githubusercontent.com`
 5. `cosign verify-attestation <image> --type slsaprovenance --certificate-identity-regexp '<generator workflow>' --certificate-oidc-issuer ... --certificate-github-workflow-repository MBombeck/healthlog-push`
-6. Only now: render `.env` with the new image, `docker compose pull`, `docker compose up -d`.
+6. Only now: render `.env` with the new image and `HLP_SECRETS_REV`, a SHA-256 fingerprint of all secrets, `docker compose pull`, `docker compose up -d`. Because the fingerprint is part of the compose environment of both containers, compose recreates them whenever a secret differs from what they were started with, also when an earlier run wrote the secret files and then failed.
 7. Wait until `docker compose exec relay /healthlog-push healthcheck` exits 0 (status `ok`) and the signer reports healthy.
 8. Write the image to `/srv/healthlog-push/deployed-digest`.
 
@@ -198,7 +201,10 @@ Forks that publish their own image set `healthlog_push_source_repo` and
 ```sh
 ansible-playbook --syntax-check -i deploy/ansible/inventory.example.yml deploy/ansible/site.yml
 yamllint -c deploy/.yamllint deploy/
+(cd deploy/ansible && ansible-lint --offline)
 docker compose -f deploy/compose/compose.yaml --env-file deploy/compose/.env.example config -q
 ```
+
+CI runs the first three in the `deploy-lint` job with pinned linter versions.
 
 Moving to another host: `docs/migration.md`.

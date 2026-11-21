@@ -109,7 +109,7 @@ table inet healthlog_push {
 		udp sport 546 udp dport 547 accept
 {% endif %}
 {% if firewall_allow_cloud_metadata %}
-		ip daddr 169.254.169.254 tcp dport 80 accept
+		ip daddr 169.254.169.254 tcp dport 80 meta skuid 0 accept
 {% endif %}
 {% for rule in healthlog_push_mgmt_vpn_egress %}
 		{{ rule.proto | default('udp') }} dport {{ rule.port }} accept
