@@ -1,0 +1,5 @@
+go test fuzz v1
+string("0")
+string("0")
+string("0")
+string("0000A000A0A000A00000A0A0A000A000")

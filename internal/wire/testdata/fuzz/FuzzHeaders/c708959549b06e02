@@ -1,0 +1,5 @@
+go test fuzz v1
+string("0")
+string("0")
+string("0\xee\xa00000")
+string("00000000000000000\xe3\x800000000000000")

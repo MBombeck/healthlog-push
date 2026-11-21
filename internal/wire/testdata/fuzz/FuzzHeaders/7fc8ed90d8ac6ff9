@@ -1,0 +1,5 @@
+go test fuzz v1
+string("0")
+string("0")
+string("0/00\xc6\xc6\xc6")
+string("00000000\xcc\xcc\xcc0000000000000000000000000")

@@ -226,7 +226,7 @@ func TestTextRules(t *testing.T) {
 		t.Fatalf("only %d files listed", len(files))
 	}
 	for _, p := range files {
-		if strings.HasPrefix(p, "spec/vectors/") || p == "scripts/check-text.sh" || p == "go.sum" {
+		if strings.HasPrefix(p, "spec/vectors/") || strings.Contains(p, "/testdata/fuzz/") || p == "scripts/check-text.sh" || p == "go.sum" {
 			continue
 		}
 		b, err := os.ReadFile(p)

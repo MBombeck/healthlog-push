@@ -1,0 +1,82 @@
+# Security invariants
+
+Each invariant of the relay with the test that fails when it breaks. `TestInvariantsNameRealTests` fails when a
+test named here no longer exists. The threat model behind these is in [docs/threat-model.md](docs/threat-model.md);
+the protocol in [spec/protocol.md](spec/protocol.md).
+
+Concurrency model: all mutable relay state (instances, bindings, quotas, conflicts, control) is guarded by one
+mutex in `internal/relay`. Signatures are verified and bodies read outside it; handlers that release the lock
+after authentication check that their instance is still the live record before writing (`stillThere`). The
+store is written in short transactions; the minute flush and the daily retention use one transaction each.
+Comparisons involve only public values or hashes of them (key hashes, MACs as map keys), so no constant-time
+comparison is needed; signatures are checked by the standard library.
+
+## Confidentiality
+
+| Id | Invariant | Tests |
+|---|---|---|
+| C1 | The relay cannot open an envelope: no HPKE, X25519 or AEAD code is linked into the service. | `TestRelayCannotOpenEnvelopes` (structure_test.go) |
+| C2 | Instances choose only class, opaque envelope, lifetime and collapse id; every APNs payload is a fixed template, so no instance can make Apple show text it wrote. | `TestPayloadTemplatesOnlyInAPNs` (structure_test.go), `TestTemplates` (internal/apns/apns_test.go), `TestEndToEndAlert` (internal/relay/push_test.go), `TestSilentTemplateAndPriority` (internal/relay/push_test.go), `TestEnvelopeFrameChecked` (internal/relay/push_test.go) |
+| C3 | The relay checks only the outer frame of an envelope (version, suite, class byte, exact length) and passes it on unchanged. | `TestVectorsEnvelopeFrame` (internal/wire/vectors_test.go), `FuzzCheckEnvelopeFrame` (internal/wire/fuzz_test.go) |
+
+## Authenticity of requests and answers
+
+| Id | Invariant | Tests |
+|---|---|---|
+| A1 | Every instance request is signed over host, instance id, method, raw path with query, time, nonce and body hash; any change fails. | `TestRequestSignatureScope` (internal/relay/http_test.go), `TestVectorsStatements` (internal/wire/vectors_test.go) |
+| A2 | A nonce is accepted once; time stamps outside 300 seconds or before the relay start are refused. | `TestNonceReplayAndTimeWindow` (internal/relay/http_test.go) |
+| A3 | Every /v1 request carries a nonce, and every /v1 answer is signed over host, method, raw path, nonce, status and body; non-canonical paths get a signed 404, never an unsigned redirect. | `TestResponseSignatureBindsNonce` (internal/relay/http_test.go), `TestNonceMandatoryOnV1` (internal/relay/http_test.go), `TestNotFoundUnderV1NeedsNonce` (internal/relay/http_test.go), `TestNonCanonicalPathsAreSigned404` (internal/relay/http_test.go) |
+| A4 | Failed signatures by a third party never refuse a correctly signed request of the instance. | `TestForgedSignaturesCannotLockOutAnInstance` (internal/relay/http_test.go) |
+| A5 | Registration and key rotation need proof of possession of the new key; a key can rotate once per day. | `TestParseRegistration` (internal/wire/wire_test.go), `TestRotateAndDelete` (internal/relay/registration_test.go) |
+
+## Device bindings
+
+| Id | Invariant | Tests |
+|---|---|---|
+| B1 | A binding needs a statement signed by the device's binding key that names this instance; a statement for another instance, an older seq or a foreign key never takes a binding over. | `TestBindingProofOfPossession` (internal/relay/bindings_test.go), `TestParseBind` (internal/wire/wire_test.go) |
+| B2 | A different key on a live binding is a conflict resolved only by the challenge the device answers; only the holding instance may replace its own binding after seven silent days. | `TestChallengeFlow` (internal/relay/bindings_test.go), `TestConflictFallbackAfterSevenQuietDays` (internal/relay/bindings_test.go), `TestFormerInstanceCannotTakeOverASilentBinding` (internal/relay/bindings_test.go) |
+| B3 | Answers about tokens bound elsewhere are indistinguishable from unknown tokens, also in the work done (one signature check either way). | `TestUniformAnswers` (internal/relay/bindings_test.go), `TestAppAnswersCostTheSameWork` (internal/relay/concurrency_test.go) |
+| B4 | The device can opt out without its instance; the pair stays blocked for a year, its key stays pinned to the token so that no other key can bind it without the device, and only a later statement of the same key lifts the block. | `TestDirectOptOut` (internal/relay/bindings_test.go), `TestOptOutHoldsAgainstANewInstance` (internal/relay/bindings_test.go), `TestWithheldStatementCannotLiftOptOut` (internal/relay/bindings_test.go), `TestOptOutReturnNeedsTheDevice` (internal/relay/bindings_test.go) |
+| B5 | Opt-outs and abuse blocks survive a MAC key rotation and a restore from the export. | `TestBlocksSurviveMACRotation` (internal/relay/restore_test.go), `TestOptOutSurvivesRestore` (internal/relay/restore_test.go), `TestAbuseBlocksSurviveRestore` (internal/relay/restore_test.go) |
+| B6 | A Live Activity end needs the device's activity statement; its token's failures never touch the device binding. | `TestLiveActivityEnd` (internal/relay/push_test.go) |
+
+## Deletion and failure
+
+| Id | Invariant | Tests |
+|---|---|---|
+| D1 | Only Apple's 410 Unregistered deletes a binding at once; soft failures delete only on a second day; transient errors change nothing. | `TestUnregisteredIsTheOnlyFinalDeletion` (internal/relay/push_test.go), `TestDeletionOnlyThroughKnownPaths` (structure_test.go) |
+| D2 | A relay-side misconfiguration cannot wipe bindings: the breaker counts only established bindings, needs failures from three instances, and while not closed deletes and marks nothing. | `TestBreakerProtectsBindings` (internal/relay/breaker_e2e_test.go), `TestBreakerHalfOpenDoesNotDelete` (internal/relay/breaker_e2e_test.go), `TestBreakerThresholds` (internal/relay/breaker_test.go), `TestBreakerNeedsThreeInstances` (internal/relay/breaker_test.go), `TestBreakerStillOpensOnRealMisconfiguration` (internal/relay/breaker_e2e_test.go) |
+| D3 | Invented tokens cannot open the breaker for everybody and cost the instance its invalid-token budget. | `TestInventedTokensCannotOpenTheBreaker` (internal/relay/breaker_e2e_test.go), `TestInvalidTokenBudget` (internal/relay/push_test.go) |
+| D4 | A provider token Apple rejects twice in a row stops sending; an old rejection is forgotten once a newer token works. | `TestProviderTokenErrors` (internal/relay/push_test.go), `TestOldProviderRejectionForgotten` (internal/relay/push_test.go) |
+| D5 | A store write failure keeps the push path running; only proven damage moves the database aside, never over an earlier copy. | `TestStorageFailureKeepsSending` (internal/relay/push_test.go), `TestStoreNotMovedWithoutProof` (cmd/healthlog-push/main_test.go), `TestDamagedAsideNeverOverwritten` (cmd/healthlog-push/main_test.go), `TestDamagedStoreRecovers` (cmd/healthlog-push/main_test.go) |
+| D6 | The send queue recovers after a run of slow sends and the APNs warm-up ends after the first attempt. | `TestRecoversAfterSlowSends` (internal/queue/queue_test.go), `TestWarmUpEndsAfterFirstAttempt` (internal/apns/apns_test.go) |
+| D7 | Concurrent rotation and deletion leave no instance behind that answered 204 to its deletion. | `TestRotateRacingDeleteLeavesNoZombie` (internal/relay/concurrency_test.go), `TestBindAfterInstanceDeletion` (internal/relay/bindings_test.go) |
+
+## Availability and fairness
+
+| Id | Invariant | Tests |
+|---|---|---|
+| F1 | Bodies are refused from their headers (unknown instance, undeclared or oversized length) before they are read, and buffered bodies are capped globally. | `TestHeadersCheckedBeforeBody` (internal/relay/http_test.go), `TestBufferedBodyBudget` (internal/relay/http_test.go) |
+| F2 | Junk on the app-direct endpoints cannot block a signed opt-out; verified app calls are limited per device. | `TestJunkCannotStarveOptOut` (internal/relay/http_test.go), `TestAppEndpointsLimitedPerDevice` (internal/relay/http_test.go) |
+| F3 | One instance cannot starve others: per-instance, per-device and pool limits, fair queue with admission control. | `TestInstanceRateLimits` (internal/relay/push_test.go), `TestPushesPerMinuteProbation` (internal/relay/push_test.go), `TestBindingQuotas` (internal/relay/limits_test.go), `TestDeviceAlertBucketAndSilentLimit` (internal/relay/push_test.go), `TestDeviceDayCapAllClasses` (internal/relay/limits_test.go), `TestProbationPoolIsSeparate` (internal/relay/limits_test.go), `TestFairAndPrioritised` (internal/queue/queue_test.go), `TestAdmissionControl` (internal/queue/queue_test.go), `TestStaleJobsDropped` (internal/queue/queue_test.go) |
+| F4 | Registrations are limited per IPv4 address, IPv6 /64 and /48 and globally; connections per address and per /48. | `TestRegistrationLimits` (internal/limits/limits_test.go), `TestConnLimitsPerAddressAndPer48` (internal/limits/limits_test.go), `TestConnLimiter` (internal/limits/limits_test.go) |
+| F5 | Health status and the deploy gate depend only on the relay's own facts; third-party receipts are capped and shown only. | `TestReceiptsDriveDeliveryHealth` (internal/relay/push_test.go), `TestPublicEndpoints` (internal/relay/http_test.go) |
+| F6 | Periodic maintenance writes in batches and a metrics scrape writes nothing. | `TestFlushIsOneTransaction` (internal/relay/push_test.go), `TestMaintenanceWritesInBatches` (internal/relay/concurrency_test.go) |
+
+## Data minimisation
+
+| Id | Invariant | Tests |
+|---|---|---|
+| P1 | Logs, metrics, stats and the export contain no address, token, token MAC or (except the export) instance id; the only logger takes closed keys. | `TestNothingIdentifyingReachesLogsMetricsOrStats` (internal/relay/privacy_test.go), `TestOnlyOneLogger` (structure_test.go), `TestLogFieldsAreClosed` (structure_test.go), `TestClientAddressConfined` (structure_test.go), `TestServerErrorLogIsSet` (structure_test.go) |
+| P2 | Metrics are refreshed hourly below 20 active instances; usage reports cover completed days and weeks only. | `TestMetricsCoarseBelowThreshold` (internal/relay/privacy_test.go), `TestUsageAggregates` (internal/relay/privacy_test.go) |
+| P3 | The store holds a closed set of buckets with day or week granularity and applies the retention periods. | `TestStoreBucketsAreClosed` (internal/store/store_test.go), `TestRetention` (internal/store/store_test.go), `TestRevokedRecordsExpireAfterTwelveMonths` (internal/relay/restore_test.go), `TestProvisionalAndInstanceRetention` (internal/relay/registration_test.go) |
+| P4 | The registry export is signed, refused when edited, and holds no bindings or tokens. | `TestEditedExportRefused` (internal/relay/restore_test.go), `TestImportRefusesFieldsOutsideTheClosedSets` (internal/store/store_test.go), `TestExportRoundTrip` (internal/store/store_test.go), `TestExportBlocksRetention` (internal/store/store_test.go) |
+
+## Implementations and texts
+
+| Id | Invariant | Tests |
+|---|---|---|
+| I1 | Go and the JavaScript reference build byte-identical statements, signatures and token tags from the shared vectors. | `TestVectorsStatements` (internal/wire/vectors_test.go), `TestVectorsTokenTags` (internal/wire/vectors_test.go) |
+| I2 | Every parser of network input is fuzzed; the corpus is committed. | `FuzzParseRegistration` (internal/wire/fuzz_test.go), `FuzzParseBind` (internal/wire/fuzz_test.go), `FuzzPushItems` (internal/wire/fuzz_test.go), `FuzzParseUnbind` (internal/wire/fuzz_test.go), `FuzzParseChallenge` (internal/wire/fuzz_test.go), `FuzzParseSelfRead` (internal/wire/fuzz_test.go), `FuzzHeaders` (internal/wire/fuzz_test.go), `FuzzParseReceipts` (internal/wire/fuzz_test.go), `FuzzJWTIssuedAt` (internal/wire/fuzz_test.go) |
+| I3 | The privacy notice and terms have one source, served by the relay. | `TestLegalTextsInSync` (legal_test.go) |
+| I4 | Files stay under 350 lines and functions under 60. | `TestFileAndFunctionSize` (structure_test.go) |

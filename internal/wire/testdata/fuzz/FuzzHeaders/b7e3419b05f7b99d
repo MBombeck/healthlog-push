@@ -1,0 +1,5 @@
+go test fuzz v1
+string("0")
+string("0")
+string("0")
+string("00000ү0000000000000000β0000000")

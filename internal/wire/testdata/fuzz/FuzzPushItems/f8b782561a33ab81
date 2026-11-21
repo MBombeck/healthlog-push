@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("{\"items\":[{\"ref\":\"a0\",\"token\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"env\":\"production\",\"ClAss\":\"alert\",\"ttlSeConds\":1,\"envelope\":\" 00000000\"}]}")

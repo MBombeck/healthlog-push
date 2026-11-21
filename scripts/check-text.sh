@@ -21,7 +21,7 @@ status=0
 while IFS= read -r -d '' file; do
   case "$file" in
     vendor/*|scripts/check-text.sh) continue ;;
-    spec/vectors/*.json) continue ;;
+    spec/vectors/*.json | */testdata/fuzz/*) continue ;;
   esac
   [ -f "$file" ] || continue
 
