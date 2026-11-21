@@ -2,18 +2,23 @@ package relay
 
 import "time"
 
-// Breaker protects every binding from a relay-side misconfiguration (wrong key, wrong topic, bad deploy):
-// when more than 30 % of the device sends in five minutes (at least 20) end with Unregistered,
-// BadDeviceToken or DeviceTokenNotForTopic, it opens. While open, the relay deletes and marks nothing and
-// answers 503 relay_misconfigured. After a cool-down it lets traffic through again in half-open mode, still
-// without deleting or marking anything, and closes only when Apple accepts again: at least 20 sends with at
+// Breaker protects every binding from a relay-side misconfiguration (wrong key, wrong topic, bad deploy).
+//
+// It only counts sends to established bindings, those that have had at least one push accepted by Apple: a
+// misconfiguration hits exactly those, while tokens an instance invented never reach that state and so
+// cannot move the breaker (K1). It opens when, within five minutes, at least 20 such sends happened, more
+// than 30 % of them ended with Unregistered, BadDeviceToken or DeviceTokenNotForTopic, and the failures came
+// from at least three different instances. While open, the relay deletes and marks nothing and answers
+// 503 relay_misconfigured. After a cool-down it lets traffic through in half-open mode, still without
+// deleting or marking anything, and closes when Apple accepts again: at least 20 established sends with at
 // most 10 % token failures and at least one accepted push.
 type Breaker struct {
-	Window    time.Duration
-	MinSends  int
-	OpenRatio float64
-	CloseMax  float64
-	Cooldown  time.Duration
+	Window       time.Duration
+	MinSends     int
+	MinInstances int
+	OpenRatio    float64
+	CloseMax     float64
+	Cooldown     time.Duration
 
 	state    string // closed, open, half_open
 	openedAt time.Time
@@ -26,6 +31,21 @@ type breakerSlot struct {
 	start        time.Time
 	sends, fails int
 	accepted     int
+	failInst     map[string]struct{}
+}
+
+func (s *breakerSlot) record(inst string, accepted, tokenFailure bool) {
+	s.sends++
+	if accepted {
+		s.accepted++
+	}
+	if tokenFailure {
+		s.fails++
+		if s.failInst == nil {
+			s.failInst = map[string]struct{}{}
+		}
+		s.failInst[inst] = struct{}{}
+	}
 }
 
 // Breaker states.
@@ -37,7 +57,8 @@ const (
 
 // NewBreaker returns a closed breaker with the hosted-relay thresholds.
 func NewBreaker() *Breaker {
-	return &Breaker{Window: 5 * time.Minute, MinSends: 20, OpenRatio: 0.30, CloseMax: 0.10, Cooldown: 10 * time.Minute, state: BreakerClosed}
+	return &Breaker{Window: 5 * time.Minute, MinSends: 20, MinInstances: 3, OpenRatio: 0.30, CloseMax: 0.10,
+		Cooldown: 10 * time.Minute, state: BreakerClosed}
 }
 
 func (b *Breaker) slot(now time.Time) *breakerSlot {
@@ -51,14 +72,19 @@ func (b *Breaker) slot(now time.Time) *breakerSlot {
 	return s
 }
 
-func (b *Breaker) totals(now time.Time) (sends, fails int) {
-	for _, s := range b.slots {
+func (b *Breaker) totals(now time.Time) (sends, fails, instances int) {
+	seen := map[string]struct{}{}
+	for i := range b.slots {
+		s := &b.slots[i]
 		if now.Sub(s.start) < b.Window {
 			sends += s.sends
 			fails += s.fails
+			for i := range s.failInst {
+				seen[i] = struct{}{}
+			}
 		}
 	}
-	return
+	return sends, fails, len(seen)
 }
 
 // State returns the current state, moving from open to half-open after the cool-down.
@@ -73,24 +99,18 @@ func (b *Breaker) State(now time.Time) string {
 // Marking reports whether token failures may change bindings now: only while closed.
 func (b *Breaker) Marking(now time.Time) bool { return b.State(now) == BreakerClosed }
 
-// Record counts the outcome of one device send. tokenFailure is Unregistered, BadDeviceToken or
-// DeviceTokenNotForTopic. It returns true when this call opened the breaker.
-func (b *Breaker) Record(now time.Time, accepted, tokenFailure bool) bool {
+// Record counts the outcome of one send to an established binding of instance inst. tokenFailure is
+// Unregistered, BadDeviceToken or DeviceTokenNotForTopic. It returns true when this call opened the breaker.
+func (b *Breaker) Record(now time.Time, inst string, accepted, tokenFailure bool) bool {
 	switch b.State(now) {
 	case BreakerOpen:
 		return false
 	case BreakerHalfOpen:
-		b.half.sends++
-		if tokenFailure {
-			b.half.fails++
-		}
-		if accepted {
-			b.half.accepted++
-		}
+		b.half.record(inst, accepted, tokenFailure)
 		if b.half.sends >= b.MinSends {
 			ratio := float64(b.half.fails) / float64(b.half.sends)
 			switch {
-			case ratio > b.OpenRatio:
+			case ratio > b.OpenRatio && len(b.half.failInst) >= b.MinInstances:
 				b.open(now)
 				return true
 			case ratio <= b.CloseMax && b.half.accepted > 0:
@@ -99,13 +119,9 @@ func (b *Breaker) Record(now time.Time, accepted, tokenFailure bool) bool {
 		}
 		return false
 	}
-	s := b.slot(now)
-	s.sends++
-	if tokenFailure {
-		s.fails++
-	}
-	sends, fails := b.totals(now)
-	if sends >= b.MinSends && float64(fails)/float64(sends) > b.OpenRatio {
+	b.slot(now).record(inst, accepted, tokenFailure)
+	sends, fails, instances := b.totals(now)
+	if sends >= b.MinSends && float64(fails)/float64(sends) > b.OpenRatio && instances >= b.MinInstances {
 		b.open(now)
 		return true
 	}

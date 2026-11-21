@@ -28,6 +28,7 @@ const (
 	KErrors  Key = "errors"  // map of reason to count
 	KPushes  Key = "pushes"  // integer
 	KPeriod  Key = "period"  // "minute" or "hour"
+	KEvents  Key = "events"  // map of event name to count
 )
 
 // Field is one key and value.

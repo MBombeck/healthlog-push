@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/MBombeck/healthlog-push/internal/logx"
@@ -63,7 +64,7 @@ func (r *Relay) paused(c wire.Class, tier string, now time.Time) (bool, time.Dur
 			continue
 		}
 		if (p.Class == "all" || p.Class == string(c)) && (p.Tier == "all" || p.Tier == tier) {
-			return true, time.Until(time.Unix(p.Until, 0))
+			return true, time.Unix(p.Until, 0).Sub(now)
 		}
 	}
 	return false, 0
@@ -126,6 +127,20 @@ func (r *Relay) NewInvite() (string, error) {
 func hashInvite(code string) string {
 	s := sha256.Sum256([]byte("hl-invite\n" + code))
 	return hex.EncodeToString(s[:])
+}
+
+// inviteValid reports whether a matching, unexpired invite exists. Caller holds r.mu.
+func (r *Relay) inviteValid(code string, today int) bool {
+	if code == "" {
+		return false
+	}
+	h := hashInvite(code)
+	for _, inv := range r.control.Invites {
+		if inv.Hash == h && inv.ExpiresDay >= today {
+			return true
+		}
+	}
+	return false
 }
 
 // consumeInvite removes a matching, unexpired invite. Caller holds r.mu.
@@ -254,8 +269,7 @@ func (r *Relay) Revoke(id, reason string) error {
 	s.rec.Tier, s.rec.Reason, s.rec.ReasonDay = store.TierRevoked, reason, store.Day(r.cfg.Now())
 	for m, b := range r.bindings {
 		if b.InstanceID == id {
-			delete(r.bindings, m)
-			delete(r.dirty, m)
+			r.dropBindingLocked(m)
 		}
 	}
 	logx.Event("admin.revoke", logx.Str(logx.KReason, reason))
@@ -402,4 +416,76 @@ func (r *Relay) ExportNow() error {
 		return err
 	}
 	return store.WriteExport(r.cfg.ExportDir, ex)
+}
+
+// Suspect is one row of the abuse overview: what an instance did today and in the last seven days.
+type Suspect struct {
+	ID              string `json:"id"`
+	Tier            string `json:"tier"`
+	Created         string `json:"created"`
+	InvalidToday    int64  `json:"invalidToday"`
+	Invalid7d       int64  `json:"invalid7d"`
+	Sent7d          int64  `json:"sent7d"`
+	Rebinds7d       int64  `json:"rebinds7d"`
+	ChallengesToday int64  `json:"challengesToday"`
+	BlockedNewUntil string `json:"blockedNewBindingsUntil,omitempty"`
+	Active          int    `json:"active"`
+	Provisional     int    `json:"provisional"`
+	SoftInvalid     int    `json:"softInvalid"`
+}
+
+// Suspects lists instances with any invalid token, rebind or challenge in the last seven days, worst first
+// (by invalid tokens today, then over seven days, then rebinds). This is the operator's way to find an
+// instance that floods the relay with invented tokens; it lives only on the admin socket.
+func (r *Relay) Suspects(limit int) []Suspect {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	now := r.cfg.Now()
+	today := store.Day(now)
+	out := []Suspect{}
+	for id, s := range r.instances {
+		r.rollInstanceDay(s, now)
+		sp := Suspect{ID: id, Tier: s.rec.Tier, Created: store.DayString(s.rec.CreatedDay), InvalidToday: s.invalid,
+			ChallengesToday: s.challenges}
+		for d := today - 6; d <= today; d++ {
+			c := r.st.Counters(d, id)
+			sp.Invalid7d += c.Invalid
+			sp.Sent7d += c.Sent
+			sp.Rebinds7d += c.Rebinds
+		}
+		sp.Invalid7d += s.pending.Invalid
+		sp.Sent7d += s.pending.Sent
+		sp.Rebinds7d += s.pending.Rebinds
+		if now.Before(s.blockNewUntil) {
+			sp.BlockedNewUntil = s.blockNewUntil.UTC().Format(time.RFC3339)
+		}
+		for m := range r.byInst[id] {
+			switch r.bindings[m].State {
+			case store.StateActive:
+				sp.Active++
+			case store.StateProvisional:
+				sp.Provisional++
+			case store.StateSoftInvalid:
+				sp.SoftInvalid++
+			}
+		}
+		if sp.InvalidToday+sp.Invalid7d+sp.Rebinds7d+sp.ChallengesToday > 0 {
+			out = append(out, sp)
+		}
+	}
+	slices.SortFunc(out, func(a, b Suspect) int {
+		for _, d := range []int64{b.InvalidToday - a.InvalidToday, b.Invalid7d - a.Invalid7d, b.Rebinds7d - a.Rebinds7d} {
+			if d != 0 {
+				if d > 0 {
+					return 1
+				}
+				return -1
+			}
+		}
+		return strings.Compare(a.ID, b.ID)
+	})
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out
 }

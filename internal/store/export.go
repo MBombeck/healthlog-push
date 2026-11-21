@@ -200,7 +200,7 @@ func (s *Store) Import(ex *Export, today int) (int, error) {
 				continue
 			}
 			bucket := set.bucket
-			if err := s.db.Update(func(tx *bolt.Tx) error {
+			if err := s.update(func(tx *bolt.Tx) error {
 				return tx.Bucket(bucket).Put(k, []byte(strconv.Itoa(exp-RetainBlocks)))
 			}); err != nil {
 				return n, err

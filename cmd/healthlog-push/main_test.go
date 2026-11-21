@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"crypto/tls"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -82,5 +83,78 @@ func TestKeygenRoundTrip(t *testing.T) {
 	}
 	if _, err := loadIdentity([]byte("short")); err == nil {
 		t.Fatal("bad identity accepted")
+	}
+}
+
+// TestStoreNotMovedWithoutProof (M2): an error that does not prove damage (here: no permission) stops the
+// start and leaves the file where it is.
+func TestStoreNotMovedWithoutProof(t *testing.T) {
+	data := t.TempDir()
+	st, err := store.Open(filepath.Join(data, "relay.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = st.Close()
+	path := filepath.Join(data, "relay.db")
+	if err := os.Chmod(path, 0); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chmod(path, 0o600) }()
+	if os.Getuid() == 0 {
+		t.Skip("root ignores file permissions")
+	}
+	if _, _, err := openStore(data, t.TempDir()); err == nil {
+		t.Fatal("started despite an unreadable database")
+	}
+	if m, _ := filepath.Glob(filepath.Join(data, "relay.db.damaged-*")); len(m) != 0 {
+		t.Fatal("database moved aside without proof of damage")
+	}
+}
+
+// TestDamagedAsideNeverOverwritten (M2): two damaged starts keep two files aside.
+func TestDamagedAsideNeverOverwritten(t *testing.T) {
+	data := t.TempDir()
+	for range 2 {
+		if err := os.WriteFile(filepath.Join(data, "relay.db"), bytes.Repeat([]byte("damaged!"), 8192), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		st, _, err := openStore(data, t.TempDir())
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = st.Close()
+	}
+	if m, _ := filepath.Glob(filepath.Join(data, "relay.db.damaged-*")); len(m) != 2 {
+		t.Fatalf("aside files: %v", m)
+	}
+}
+
+// TestTLS12OnlyForPureACMEValidation (N8): a client that offers h2 next to acme-tls/1 gets the TLS 1.3
+// configuration; only a handshake offering nothing but acme-tls/1 may use TLS 1.2.
+func TestTLS12OnlyForPureACMEValidation(t *testing.T) {
+	dir := t.TempDir()
+	var b bytes.Buffer
+	if err := keygen("acme-account", &b); err != nil {
+		t.Fatal(err)
+	}
+	kf := filepath.Join(dir, "acme")
+	_ = os.WriteFile(kf, b.Bytes(), 0o600)
+	t.Setenv("HLP_TLS_MODE", "acme")
+	t.Setenv("HLP_ACME_ACCOUNT_KEY_FILE", kf)
+	t.Setenv("HLP_ACME_CACHE_DIR", dir)
+	cfg, err := tlsConfig("push.example.org")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mixed, _ := cfg.GetConfigForClient(&tls.ClientHelloInfo{SupportedProtos: []string{"h2", "acme-tls/1"}})
+	if mixed != nil {
+		t.Fatal("a mixed ALPN offer got the TLS 1.2 configuration")
+	}
+	pure, _ := cfg.GetConfigForClient(&tls.ClientHelloInfo{SupportedProtos: []string{"acme-tls/1"}})
+	if pure == nil || pure.MinVersion != tls.VersionTLS12 || cfg.MinVersion != tls.VersionTLS13 {
+		t.Fatal("validation handshake configuration")
+	}
+	if maxStreams > 16 {
+		t.Fatal("more than 16 HTTP/2 streams per connection")
 	}
 }

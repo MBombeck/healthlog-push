@@ -141,6 +141,10 @@ func loadIdentity(b []byte) (ed25519.PrivateKey, error) {
 	return ed25519.NewKeyFromSeed(seed), nil
 }
 
+// maxStreams bounds concurrent HTTP/2 streams per connection; an instance never needs more, and together
+// with the connection limits it bounds the request bodies that can be in flight (H2).
+const maxStreams = 16
+
 func runRelay() error {
 	host := os.Getenv("HLP_PUBLIC_HOST")
 	if host == "" {
@@ -228,7 +232,7 @@ func runRelay() error {
 		IdleTimeout:       60 * time.Second,
 		MaxHeaderBytes:    8 << 10,
 		ErrorLog:          log.New(r.ErrLog, "", 0),
-		HTTP2:             &http.HTTP2Config{MaxConcurrentStreams: 100},
+		HTTP2:             &http.HTTP2Config{MaxConcurrentStreams: maxStreams},
 	}
 	metricsSrv := &http.Server{Addr: env("HLP_METRICS_LISTEN", "127.0.0.1:9464"), Handler: r.MetricsHandler(),
 		ReadHeaderTimeout: 5 * time.Second, ErrorLog: log.New(io.Discard, "", 0)}
@@ -267,15 +271,28 @@ func openStore(dataDir, exportDir string) (*store.Store, bool, error) {
 	fresh := errors.Is(statErr, os.ErrNotExist)
 	st, err := store.Open(path)
 	if err == nil {
-		if cerr := st.Check(); cerr == nil {
+		cerr := st.Check()
+		if cerr == nil {
 			if fresh {
 				return importExport(st, exportDir)
 			}
 			return st, false, nil
 		}
 		_ = st.Close()
+		err = cerr
 	}
-	aside := path + ".damaged-" + time.Now().UTC().Format("20060102")
+	// Only proven damage moves the file. A held lock, wrong permissions or a full disk stop the relay
+	// instead, so the operator can fix the cause without losing every binding.
+	if !store.IsCorrupt(err) {
+		return nil, false, fmt.Errorf("open store: %w", err)
+	}
+	aside := path + ".damaged-" + time.Now().UTC().Format("20060102T150405Z")
+	for n := 1; ; n++ {
+		if _, serr := os.Stat(aside); errors.Is(serr, os.ErrNotExist) {
+			break
+		}
+		aside = fmt.Sprintf("%s.damaged-%s-%d", path, time.Now().UTC().Format("20060102T150405Z"), n)
+	}
 	if rerr := os.Rename(path, aside); rerr != nil {
 		return nil, false, fmt.Errorf("database unusable and cannot be moved aside: %w", rerr)
 	}
@@ -337,7 +354,8 @@ func tlsConfig(host string) (*tls.Config, error) {
 		challenge := base.Clone()
 		challenge.MinVersion = tls.VersionTLS12
 		base.GetConfigForClient = func(h *tls.ClientHelloInfo) (*tls.Config, error) {
-			if slices.Contains(h.SupportedProtos, acme.ALPNProto) {
+			// Only a pure validation handshake (offering nothing but acme-tls/1) gets the TLS 1.2 config.
+			if len(h.SupportedProtos) == 1 && h.SupportedProtos[0] == acme.ALPNProto {
 				return challenge, nil
 			}
 			return nil, nil

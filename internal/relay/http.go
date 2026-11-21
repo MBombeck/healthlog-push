@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/netip"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/MBombeck/healthlog-push/internal/notice"
@@ -19,6 +20,12 @@ import (
 const (
 	maxPushBody  = 128 << 10
 	maxOtherBody = 4 << 10
+	// maxBufferedBodies caps the request bodies held in memory at the same time across all connections,
+	// well below the container's memory limit.
+	maxBufferedBodies = 32 << 20
+	// maxResponseBytes is the documented upper bound of any relay response body (spec/protocol.md); a
+	// client may refuse anything longer.
+	maxResponseBytes = 64 << 10
 )
 
 // Handler returns the public HTTP handler.
@@ -46,9 +53,36 @@ func (r *Relay) Handler() http.Handler {
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("Strict-Transport-Security", "max-age=31536000")
 		h.Set("Content-Security-Policy", "default-src 'none'")
+		// Every /v1 request carries a nonce so that its signed response cannot be replayed onto another
+		// request (spec/statements.md, hl-relay-resp-v2). Only the public monitoring endpoints may omit it.
+		// Checked before routing, so even a 404 under /v1 is bound to a nonce.
+		if strings.HasPrefix(req.URL.Path, "/v1/") {
+			if _, err := wire.ParseNonce(req.Header.Get("HL-Nonce")); err != nil {
+				r.fail(w, req, http.StatusBadRequest, errBody{Error: "nonce_required"})
+				return
+			}
+		}
 		if _, pattern := mux.Handler(req); pattern == "" {
 			r.fail(w, req, http.StatusNotFound, errBody{Error: "not_found"})
 			return
+		}
+		// Header checks before any body byte is read: the length must be declared and within the largest
+		// limit, and the bytes are reserved against a global budget for buffered bodies.
+		if req.Method == http.MethodPost || req.Method == http.MethodDelete {
+			switch {
+			case req.ContentLength < 0:
+				r.fail(w, req, http.StatusLengthRequired, errBody{Error: "length_required"})
+				return
+			case req.ContentLength > maxPushBody:
+				r.fail(w, req, http.StatusRequestEntityTooLarge, errBody{Error: "too_large"})
+				return
+			}
+			if !r.reserveBody(req.ContentLength) {
+				r.M.Inc("hlp_body_budget_refused_total")
+				r.fail(w, req, http.StatusServiceUnavailable, errBody{Error: "overloaded", RetryAfter: jitter(2 * time.Second)})
+				return
+			}
+			defer r.releaseBody(req.ContentLength)
 		}
 		mux.ServeHTTP(w, req)
 	})
@@ -71,7 +105,8 @@ type errBody struct {
 	Limits     *TierLimits `json:"limits,omitempty"`
 }
 
-// requestNonce is the nonce the response signature binds to: the HL-Nonce header when well formed, else "-".
+// requestNonce is the nonce the response signature binds to: the HL-Nonce header when well formed, else "-"
+// (only possible on /healthz, /version and the nonce_required refusal).
 func requestNonce(req *http.Request) string {
 	if n, err := wire.ParseNonce(req.Header.Get("HL-Nonce")); err == nil {
 		return n
@@ -92,7 +127,8 @@ func (r *Relay) reply(w http.ResponseWriter, req *http.Request, status int, v an
 	if len(body) > 0 {
 		h.Set("Content-Type", "application/json")
 	}
-	h.Set("HL-Relay-Signature", wire.EncodeB64(ed25519.Sign(r.cfg.Identity, []byte(wire.ResponseText(r.cfg.Host, requestNonce(req), status, body)))))
+	text := wire.ResponseText(r.cfg.Host, req.Method, req.RequestURI, requestNonce(req), status, body)
+	h.Set("HL-Relay-Signature", wire.EncodeB64(ed25519.Sign(r.cfg.Identity, []byte(text))))
 	h.Set("Content-Length", strconv.Itoa(len(body)))
 	w.WriteHeader(status)
 	_, _ = w.Write(body)
@@ -115,7 +151,21 @@ func jitter(d time.Duration) int {
 	return max(1, int(s*(0.7+0.6*rand.Float64()))) //nolint:gosec // jitter, not security
 }
 
+func (r *Relay) reserveBody(n int64) bool {
+	if r.bodyBytes.Add(n) > maxBufferedBodies {
+		r.bodyBytes.Add(-n)
+		return false
+	}
+	return true
+}
+
+func (r *Relay) releaseBody(n int64) { r.bodyBytes.Add(-n) }
+
+// readBody reads a body whose declared length the handler wrapper has already checked and reserved.
 func readBody(w http.ResponseWriter, req *http.Request, limit int64) ([]byte, bool) {
+	if req.ContentLength > limit {
+		return nil, false
+	}
 	b, err := io.ReadAll(http.MaxBytesReader(w, req.Body, limit))
 	if err != nil {
 		return nil, false
@@ -133,20 +183,17 @@ func remoteAddr(req *http.Request) netip.Addr {
 	return ap.Addr()
 }
 
-// auth verifies an instance request (spec/protocol.md, "Request signing"). Order: body size, known instance,
-// time window, signature budget, signature, tier, request rate, nonce. It writes the error response itself.
+// auth verifies an instance request (spec/protocol.md, "Request signing"). Order: known instance and time
+// window from the headers, declared length, body, signature, tier, request rate, nonce. The signature is
+// always verified: a valid request is never refused because of someone else's failed attempts. It writes
+// the error response itself.
 func (r *Relay) auth(w http.ResponseWriter, req *http.Request, limit int64) (*instState, []byte, bool) {
-	body, ok := readBody(w, req, limit)
-	if !ok {
-		r.fail(w, req, http.StatusRequestEntityTooLarge, errBody{Error: "too_large"})
-		return nil, nil, false
-	}
 	now := r.cfg.Now()
 	id := req.Header.Get("HL-Instance")
 	r.mu.Lock()
-	defer r.mu.Unlock()
-	s := r.instances[id]
-	if !wire.ValidInstanceID(id) || s == nil {
+	known := r.instances[id] != nil
+	r.mu.Unlock()
+	if !wire.ValidInstanceID(id) || !known {
 		r.fail(w, req, http.StatusUnauthorized, errBody{Error: "unknown_instance"})
 		return nil, nil, false
 	}
@@ -155,15 +202,25 @@ func (r *Relay) auth(w http.ResponseWriter, req *http.Request, limit int64) (*in
 		r.fail(w, req, http.StatusUnauthorized, errBody{Error: "stale_timestamp", RelayTime: now.Unix()})
 		return nil, nil, false
 	}
-	if !s.badSig.Peek(now) {
-		r.fail(w, req, http.StatusTooManyRequests, errBody{Error: "instance_rate", Scope: "instance", RetryAfter: jitter(s.badSig.RetryAfter(now))})
+	body, ok := readBody(w, req, limit)
+	if !ok {
+		r.fail(w, req, http.StatusRequestEntityTooLarge, errBody{Error: "too_large"})
 		return nil, nil, false
 	}
 	nonce, nerr := wire.ParseNonce(req.Header.Get("HL-Nonce"))
 	sig, serr := wire.ParseSignature(req.Header.Get("HL-Signature"))
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s := r.instances[id]
+	if s == nil {
+		r.fail(w, req, http.StatusUnauthorized, errBody{Error: "unknown_instance"})
+		return nil, nil, false
+	}
 	if nerr != nil || serr != nil || !wire.Verify(s.rec.PublicKey, wire.RequestText(r.cfg.Host, id, req.Method, req.RequestURI, ts, nonce, body), sig) {
-		s.badSig.Allow(now)
-		r.M.Inc("hlp_auth_failures_total", "reason", "bad_signature")
+		// The bucket only limits how often failures are counted; it never refuses anyone.
+		if s.badSig.Allow(now) {
+			r.M.Inc("hlp_auth_failures_total", "reason", "bad_signature")
+		}
 		r.fail(w, req, http.StatusUnauthorized, errBody{Error: "bad_signature"})
 		return nil, nil, false
 	}
@@ -198,7 +255,10 @@ func (r *Relay) auth(w http.ResponseWriter, req *http.Request, limit int64) (*in
 			return nil, nil, false
 		}
 	}
-	s.rec.LastSeenWeek = store.Week(store.Day(now))
+	if wk := store.Week(store.Day(now)); s.rec.LastSeenWeek != wk {
+		s.rec.LastSeenWeek = wk
+		r.dirtyInst[s.rec.ID] = true
+	}
 	r.rollInstanceDay(s, now)
 	return s, body, true
 }
@@ -230,13 +290,31 @@ func (r *Relay) rollInstanceDay(s *instState, now time.Time) {
 	}
 }
 
-// appDirect limits the unauthenticated app endpoints globally; per-device checks follow in the handler.
-func (r *Relay) appDirectAllowed(w http.ResponseWriter, req *http.Request) bool {
-	r.mu.Lock()
-	ok := r.appDirect.Allow(r.cfg.Now())
-	r.mu.Unlock()
-	if !ok {
+// appFailLocked answers a failed app-direct request. Failures are charged to one global bucket; when it is
+// empty the answer becomes 429 global. A request that verifies is never charged here, so junk traffic cannot
+// block a device's opt-out, self-read or challenge answer (H5). Caller holds r.mu.
+func (r *Relay) appFailLocked(w http.ResponseWriter, req *http.Request, status int, e errBody) {
+	if !r.appDirect.Allow(r.cfg.Now()) {
 		r.fail(w, req, http.StatusTooManyRequests, errBody{Error: "global", Scope: "global", RetryAfter: jitter(2 * time.Second)})
+		return
 	}
-	return ok
+	r.fail(w, req, status, e)
+}
+
+// appFail is appFailLocked for callers that do not hold r.mu.
+func (r *Relay) appFail(w http.ResponseWriter, req *http.Request, status int, e errBody) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.appFailLocked(w, req, status, e)
+}
+
+// appAllowedLocked applies the per-device bucket to a verified app-direct request. Caller holds r.mu.
+func (r *Relay) appAllowedLocked(w http.ResponseWriter, req *http.Request, m string) bool {
+	now := r.cfg.Now()
+	d := r.dev(m)
+	if !d.app.Allow(now) {
+		r.fail(w, req, http.StatusTooManyRequests, errBody{Error: "device_quota", Scope: "device", RetryAfter: jitter(d.app.RetryAfter(now))})
+		return false
+	}
+	return true
 }

@@ -60,7 +60,7 @@ unpadded base64url.
 
 The header (bytes 0 to 2) carries no key identifier of any kind. For a given class it is the same for every
 device of every server, so it cannot be used to group devices. A device with at most two recipient keys and
-at most two pinned sender keys tries every pair, at most four derivations.
+at most three pinned sender keys (`next`, `current`, `previous`) tries every pair, at most six derivations.
 
 ### Fixed sizes
 
@@ -222,9 +222,20 @@ ends in `authFailure` (vectors `lowOrderEncZero` and `lowOrderEncPoint`).
 - **Device key:** a new pair at every sign-in, every 30 days and at reinstallation. The previous pair stays
   usable for opening for 7 days, so the receiver holds at most two recipient keys. Signing out deletes every
   pair of that account together with its pinned sender keys. Vector: `previousRecipientKey`.
-- **Sender key:** rotated yearly and on demand. The previous key stays pinned as `previous` for 30 days, so
-  the receiver trusts at most two sender keys. An emergency rotation drops the previous key at once.
-  Vector: `previousSender`.
+- **Sender key:** staged, so that a device that has not opened the app recently never receives an envelope
+  sealed with a key it has not pinned. Each sender key goes through three phases:
+  1. **Announce.** The server creates the new key pair and publishes the public key as `next` (in
+     `/api/auth/me` and in the answer of `POST /api/devices`) for at least 7 days before sealing anything
+     with it. It keeps sealing with `current`.
+  2. **Overlap.** After at least 7 days as `next`, the server seals with the new key; it becomes `current`
+     and the old one becomes `previous`. `previous` stays published for 30 days.
+  3. **Retire.** After 30 days as `previous`, the old key is deleted on the server and dropped by devices.
+  At any time at most three sender keys are published (`next`, `current`, `previous`); a receiver pins all
+  of them and tries each, so at most two recipient keys times three sender keys, six derivations. The
+  regular rotation runs once a year. An **emergency rotation** (key compromise) skips the announce phase and
+  drops `previous` at once: devices that have not fetched the new key show the neutral placeholder until
+  the app is opened; that cost is accepted only when the key is known to be exposed. It is an operator
+  action with an audit entry. Vector: `previousSender`.
 - Rotation never changes the envelope format; the header carries no key id, so nothing in the envelope
   reveals which key was used.
 

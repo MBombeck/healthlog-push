@@ -168,8 +168,12 @@ func NewRegistrations(l RegistrationLimits, now time.Time) *Registrations {
 	}
 }
 
-// Allow counts a registration attempt from addr. ignoreGlobal skips the global caps (recovery window).
-func (r *Registrations) Allow(addr netip.Addr, now time.Time, ignoreGlobal bool) bool {
+// RecoveryFactor multiplies the global caps during a recovery window: higher, never unlimited.
+const RecoveryFactor = 10
+
+// Allow counts a registration attempt from addr. recovery raises the global caps by RecoveryFactor and
+// skips the halving after a restart; the per-address caps always apply.
+func (r *Registrations) Allow(addr netip.Addr, now time.Time, recovery bool) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if d := now.Unix() / 86400; d != r.day {
@@ -183,14 +187,15 @@ func (r *Registrations) Allow(addr netip.Addr, now time.Time, ignoreGlobal bool)
 	if n != w && r.wide[kw] >= r.L.PerWideDay {
 		return false
 	}
-	if !ignoreGlobal {
-		gh, gd := r.L.GlobalHour, r.L.GlobalDay
-		if now.Before(r.halfUntil) {
-			gh, gd = max(1, gh/2), max(1, gd/2)
-		}
-		if r.hour.Count(now) >= gh || r.globalDay.Count(now) >= gd {
-			return false
-		}
+	gh, gd := r.L.GlobalHour, r.L.GlobalDay
+	switch {
+	case recovery:
+		gh, gd = gh*RecoveryFactor, gd*RecoveryFactor
+	case now.Before(r.halfUntil):
+		gh, gd = max(1, gh/2), max(1, gd/2)
+	}
+	if r.hour.Count(now) >= gh || r.globalDay.Count(now) >= gd {
+		return false
 	}
 	r.narrow[kn]++
 	if n != w {

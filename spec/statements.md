@@ -95,13 +95,16 @@ hl-relay-v1
 - **Vectors:** `request` (POST with body `{"items":[]}`), `requestWithQuery` (GET with a query and an empty
   body). Negative: `requestQueryAdded`, `requestOtherMethod`.
 
-## hl-relay-resp-v1
+## hl-relay-resp-v2
 
-Signature of the relay over every response it produces through its JSON reply path.
+Signature of the relay over every response it produces through its JSON reply path. Version 2 replaces
+version 1 before any release: it binds method and path, and the nonce is mandatory on every `/v1` request.
 
 ```
-hl-relay-resp-v1
+hl-relay-resp-v2
 <host>
+<method>
+<path-with-query>
 <nonce>
 <status>
 <hex(SHA-256(body))>
@@ -109,22 +112,43 @@ hl-relay-resp-v1
 
 | Field | Value |
 |---|---|
-| `nonce` | the `HL-Nonce` header of the request when it is well formed (22 characters of base64url decoding to 16 bytes), otherwise the single character `-` |
-| `status` | the HTTP status code of the response, decimal |
-| body hash | over the response body bytes; empty for `204` |
+| `host` | the relay's configured public host name, for example `push.healthlog.dev` (never taken from the request) |
+| `method` | the request method exactly as sent, upper case (`GET`, `POST`, `DELETE`) |
+| `path-with-query` | the raw request target exactly as sent on the wire, path plus `?query` if present, not decoded or normalised (for HTTP/2 the `:path` pseudo-header) |
+| `nonce` | the request's `HL-Nonce` header: 16 random bytes, unpadded base64url, exactly 22 characters. The single character `-` appears only where no valid nonce exists (see below) |
+| `status` | the HTTP status code of the response, decimal, no leading zeros |
+| body hash | lowercase hex SHA-256 over the exact response body bytes; for an empty body (every `204`) the hash of the empty string, `e3b0c442...b855` |
 
-- **Signs:** the relay identity key. The signature travels in the response header `HL-Relay-Signature`.
-- **Verifies:** the HealthLog server for its requests, and the app for its direct calls, against the relay
-  identity keys they have pinned (`current` and `next`). A missing or invalid signature is a transport error:
-  the response is treated as if it never arrived, and in particular never as a refusal, a revocation, an
-  upgrade demand or a notice.
-- The nonce binds the response to the request. A response replayed onto another request, a changed status or
-  a changed body fails. Requests that carry no nonce (registration, and app calls that send none) get `-`;
-  the app may send its own `HL-Nonce` on a direct call to bind the answer, the relay neither checks nor
-  records it there.
+Fields are joined with a single line feed (0x0A), no trailing line feed, UTF-8. The signature is Ed25519 by
+the relay identity key over these bytes, sent as unpadded base64url in the response header
+`HL-Relay-Signature`.
+
+Client rules (HealthLog server and app, both MUST):
+
+1. Send a fresh `HL-Nonce` (16 bytes from a CSPRNG) on every `/v1` request, including registration and the
+   app's direct calls. The relay answers a `/v1` request without a valid nonce with `400 nonce_required`.
+2. Rebuild the text from the request it sent (own method, own raw path with query, own nonce) and the
+   response it received (status, raw body bytes), and verify against each pinned relay identity key
+   (`current`, then `next`).
+3. Treat as a transport error, never as an answer: a missing or invalid signature, and any response bound to
+   `-`. A transport error is never read as a refusal, a revocation, `410`, `426` or a notice.
+4. Take retry hints only from the signed body (`retryAfter`, seconds), never from the unsigned `Retry-After`
+   header, and cap them at 86 400 seconds.
+5. Refuse a response body longer than 262 144 bytes without reading it further (the relay never sends more
+   than 65 536).
+
+`-` is used only for `GET /healthz` and `GET /version` when the caller sends no nonce (monitors that do not
+verify), and for the `400 nonce_required` refusal itself.
+
+- **Signs:** the relay identity key. **Verifies:** the HealthLog server for its requests and the app for its
+  direct calls, against the pinned relay identity keys.
+- A response replayed onto another request (other nonce, method or path), a changed status or a changed body
+  fails.
 - The plain-text pages `/`, `/privacy` and `/terms` are not signed.
-- **Vectors:** `response` (status 200, body `{"items":[]}`), `responseWithoutNonce` (status 404, body
-  `{"error":"not_found"}`). Negative: `responseOtherNonce`, `responseOtherStatus`.
+- **Vectors:** `response` (`POST /v1/push`, status 200, body `{"items":[]}`), `responseAppEndpoint`
+  (`DELETE /v1/bindings/self`, status 204, empty body), `responseWithoutNonce` (`GET /healthz`, status 200).
+  Negative: `responseOtherNonce`, `responseOtherStatus`, `responseOtherMethod`, `responseOtherPath`,
+  `responseAppReplayedOntoOtherRequest`.
 
 ## hl-relay-status-v1
 
@@ -264,7 +288,7 @@ hl-selfread-v1
 |---|---|---|---|---|
 | `hl-register-v1` | new instance key | relay | `time` within 300 s | `register`, `rotateNewKeyProof` |
 | `hl-relay-v1` | instance key | relay | `HL-Timestamp` within 300 s, not before relay start | `request`, `requestWithQuery` |
-| `hl-relay-resp-v1` | relay identity key | server, app | none (nonce binds) | `response`, `responseWithoutNonce` |
+| `hl-relay-resp-v2` | relay identity key | server, app | none (method, path and nonce bind) | `response`, `responseAppEndpoint`, `responseWithoutNonce` |
 | `hl-relay-status-v1` | relay identity key | server | none (`issued` in the body) | `statusFile` |
 | `hl-bind-v1` | binding key | relay | `iat` within 300 s | `bind` |
 | `hl-unbind-v1` | binding key | relay | `iat` within 300 s | `unbind` |

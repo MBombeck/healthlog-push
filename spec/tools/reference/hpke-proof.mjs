@@ -515,7 +515,8 @@ class RelayBindings {
 // Signed relay responses (red team B5): bound to the request nonce, verified against the pinned relay key.
 {
   const relayId = ed();
-  const respText = (nonce, status, body) => ["hl-relay-resp-v1", RELAY_HOST, nonce, status, hex(sha(Buffer.from(body)))].join("\n");
+  // Response signature, version 2: method and path with query are bound as well (spec/statements.md).
+  const respText = (nonce, status, body, method = "POST", path = "/v1/push") => ["hl-relay-resp-v2", RELAY_HOST, method, path, nonce, status, hex(sha(Buffer.from(body)))].join("\n");
   const body = JSON.stringify({ results: [{ ref: "r1", status: 410, reason: "unregistered" }] });
   const sig = sign(relayId.privateKey, respText("n-1", 200, body));
   const accept = (pinned, nonce, status, b, s) => (s && verify(pinned, respText(nonce, status, b), s)) ? "trusted" : "transportError";
@@ -524,6 +525,7 @@ class RelayBindings {
     genuineTrusted: accept(relayId.publicKey, "n-1", 200, body, sig) === "trusted",
     replayOntoOtherRequest: accept(relayId.publicKey, "n-2", 200, body, sig) === "transportError",
     alteredBody: accept(relayId.publicKey, "n-1", 200, body.replace("410", "200"), sig) === "transportError",
+    otherPathRefused: !verify(relayId.publicKey, respText("n-1", 200, body, "POST", "/v1/status"), sig),
     unsignedTreatedAsTransportError: accept(relayId.publicKey, "n-1", 200, body, null) === "transportError",
     impostorWithValidTlsButOtherKey: accept(relayId.publicKey, "n-1", 200, body, sign(impostor.privateKey, respText("n-1", 200, body))) === "transportError",
   });

@@ -12,9 +12,11 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	bolt "go.etcd.io/bbolt"
+	bolterr "go.etcd.io/bbolt/errors"
 )
 
 // Bucket names. Adding a bucket is a reviewed change; TestStoreBucketsAreClosed pins the list.
@@ -138,8 +140,18 @@ type DayCounters struct {
 
 // Store wraps the bbolt database.
 type Store struct {
-	db *bolt.DB
+	db     *bolt.DB
+	writes atomic.Int64
 }
+
+// update runs one write transaction and counts it.
+func (s *Store) update(fn func(*bolt.Tx) error) error {
+	s.writes.Add(1)
+	return s.db.Update(fn)
+}
+
+// Writes returns the number of write transactions since open, for tests of the write pattern.
+func (s *Store) Writes() int64 { return s.writes.Load() }
 
 // ErrNotFound is returned for missing records.
 var ErrNotFound = errors.New("not found")
@@ -168,14 +180,29 @@ func Open(path string) (*Store, error) {
 // Close closes the database.
 func (s *Store) Close() error { return s.db.Close() }
 
-// Check runs the bbolt consistency check.
+// ErrCorrupt marks a failed consistency check.
+var ErrCorrupt = errors.New("store corrupt")
+
+// Check runs the bbolt consistency check. A finding is returned wrapped in ErrCorrupt.
 func (s *Store) Check() error {
 	return s.db.View(func(tx *bolt.Tx) error {
 		for err := range tx.Check() {
-			return err
+			return fmt.Errorf("%w: %v", ErrCorrupt, err) //nolint:errorlint // the finding is detail, ErrCorrupt the class
 		}
 		return nil
 	})
+}
+
+// IsCorrupt reports whether err proves that the database file itself is damaged, as opposed to a lock held
+// by another process, wrong permissions or a full disk. Only then may the file be moved aside (M2).
+func IsCorrupt(err error) bool {
+	for _, e := range []error{ErrCorrupt, bolterr.ErrInvalid, bolterr.ErrVersionMismatch, bolterr.ErrChecksum, bolterr.ErrInvalidMapping} {
+		if errors.Is(err, e) {
+			return true
+		}
+	}
+	// bbolt reports a truncated file with an unwrapped error.
+	return err != nil && strings.HasPrefix(err.Error(), "file size too small")
 }
 
 func put(tx *bolt.Tx, bucket, k []byte, v any) error {
@@ -188,7 +215,7 @@ func put(tx *bolt.Tx, bucket, k []byte, v any) error {
 
 // PutInstance writes an instance and its key index.
 func (s *Store) PutInstance(in *Instance) error {
-	return s.db.Update(func(tx *bolt.Tx) error {
+	return s.update(func(tx *bolt.Tx) error {
 		if err := put(tx, bInstances, []byte(in.ID), in); err != nil {
 			return err
 		}
@@ -198,7 +225,7 @@ func (s *Store) PutInstance(in *Instance) error {
 
 // ReplaceInstanceKey moves the key index from old to the instance's new key.
 func (s *Store) ReplaceInstanceKey(in *Instance, oldKey []byte) error {
-	return s.db.Update(func(tx *bolt.Tx) error {
+	return s.update(func(tx *bolt.Tx) error {
 		if err := tx.Bucket(bInstanceKeys).Delete([]byte(hex.EncodeToString(oldKey))); err != nil {
 			return err
 		}
@@ -211,7 +238,7 @@ func (s *Store) ReplaceInstanceKey(in *Instance, oldKey []byte) error {
 
 // DeleteInstance removes an instance, its key index and all its bindings.
 func (s *Store) DeleteInstance(id string) error {
-	return s.db.Update(func(tx *bolt.Tx) error {
+	return s.update(func(tx *bolt.Tx) error {
 		v := tx.Bucket(bInstances).Get([]byte(id))
 		if v != nil {
 			var in Instance
@@ -246,7 +273,7 @@ func deleteBindingsOf(tx *bolt.Tx, id string) error {
 
 // DeleteBindingsOf removes all bindings of an instance.
 func (s *Store) DeleteBindingsOf(id string) error {
-	return s.db.Update(func(tx *bolt.Tx) error { return deleteBindingsOf(tx, id) })
+	return s.update(func(tx *bolt.Tx) error { return deleteBindingsOf(tx, id) })
 }
 
 // Instances returns all instances.
@@ -267,12 +294,12 @@ func (s *Store) Instances() ([]*Instance, error) {
 
 // PutBinding writes a binding under its token MAC.
 func (s *Store) PutBinding(mac []byte, b *Binding) error {
-	return s.db.Update(func(tx *bolt.Tx) error { return put(tx, bBindings, mac, b) })
+	return s.update(func(tx *bolt.Tx) error { return put(tx, bBindings, mac, b) })
 }
 
 // PutBindings writes several bindings in one transaction.
 func (s *Store) PutBindings(m map[string]*Binding) error {
-	return s.db.Update(func(tx *bolt.Tx) error {
+	return s.update(func(tx *bolt.Tx) error {
 		for k, b := range m {
 			if err := put(tx, bBindings, []byte(k), b); err != nil {
 				return err
@@ -284,12 +311,12 @@ func (s *Store) PutBindings(m map[string]*Binding) error {
 
 // DeleteBinding removes a binding.
 func (s *Store) DeleteBinding(mac []byte) error {
-	return s.db.Update(func(tx *bolt.Tx) error { return tx.Bucket(bBindings).Delete(mac) })
+	return s.update(func(tx *bolt.Tx) error { return tx.Bucket(bBindings).Delete(mac) })
 }
 
 // RenameBinding moves a binding to a new MAC key (MAC key rotation).
 func (s *Store) RenameBinding(oldMac, newMac []byte, b *Binding) error {
-	return s.db.Update(func(tx *bolt.Tx) error {
+	return s.update(func(tx *bolt.Tx) error {
 		if err := tx.Bucket(bBindings).Delete(oldMac); err != nil {
 			return err
 		}
@@ -334,7 +361,7 @@ func tokenKey(mac []byte) []byte {
 
 // BlockPair records that the device opted out of this instance.
 func (s *Store) BlockPair(mac []byte, instanceID string, day int) error {
-	return s.db.Update(func(tx *bolt.Tx) error {
+	return s.update(func(tx *bolt.Tx) error {
 		return tx.Bucket(bBlockedPairs).Put(pairKey(mac, instanceID), []byte(strconv.Itoa(day)))
 	})
 }
@@ -351,12 +378,12 @@ func (s *Store) PairBlocked(mac []byte, instanceID string) bool {
 
 // BlockToken blocks a token MAC for every instance except its current holder.
 func (s *Store) BlockToken(mac []byte, day int) error {
-	return s.db.Update(func(tx *bolt.Tx) error { return tx.Bucket(bBlockedToken).Put(tokenKey(mac), []byte(strconv.Itoa(day))) })
+	return s.update(func(tx *bolt.Tx) error { return tx.Bucket(bBlockedToken).Put(tokenKey(mac), []byte(strconv.Itoa(day))) })
 }
 
 // UnblockToken removes a token block.
 func (s *Store) UnblockToken(mac []byte) error {
-	return s.db.Update(func(tx *bolt.Tx) error { return tx.Bucket(bBlockedToken).Delete(tokenKey(mac)) })
+	return s.update(func(tx *bolt.Tx) error { return tx.Bucket(bBlockedToken).Delete(tokenKey(mac)) })
 }
 
 // TokenBlocked reports whether a token MAC is blocked.
@@ -371,12 +398,12 @@ func (s *Store) TokenBlocked(mac []byte) bool {
 
 // PutDeny writes a denylist entry.
 func (s *Store) PutDeny(e *DenyEntry) error {
-	return s.db.Update(func(tx *bolt.Tx) error { return put(tx, bDenylist, []byte(e.InstanceID), e) })
+	return s.update(func(tx *bolt.Tx) error { return put(tx, bDenylist, []byte(e.InstanceID), e) })
 }
 
 // DeleteDeny removes a denylist entry.
 func (s *Store) DeleteDeny(id string) error {
-	return s.db.Update(func(tx *bolt.Tx) error { return tx.Bucket(bDenylist).Delete([]byte(id)) })
+	return s.update(func(tx *bolt.Tx) error { return tx.Bucket(bDenylist).Delete([]byte(id)) })
 }
 
 // Denylist returns all entries.
@@ -401,7 +428,7 @@ func counterKey(day int, instanceID string) []byte {
 
 // AddCounters adds to the per-instance counters of a day.
 func (s *Store) AddCounters(day int, instanceID string, d DayCounters) error {
-	return s.db.Update(func(tx *bolt.Tx) error {
+	return s.update(func(tx *bolt.Tx) error {
 		k := counterKey(day, instanceID)
 		var c DayCounters
 		if v := tx.Bucket(bCounters).Get(k); v != nil {
@@ -428,7 +455,7 @@ func (s *Store) Counters(day int, instanceID string) DayCounters {
 
 // AddGlobal adds n to a global day counter. class and result come from closed sets.
 func (s *Store) AddGlobal(day int, class, result string, n int64) error {
-	return s.db.Update(func(tx *bolt.Tx) error {
+	return s.update(func(tx *bolt.Tx) error {
 		k := fmt.Appendf(nil, "%06d|%s|%s", day, class, result)
 		var cur int64
 		if v := tx.Bucket(bGlobal).Get(k); v != nil {
@@ -468,13 +495,13 @@ func (s *Store) GetControl(v any) error {
 
 // PutControl writes the operator control state.
 func (s *Store) PutControl(v any) error {
-	return s.db.Update(func(tx *bolt.Tx) error { return put(tx, bControl, []byte("state"), v) })
+	return s.update(func(tx *bolt.Tx) error { return put(tx, bControl, []byte("state"), v) })
 }
 
 // Prune applies the retention rules for blocks, denylist and counters for the given day. Bindings and
 // instances are pruned by the relay, which owns their in-memory copies.
 func (s *Store) Prune(today int) error {
-	return s.db.Update(func(tx *bolt.Tx) error {
+	return s.update(func(tx *bolt.Tx) error {
 		pruneDay := func(bucket []byte, keep int, dayOf func(k, v []byte) int) error {
 			bk := tx.Bucket(bucket)
 			var del [][]byte
@@ -507,5 +534,63 @@ func (s *Store) Prune(today int) error {
 			}
 		}
 		return nil
+	})
+}
+
+// Flush is one batch of periodic writes.
+type Flush struct {
+	Bindings  map[string]*Binding    // by MAC
+	Instances []*Instance            // changed records only
+	Counters  map[string]DayCounters // per instance, added to the day's counters
+	Global    map[[3]string]int64    // (day, class, result) added to the global counters
+	Day       int
+	Peak      int64 // busiest minute of the day so far
+}
+
+// ApplyFlush writes a flush in a single transaction (one fsync, however many instances there are).
+func (s *Store) ApplyFlush(f *Flush) error {
+	return s.update(func(tx *bolt.Tx) error {
+		for k, b := range f.Bindings {
+			if err := put(tx, bBindings, []byte(k), b); err != nil {
+				return err
+			}
+		}
+		for _, in := range f.Instances {
+			if err := put(tx, bInstances, []byte(in.ID), in); err != nil {
+				return err
+			}
+		}
+		for id, d := range f.Counters {
+			k := counterKey(f.Day, id)
+			var c DayCounters
+			if v := tx.Bucket(bCounters).Get(k); v != nil {
+				_ = json.Unmarshal(v, &c)
+			}
+			c.Sent += d.Sent
+			c.Invalid += d.Invalid
+			c.Rebinds += d.Rebinds
+			if err := put(tx, bCounters, k, &c); err != nil {
+				return err
+			}
+		}
+		add := func(key []byte, n int64, peak bool) error {
+			var cur int64
+			if v := tx.Bucket(bGlobal).Get(key); v != nil {
+				cur, _ = strconv.ParseInt(string(v), 10, 64)
+			}
+			if peak {
+				cur = max(cur, n)
+			} else {
+				cur += n
+			}
+			return tx.Bucket(bGlobal).Put(key, []byte(strconv.FormatInt(cur, 10)))
+		}
+		for k, n := range f.Global {
+			d, _ := strconv.Atoi(k[0])
+			if err := add(fmt.Appendf(nil, "%06d|%s|%s", d, k[1], k[2]), n, false); err != nil {
+				return err
+			}
+		}
+		return add(fmt.Appendf(nil, "%06d|all|peak_minute", f.Day), f.Peak, true)
 	})
 }

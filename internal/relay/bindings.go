@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/MBombeck/healthlog-push/internal/apns"
-	"github.com/MBombeck/healthlog-push/internal/logx"
 	"github.com/MBombeck/healthlog-push/internal/queue"
 	"github.com/MBombeck/healthlog-push/internal/store"
 	"github.com/MBombeck/healthlog-push/internal/wire"
@@ -57,6 +56,9 @@ func (r *Relay) handleBind(w http.ResponseWriter, req *http.Request) {
 func (r *Relay) bindLocked(s *instState, b *wire.Bind, now time.Time) (int, *bindResp, *errBody) {
 	id := s.rec.ID
 	today := store.Day(now)
+	if r.instances[id] == nil { // deleted between authentication and this call (N2)
+		return http.StatusUnauthorized, nil, &errBody{Error: "unknown_instance"}
+	}
 	if !r.cfg.Environments[b.Env] {
 		return http.StatusUnprocessableEntity, nil, &errBody{Error: "env_unsupported"}
 	}
@@ -108,8 +110,7 @@ func (r *Relay) bindLocked(s *instState, b *wire.Bind, now time.Time) (int, *bin
 	if cur == nil || cur.InstanceID != id {
 		s.newBindings++
 	}
-	r.bindings[m] = nb
-	delete(r.dirty, m)
+	r.setBindingLocked(m, nb)
 	r.M.Inc("hlp_bindings_total", "result", "bound")
 	status := http.StatusCreated
 	if cur != nil && cur.InstanceID == id {
@@ -128,7 +129,7 @@ func (r *Relay) admitNewBinding(s *instState, cur *store.Binding, now time.Time)
 		return &errBody{Error: "binding_quota", Scope: "instance", RetryAfter: jitter(retry), Limits: &tl}
 	}
 	if now.Before(s.blockNewUntil) {
-		return http.StatusTooManyRequests, quota(time.Until(s.blockNewUntil))
+		return http.StatusTooManyRequests, quota(s.blockNewUntil.Sub(now))
 	}
 	if s.newBindings >= tl.NewBindingsDay {
 		return http.StatusTooManyRequests, quota(day)
@@ -156,26 +157,30 @@ func (r *Relay) startChallenge(s *instState, m string, b *wire.Bind, kh []byte, 
 		consent: b.Consent, expires: now.Add(challengeTTL),
 	}
 	p := &apns.Push{Token: b.Token, Challenge: true, Payload: apns.ChallengePayload(ch), Expiration: now.Add(challengeTTL), Sandbox: b.Env == "sandbox"}
-	_ = r.q.Push(&queue.Job{Instance: s.rec.ID, Run: func() {
+	err := r.q.Push(&queue.Job{Instance: s.rec.ID, Run: func() {
 		res := r.sender.Send(context.Background(), p)
 		r.M.Inc("hlp_challenges_total", "result", string(res.Outcome))
 	}, Drop: func() {}})
+	if err != nil {
+		// Not sent: give the quota back so the token can be challenged again today (N5).
+		delete(r.conflicts, ch)
+		delete(r.challengeDay, m)
+		s.challenges--
+		return &errBody{Error: "binding_conflict", Reason: "challenge_unsent", RetryAfter: jitter(time.Minute)}
+	}
 	return &errBody{Error: "binding_conflict", Reason: "challenge_sent"}
 }
 
 // handleChallenge implements POST /v1/bindings/challenge, called by the app with its binding key.
 func (r *Relay) handleChallenge(w http.ResponseWriter, req *http.Request) {
-	if !r.appDirectAllowed(w, req) {
-		return
-	}
 	body, ok := readBody(w, req, maxOtherBody)
 	if !ok {
-		r.fail(w, req, http.StatusRequestEntityTooLarge, errBody{Error: "too_large"})
+		r.appFail(w, req, http.StatusRequestEntityTooLarge, errBody{Error: "too_large"})
 		return
 	}
 	ans, err := wire.ParseChallenge(body)
 	if err != nil {
-		r.fail(w, req, http.StatusUnprocessableEntity, errBody{Error: "invalid_item"})
+		r.appFail(w, req, http.StatusUnprocessableEntity, errBody{Error: "invalid_item"})
 		return
 	}
 	r.mu.Lock()
@@ -184,12 +189,21 @@ func (r *Relay) handleChallenge(w http.ResponseWriter, req *http.Request) {
 	pc := r.conflicts[ans.Challenge]
 	if pc == nil || now.After(pc.expires) || !bytes.Equal(pc.tokenTag, ans.TokenTag) ||
 		!bytes.Equal(pc.keyHash, keyHash(ans.BindingKey)) || !ans.Verify(r.cfg.Host) {
-		r.fail(w, req, http.StatusForbidden, errBody{Error: "challenge_refused"})
+		r.appFailLocked(w, req, http.StatusForbidden, errBody{Error: "challenge_refused"})
+		return
+	}
+	if !r.appAllowedLocked(w, req, pc.mac) {
 		return
 	}
 	delete(r.conflicts, ans.Challenge)
-	if r.instances[pc.instanceID] == nil || r.pairBlocked(pc.token, pc.instanceID) {
+	s := r.instances[pc.instanceID]
+	if s == nil || s.rec.Tier == store.TierRevoked || s.rec.Tier == store.TierSuspended || r.pairBlocked(pc.token, pc.instanceID) {
 		r.fail(w, req, http.StatusForbidden, errBody{Error: "challenge_refused"})
+		return
+	}
+	cur := r.bindings[pc.mac]
+	if code, e := r.admitNewBinding(s, cur, now); e != nil {
+		r.fail(w, req, code, *e)
 		return
 	}
 	today := store.Day(now)
@@ -199,13 +213,13 @@ func (r *Relay) handleChallenge(w http.ResponseWriter, req *http.Request) {
 		r.fail(w, req, http.StatusServiceUnavailable, errBody{Error: "storage_unavailable"})
 		return
 	}
-	if old := r.bindings[pc.mac]; old != nil && old.InstanceID != pc.instanceID {
-		r.instances[pc.instanceID].pending.Rebinds++
+	if cur != nil && cur.InstanceID != pc.instanceID {
+		s.pending.Rebinds++
+		r.dirtyInst[s.rec.ID] = true
 	}
-	r.bindings[pc.mac] = nb
-	delete(r.dirty, pc.mac)
+	r.setBindingLocked(pc.mac, nb)
 	r.M.Inc("hlp_bindings_total", "result", "challenge_resolved")
-	logx.Event("binding.challenge_resolved")
+	r.summary.events["challenge_resolved"]++
 	r.reply(w, req, http.StatusOK, bindResp{State: nb.State})
 }
 
@@ -229,8 +243,7 @@ func (r *Relay) handleUnbindByInstance(w http.ResponseWriter, req *http.Request)
 			r.fail(w, req, http.StatusServiceUnavailable, errBody{Error: "storage_unavailable"})
 			return
 		}
-		delete(r.bindings, m)
-		delete(r.dirty, m)
+		r.dropBindingLocked(m)
 		r.M.Inc("hlp_bindings_total", "result", "unbound_instance")
 	}
 	r.reply(w, req, http.StatusNoContent, nil)
@@ -239,22 +252,19 @@ func (r *Relay) handleUnbindByInstance(w http.ResponseWriter, req *http.Request)
 // handleUnbindSelf implements DELETE /v1/bindings/self: the device leaves an instance without the
 // instance's cooperation. The pair stays blocked for 12 months.
 func (r *Relay) handleUnbindSelf(w http.ResponseWriter, req *http.Request) {
-	if !r.appDirectAllowed(w, req) {
-		return
-	}
 	body, ok := readBody(w, req, maxOtherBody)
 	if !ok {
-		r.fail(w, req, http.StatusRequestEntityTooLarge, errBody{Error: "too_large"})
+		r.appFail(w, req, http.StatusRequestEntityTooLarge, errBody{Error: "too_large"})
 		return
 	}
 	now := r.cfg.Now()
 	u, err := wire.ParseUnbind(body, now.Unix())
 	switch {
 	case errors.Is(err, wire.ErrStale):
-		r.fail(w, req, http.StatusUnauthorized, errBody{Error: "stale_timestamp", RelayTime: now.Unix()})
+		r.appFail(w, req, http.StatusUnauthorized, errBody{Error: "stale_timestamp", RelayTime: now.Unix()})
 		return
 	case err != nil:
-		r.fail(w, req, http.StatusUnprocessableEntity, errBody{Error: "invalid_item"})
+		r.appFail(w, req, http.StatusUnprocessableEntity, errBody{Error: "invalid_item"})
 		return
 	}
 	r.mu.Lock()
@@ -262,15 +272,17 @@ func (r *Relay) handleUnbindSelf(w http.ResponseWriter, req *http.Request) {
 	m := r.tokenMAC(u.Token)
 	b := r.bindings[m]
 	if b == nil || b.InstanceID != u.InstanceID || !bytes.Equal(b.KeyHash, keyHash(u.BindingKey)) || !u.Verify(r.cfg.Host) {
-		r.fail(w, req, http.StatusNotFound, errBody{Error: "binding_unknown"})
+		r.appFailLocked(w, req, http.StatusNotFound, errBody{Error: "binding_unknown"})
+		return
+	}
+	if !r.appAllowedLocked(w, req, m) {
 		return
 	}
 	if !r.persist(r.st.BlockPair([]byte(m), u.InstanceID, store.Day(now))) || !r.persist(r.st.DeleteBinding([]byte(m))) {
 		r.fail(w, req, http.StatusServiceUnavailable, errBody{Error: "storage_unavailable"})
 		return
 	}
-	delete(r.bindings, m)
-	delete(r.dirty, m)
+	r.dropBindingLocked(m)
 	for ch, pc := range r.conflicts {
 		if pc.mac == m {
 			delete(r.conflicts, ch)
@@ -295,25 +307,26 @@ type selfReadResp struct {
 // handleSelfRead implements GET /v1/bindings/self: the device reads everything the relay holds about its
 // binding.
 func (r *Relay) handleSelfRead(w http.ResponseWriter, req *http.Request) {
-	if !r.appDirectAllowed(w, req) {
-		return
-	}
 	now := r.cfg.Now()
 	h := req.Header
 	sr, err := wire.ParseSelfRead(h.Get("HL-Token"), h.Get("HL-Binding-Key"), h.Get("HL-Iat"), h.Get("HL-Signature"), now.Unix())
 	switch {
 	case errors.Is(err, wire.ErrStale):
-		r.fail(w, req, http.StatusUnauthorized, errBody{Error: "stale_timestamp", RelayTime: now.Unix()})
+		r.appFail(w, req, http.StatusUnauthorized, errBody{Error: "stale_timestamp", RelayTime: now.Unix()})
 		return
 	case err != nil:
-		r.fail(w, req, http.StatusUnprocessableEntity, errBody{Error: "invalid_item"})
+		r.appFail(w, req, http.StatusUnprocessableEntity, errBody{Error: "invalid_item"})
 		return
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	b := r.bindings[r.tokenMAC(sr.Token)]
+	m := r.tokenMAC(sr.Token)
+	b := r.bindings[m]
 	if b == nil || !bytes.Equal(b.KeyHash, keyHash(sr.BindingKey)) || !sr.Verify(r.cfg.Host) {
-		r.fail(w, req, http.StatusNotFound, errBody{Error: "binding_unknown"})
+		r.appFailLocked(w, req, http.StatusNotFound, errBody{Error: "binding_unknown"})
+		return
+	}
+	if !r.appAllowedLocked(w, req, m) {
 		return
 	}
 	r.reply(w, req, http.StatusOK, selfReadResp{

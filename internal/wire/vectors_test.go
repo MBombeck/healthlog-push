@@ -140,8 +140,9 @@ func TestVectorsStatements(t *testing.T) {
 		"challenge":            {ChallengeText(h, challenge, tag), bind},
 		"activity":             {ActivityText(h, k.InstanceID, tag, TokenTag(la), now), bind},
 		"selfRead":             {SelfReadText(h, tag, now), bind},
-		"response":             {ResponseText(h, k.Nonce, 200, []byte(`{"items":[]}`)), rel},
-		"responseWithoutNonce": {ResponseText(h, "-", 404, []byte(`{"error":"not_found"}`)), rel},
+		"response":             {ResponseText(h, "POST", "/v1/push", k.Nonce, 200, []byte(`{"items":[]}`)), rel},
+		"responseAppEndpoint":  {ResponseText(h, "DELETE", "/v1/bindings/self", k.Nonce, 204, nil), rel},
+		"responseWithoutNonce": {ResponseText(h, "GET", "/healthz", "-", 200, []byte(`{"status":"ok"}`)), rel},
 		"statusFile":           {StatusFileText(h, []byte(`{"notice":null}`)), rel},
 	}
 	for _, s := range v.Statements {

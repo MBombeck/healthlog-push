@@ -118,16 +118,22 @@ cover only completed days and weeks:
   longer valid, or refused softly;
 - per completed week, the number of new server registrations and of opt-outs.
 
+To handle abuse, the operator can also list, on the relay host only, the servers that had invalid device
+tokens, moved bindings or conflict challenges in the last 7 days, with their counts. This list is shown on
+request, never logged or exported.
+
 The same counts are available as metrics on the relay host. While fewer than 20 servers are active, the
 metrics are refreshed only once an hour, so that the traffic of a single server cannot be read off them.
 
 
 ## 7. Logs
 
-The relay keeps no access log. It logs operational events (a start, a registration, an operator command)
+The relay keeps no access log. It logs operational events (a start, a storage problem, an operator command)
 by type only, and its log lines have a fixed set of fields, none of which can hold an IP address, a device
-token, a token HMAC or an instance id. Totals (number of notifications, errors
-by reason, latency) are written every minute while at least 20 servers are active, otherwise every hour.
+token, a token HMAC or an instance id. Registrations, key rotations, server deletions and resolved binding
+conflicts get no log line of their own; they are counted in the periodic totals. Totals (number of
+notifications, errors by reason, these event counts, latency) are written every minute while at least 20
+servers are active, otherwise every hour.
 Error messages of the underlying HTTP and TLS libraries, which can contain addresses, are counted and
 discarded. On the relay host, logs are limited to three files of 10 MB each.
 
@@ -146,8 +152,13 @@ discarded. On the relay host, logs are limited to three files of 10 MB each.
 - The certificate authority (Let's Encrypt) issues the TLS certificate; it sees only the host name, which is
   published in public certificate logs anyway.
 
-Nobody else receives data from the relay. There is no advertising, no profiling and no automated decision
-about you.
+- Log and metric receivers operated by the maintainer receive the relay's logs and metrics. These hold
+  counts and event types only (sections 6 and 7), no IP address, device token, token HMAC or instance id.
+- The encrypted daily backup (section 5) is stored with a storage service in Germany.
+- An external availability check reads the public health endpoint (https://push.healthlog.dev/healthz),
+  which contains no personal data.
+
+There is no advertising, no profiling and no automated decision about you.
 
 
 ## 9. Legal bases

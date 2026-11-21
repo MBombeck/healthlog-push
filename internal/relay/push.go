@@ -40,6 +40,10 @@ func itemRetry(ref string, status int, e, scope string, d time.Duration) ItemRes
 	return ItemResult{Ref: ref, Status: status, Error: e, Scope: scope, RetryAfter: jitter(d)}
 }
 
+// receiptInterval is the shortest gap between two receipt reports of one instance; servers report every
+// 55 minutes, which leaves ten minutes of slack.
+const receiptInterval = 45 * time.Minute
+
 // minReporters is how many instance reports the delivery signal needs before it can say anything.
 const minReporters = 3
 
@@ -222,10 +226,15 @@ func (r *Relay) limitsLocked(s *instState, b *store.Binding, m string, it *wire.
 		}
 	}
 	tl := r.tierLimits(s.rec)
+	// A soft-invalid binding gets one probe push per day: the day it failed, it is refused (K1).
+	if b.State == store.StateSoftInvalid && b.SoftInvalidDay == store.Day(now) {
+		return itemRetry(ref, http.StatusTooManyRequests, "binding_quota", "device", now.Truncate(day).Add(day).Sub(now)), false
+	}
+	// Over the invalid-token budget, only active bindings receive pushes for 24 hours.
+	if b.State != store.StateActive && now.Before(s.blockNewUntil) {
+		return itemRetry(ref, http.StatusTooManyRequests, "binding_quota", "instance", s.blockNewUntil.Sub(now)), false
+	}
 	if b.State == store.StateProvisional {
-		if now.Before(s.blockNewUntil) {
-			return itemRetry(ref, http.StatusTooManyRequests, "binding_quota", "instance", s.blockNewUntil.Sub(now)), false
-		}
 		if active, _ := r.counts(s.rec.ID); active >= tl.Devices {
 			return itemRetry(ref, http.StatusTooManyRequests, "binding_quota", "instance", hour), false
 		}
@@ -248,7 +257,7 @@ func (r *Relay) limitsLocked(s *instState, b *store.Binding, m string, it *wire.
 	switch c {
 	case wire.ClassAlert:
 		if b.AlertsToday >= dl.AlertDay {
-			return itemRetry(ref, http.StatusTooManyRequests, "device_quota", "device", time.Until(now.Truncate(day).Add(day))), false
+			return itemRetry(ref, http.StatusTooManyRequests, "device_quota", "device", now.Truncate(day).Add(day).Sub(now)), false
 		}
 		if !dq.alerts.Peek(now) {
 			return itemRetry(ref, http.StatusTooManyRequests, "device_quota", "device", dq.alerts.RetryAfter(now)), false
@@ -387,6 +396,8 @@ func (r *Relay) complete(instID, m string, it *wire.Item, ik string, ent *idemEn
 func (r *Relay) applyLocked(instID string, s *instState, b *store.Binding, m string, it *wire.Item, res apns.Result, now time.Time, today int) (ItemResult, bool) {
 	c := it.Class
 	device := c != wire.ClassLiveActivity
+	// Only bindings that have had a push accepted count for the breaker: invented tokens never get there.
+	established := device && b != nil && b.InstanceID == instID && b.LastSuccessDay != 0
 	r.countApple429Locked(now, res.Outcome == apns.DeviceThrottled)
 	label := func(v string) {
 		r.M.Inc("hlp_push_total", "class", string(c), "result", v)
@@ -396,8 +407,8 @@ func (r *Relay) applyLocked(instID string, s *instState, b *store.Binding, m str
 	case apns.Accepted:
 		label("accepted")
 		r.apnsLastOK = now
-		if device {
-			r.breaker.Record(now, true, false)
+		if established {
+			r.breaker.Record(now, instID, true, false)
 		}
 		if b != nil && b.InstanceID == instID {
 			if b.State != store.StateActive {
@@ -413,7 +424,7 @@ func (r *Relay) applyLocked(instID string, s *instState, b *store.Binding, m str
 					s.rec.FirstDeliveryDay = today
 				}
 				s.rec.LastPushDay = today
-				r.persist(r.st.PutInstance(s.rec))
+				r.dirtyInst[s.rec.ID] = true
 			}
 		}
 		return ItemResult{Status: http.StatusOK, Result: "accepted"}, true
@@ -422,17 +433,19 @@ func (r *Relay) applyLocked(instID string, s *instState, b *store.Binding, m str
 			label("activity_gone")
 			return ItemResult{Status: http.StatusOK, Result: "activity_gone"}, true
 		}
-		opened := r.breaker.Record(now, false, true)
-		if opened {
+		if established && r.breaker.Record(now, instID, false, true) {
 			r.M.Set("hlp_breaker_open", 1)
 			logx.Event("breaker.opened", logx.Str(logx.KState, BreakerOpen))
 		}
-		if !r.breaker.Marking(now) {
+		marking := r.breaker.Marking(now)
+		// The invalid-token budget is charged for every token that never delivered, even while the breaker is
+		// not closed; only established bindings are spared then, because a misconfiguration hits them.
+		if s != nil && (!established || marking) {
+			r.countInvalidLocked(s, now)
+		}
+		if !marking {
 			label("relay_misconfigured")
 			return ItemResult{Status: http.StatusServiceUnavailable, Error: "relay_misconfigured"}, false
-		}
-		if s != nil {
-			r.countInvalidLocked(s, now)
 		}
 		if res.Outcome == apns.Unregistered {
 			label("unregistered")
@@ -485,8 +498,7 @@ func (r *Relay) applyLocked(instID string, s *instState, b *store.Binding, m str
 
 func (r *Relay) deleteBindingLocked(m string) {
 	if r.persist(r.st.DeleteBinding([]byte(m))) {
-		delete(r.bindings, m)
-		delete(r.dirty, m)
+		r.dropBindingLocked(m)
 	}
 }
 
@@ -557,11 +569,24 @@ func (r *Relay) handleReceipts(w http.ResponseWriter, req *http.Request) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	now := r.cfg.Now()
-	if !s.lastReceipt.IsZero() && now.Sub(s.lastReceipt) < 50*time.Minute {
-		r.fail(w, req, http.StatusTooManyRequests, errBody{Error: "instance_rate", Scope: "instance", RetryAfter: jitter(hour)})
+	if !s.lastReceipt.IsZero() && now.Sub(s.lastReceipt) < receiptInterval {
+		r.fail(w, req, http.StatusTooManyRequests, errBody{Error: "instance_rate", Scope: "instance", RetryAfter: jitter(receiptInterval - now.Sub(s.lastReceipt))})
+		return
+	}
+	// Only standard instances count, and nobody can report more accepted pushes than the relay itself
+	// accepted for that instance in the last three days (M1).
+	if s.rec.Tier != store.TierStandard {
+		r.reply(w, req, http.StatusNoContent, nil)
 		return
 	}
 	s.lastReceipt = now
+	var own int64
+	for d := store.Day(now) - 2; d <= store.Day(now); d++ {
+		own += r.st.Counters(d, s.rec.ID).Sent
+	}
+	own += s.pending.Sent
+	rb.Accepted = min(rb.Accepted, own)
+	rb.Confirmed = min(rb.Confirmed, rb.Accepted)
 	h := now.Unix() / 3600
 	slot := &r.receipts[h%24]
 	if slot.hour != h {

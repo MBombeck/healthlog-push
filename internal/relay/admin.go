@@ -69,6 +69,8 @@ func (r *Relay) admin(ar *AdminRequest) (any, error) {
 		return map[string]any{"service": r.Stats(), "usage": r.UsageReport(28)}, nil
 	case "instance":
 		return r.Instance(arg(ar.Args, 0))
+	case "suspects":
+		return r.Suspects(50), nil
 	case "pause":
 		d, err := dur("for", 30*time.Minute)
 		if err != nil {

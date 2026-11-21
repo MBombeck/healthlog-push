@@ -19,46 +19,44 @@ func (r *Relay) countGlobalLocked(today int, class, result string) {
 	r.global[[3]string{strconv.Itoa(today), class, result}]++
 }
 
-// flushLocked writes dirty bindings, per-instance counters and pending global counters.
+// flushLocked writes dirty bindings, changed instance records, per-instance counters and pending global
+// counters in one write transaction. Instances that did not change are not written (M3).
 func (r *Relay) flushLocked() {
-	if len(r.dirty) > 0 {
-		m := make(map[string]*store.Binding, len(r.dirty))
-		for k := range r.dirty {
-			if b := r.bindings[k]; b != nil {
-				m[k] = b
-			}
-		}
-		if r.persist(r.st.PutBindings(m)) {
-			r.dirty = map[string]bool{}
+	today := store.Day(r.cfg.Now())
+	f := store.Flush{Bindings: map[string]*store.Binding{}, Counters: map[string]store.DayCounters{}, Global: map[[3]string]int64{},
+		Day: today, Peak: r.peakToday}
+	for k := range r.dirty {
+		if b := r.bindings[k]; b != nil {
+			f.Bindings[k] = b
 		}
 	}
-	today := store.Day(r.cfg.Now())
+	for id := range r.dirtyInst {
+		if s := r.instances[id]; s != nil {
+			f.Instances = append(f.Instances, s.rec)
+		}
+	}
 	for id, s := range r.instances {
 		if s.pending != (store.DayCounters{}) {
-			if r.persist(r.st.AddCounters(today, id, s.pending)) {
-				s.pending = store.DayCounters{}
-			}
-		}
-		if r.dbWritable {
-			_ = r.st.PutInstance(s.rec)
+			f.Counters[id] = s.pending
 		}
 	}
 	for k, n := range r.global {
-		d, _ := strconv.Atoi(k[0])
-		if r.persist(r.st.AddGlobal(d, k[1], k[2], n)) {
-			delete(r.global, k)
-		}
+		f.Global[k] = n
+	}
+	if err := r.st.ApplyFlush(&f); err != nil {
+		r.setDBError(err)
+		return
+	}
+	r.dirty, r.dirtyInst, r.global = map[string]bool{}, map[string]bool{}, map[[3]string]int64{}
+	for id := range f.Counters {
+		r.instances[id].pending = store.DayCounters{}
 	}
 	// A successful write after a failure makes the store writable again (disk freed, file system remounted).
-	if err := r.st.AddGlobal(today, "all", "peak_minute", r.peakToday); err == nil {
-		if !r.dbWritable {
-			logx.Event("store.writable_again")
-		}
-		r.dbWritable = true
-		r.M.Set("hlp_db_writable", 1)
-	} else {
-		r.setDBError(err)
+	if !r.dbWritable {
+		logx.Event("store.writable_again")
 	}
+	r.dbWritable = true
+	r.M.Set("hlp_db_writable", 1)
 }
 
 // Run drives the periodic work until ctx ends: every minute a flush and the summary log line, at every
@@ -145,8 +143,8 @@ func (r *Relay) logSummaryLocked(now time.Time) {
 		p95 = l[(len(l)*95)/100]
 	}
 	logx.Event("relay.summary", logx.Str(logx.KPeriod, name), logx.Int(logx.KPushes, r.summary.pushes),
-		logx.Counts(logx.KErrors, r.summary.errors), logx.Int(logx.KP95, p95))
-	r.summary = summary{errors: map[string]int64{}, start: now}
+		logx.Counts(logx.KErrors, r.summary.errors), logx.Counts(logx.KEvents, r.summary.events), logx.Int(logx.KP95, p95))
+	r.summary = summary{errors: map[string]int64{}, events: map[string]int64{}, start: now}
 }
 
 // Daily runs retention, tier promotion, the automatic device-limit raise, the consistency check and the
@@ -172,8 +170,7 @@ func (r *Relay) Daily() {
 			stale = true
 		}
 		if stale && r.persist(r.st.DeleteBinding([]byte(m))) {
-			delete(r.bindings, m)
-			delete(r.dirty, m)
+			r.dropBindingLocked(m)
 			removed++
 		}
 	}
@@ -202,6 +199,12 @@ func (r *Relay) Daily() {
 	if err := r.st.Check(); err != nil {
 		r.setDBError(err)
 		logx.Event("store.check_failed")
+	}
+	// Per-device quota state of tokens without a binding is dropped once a day (N6).
+	for m := range r.devs {
+		if _, ok := r.bindings[m]; !ok {
+			delete(r.devs, m)
+		}
 	}
 	for m, d := range r.challengeDay {
 		if d != today {
@@ -241,7 +244,7 @@ func (r *Relay) promoteLocked(s *instState, today int) {
 			}
 		}
 	}
-	r.persist(r.st.PutInstance(in))
+	r.dirtyInst[in.ID] = true
 }
 
 // suspiciousLocked: over the last seven days more than 20 % invalid tokens (at least 10 sends), or more
@@ -397,10 +400,14 @@ func (r *Relay) Health() (HealthStatus, bool) {
 	now := r.cfg.Now()
 	h := HealthStatus{DBWritable: r.dbWritable, APNsRecent: !r.apnsLastOK.IsZero() && now.Sub(r.apnsLastOK) < 15*time.Minute,
 		Breaker: r.breaker.State(now), Delivery: r.deliveryLocked(now)}
+	// The status, its HTTP code and the deploy gate depend only on the relay's own facts: a provider token
+	// that Apple accepts and a writable store. The breaker and the delivery signal can be influenced by
+	// third parties (instances sending traffic or reporting receipts), so they are shown but never turn the
+	// status (M1).
 	switch {
 	case r.misconfigured || (r.cfg.ProviderTokenOK != nil && !r.cfg.ProviderTokenOK()):
 		h.Status = "down"
-	case h.Breaker != BreakerClosed || !h.DBWritable || h.Delivery == "degraded":
+	case !h.DBWritable:
 		h.Status = "degraded"
 	default:
 		h.Status = "ok"

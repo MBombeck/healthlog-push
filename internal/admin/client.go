@@ -22,6 +22,7 @@ const Usage = `usage: healthlog-push admin <command> [args] [--flag value]
 
   stats                                   service state and usage aggregates (counts only)
   instance <id>                           tier, limits and binding counts of one instance
+  suspects                                instances with invalid tokens, rebinds or challenges, worst first
   pause [--class all|alert|silent|liveactivity] [--tier all|probation] [--for 30m]
   resume                                  remove all pauses
   registration open|invite|closed

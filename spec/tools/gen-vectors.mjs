@@ -123,8 +123,9 @@ export function build() {
     st("challenge", bindKey, join("hl-challenge-v1", HOST, b64u(Buffer.alloc(32, 0x63)), tokenTag)),
     st("activity", bindKey, join("hl-activity-v1", HOST, instanceId, tokenTag, laTokenTag, NOW)),
     st("selfRead", bindKey, join("hl-selfread-v1", HOST, tokenTag, NOW)),
-    st("response", relayKey, join("hl-relay-resp-v1", HOST, nonce, 200, bodyHash), { body }),
-    st("responseWithoutNonce", relayKey, join("hl-relay-resp-v1", HOST, "-", 404, hex(sha(Buffer.from('{"error":"not_found"}')))), { body: '{"error":"not_found"}' }),
+    st("response", relayKey, join("hl-relay-resp-v2", HOST, "POST", "/v1/push", nonce, 200, bodyHash), { body }),
+    st("responseAppEndpoint", relayKey, join("hl-relay-resp-v2", HOST, "DELETE", "/v1/bindings/self", nonce, 204, hex(sha(Buffer.alloc(0)))), { body: "" }),
+    st("responseWithoutNonce", relayKey, join("hl-relay-resp-v2", HOST, "GET", "/healthz", "-", 200, hex(sha(Buffer.from('{"status":"ok"}')))), { body: '{"status":"ok"}' }),
     st("statusFile", relayKey, join("hl-relay-status-v1", HOST, hex(sha(Buffer.from('{"notice":null}')))), { body: '{"notice":null}' }),
   ];
   // Mutations that must fail verification against the same public key and signature.
@@ -134,8 +135,11 @@ export function build() {
     { name: "bindOtherHost", of: "bind", text: join("hl-bind-v1", "relay.example.org", instanceId, tokenTag, "device", 7, NOW) },
     { name: "requestQueryAdded", of: "request", text: join("hl-relay-v1", HOST, instanceId, "POST", "/v1/push?x=1", NOW, nonce, bodyHash) },
     { name: "requestOtherMethod", of: "request", text: join("hl-relay-v1", HOST, instanceId, "PUT", "/v1/push", NOW, nonce, bodyHash) },
-    { name: "responseOtherNonce", of: "response", text: join("hl-relay-resp-v1", HOST, b64u(Buffer.alloc(16, 0x4f)), 200, bodyHash) },
-    { name: "responseOtherStatus", of: "response", text: join("hl-relay-resp-v1", HOST, nonce, 410, bodyHash) },
+    { name: "responseOtherNonce", of: "response", text: join("hl-relay-resp-v2", HOST, "POST", "/v1/push", b64u(Buffer.alloc(16, 0x4f)), 200, bodyHash) },
+    { name: "responseOtherStatus", of: "response", text: join("hl-relay-resp-v2", HOST, "POST", "/v1/push", nonce, 410, bodyHash) },
+    { name: "responseOtherMethod", of: "response", text: join("hl-relay-resp-v2", HOST, "GET", "/v1/push", nonce, 200, bodyHash) },
+    { name: "responseOtherPath", of: "response", text: join("hl-relay-resp-v2", HOST, "POST", "/v1/status", nonce, 200, bodyHash) },
+    { name: "responseAppReplayedOntoOtherRequest", of: "responseAppEndpoint", text: join("hl-relay-resp-v2", HOST, "DELETE", "/v1/bindings/self", b64u(Buffer.alloc(16, 0x50)), 204, hex(sha(Buffer.alloc(0)))) },
     { name: "activityTokenSwapped", of: "activity", text: join("hl-activity-v1", HOST, instanceId, tokenTag, hex(tokenTagOf(unhex("3e".repeat(32)))), NOW) },
     { name: "unbindOtherInstance", of: "unbind", text: join("hl-unbind-v1", HOST, "00000000-0000-4000-8000-000000000000", tokenTag, NOW) },
   ];

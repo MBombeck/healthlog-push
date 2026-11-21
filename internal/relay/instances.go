@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/MBombeck/healthlog-push/internal/logx"
 	"github.com/MBombeck/healthlog-push/internal/store"
 	"github.com/MBombeck/healthlog-push/internal/wire"
 )
@@ -61,7 +60,7 @@ func (r *Relay) handleRegister(w http.ResponseWriter, req *http.Request) {
 		r.fail(w, req, http.StatusServiceUnavailable, errBody{Error: "registration_paused", RetryAfter: jitter(hour)})
 		return
 	case RegInvite:
-		if !r.consumeInvite(reg.Invite, today) {
+		if !r.inviteValid(reg.Invite, today) {
 			r.fail(w, req, http.StatusForbidden, errBody{Error: "invite_required"})
 			return
 		}
@@ -70,6 +69,10 @@ func (r *Relay) handleRegister(w http.ResponseWriter, req *http.Request) {
 		r.M.Inc("hlp_registrations_total", "result", "limited")
 		r.fail(w, req, http.StatusServiceUnavailable, errBody{Error: "registration_paused", RetryAfter: jitter(hour)})
 		return
+	}
+	// The invite is spent only once the registration passed every limit (N4).
+	if r.control.Registration == RegInvite {
+		r.consumeInvite(reg.Invite, today)
 	}
 	in := &store.Instance{
 		ID: newID(), PublicKey: reg.PublicKey, Tier: store.TierProbation, CreatedDay: today,
@@ -85,7 +88,7 @@ func (r *Relay) handleRegister(w http.ResponseWriter, req *http.Request) {
 	r.addInstance(in)
 	r.M.Inc("hlp_registrations_total", "result", "created")
 	r.countGlobalLocked(today, "instance", "registered")
-	logx.Event("instance.registered", logx.Str(logx.KState, in.Tier))
+	r.summary.events["registered"]++
 	r.reply(w, req, http.StatusCreated, registerResp{InstanceID: in.ID, Tier: in.Tier, Limits: r.tierLimits(in)})
 }
 
@@ -120,7 +123,7 @@ func (r *Relay) handleRotate(w http.ResponseWriter, req *http.Request) {
 	}
 	delete(r.byKey, string(old))
 	r.byKey[string(reg.PublicKey)] = s.rec.ID
-	logx.Event("instance.rotated")
+	r.summary.events["rotated"]++
 	r.reply(w, req, http.StatusOK, registerResp{InstanceID: s.rec.ID, Tier: s.rec.Tier, Limits: r.tierLimits(s.rec)})
 }
 
@@ -137,7 +140,7 @@ func (r *Relay) handleDeleteInstance(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	r.dropInstanceLocked(id)
-	logx.Event("instance.deleted")
+	r.summary.events["deleted"]++
 	r.reply(w, req, http.StatusNoContent, nil)
 }
 
@@ -148,11 +151,9 @@ func (r *Relay) dropInstanceLocked(id string) {
 		r.nonceTotal -= len(s.nonces)
 	}
 	delete(r.instances, id)
-	for m, b := range r.bindings {
-		if b.InstanceID == id {
-			delete(r.bindings, m)
-			delete(r.dirty, m)
-		}
+	delete(r.dirtyInst, id)
+	for m := range r.byInst[id] {
+		r.dropBindingLocked(m)
 	}
 }
 
@@ -196,11 +197,11 @@ func (r *Relay) handleStatus(w http.ResponseWriter, req *http.Request) {
 func (r *Relay) serviceStateLocked(t time.Time) string {
 	paused, _ := r.paused("all", "all", t)
 	switch {
-	case r.misconfigured || r.breaker.State(t) == BreakerOpen:
+	case r.misconfigured:
 		return "misconfigured"
 	case paused:
 		return "maintenance"
-	case r.breaker.State(t) == BreakerHalfOpen || !r.dbWritable:
+	case r.breaker.State(t) != BreakerClosed || !r.dbWritable:
 		return "degraded"
 	}
 	return "ok"

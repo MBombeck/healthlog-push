@@ -186,10 +186,12 @@ func RequestText(host, instanceID, method, pathQuery string, t int64, nonce stri
 	return join("hl-relay-v1", host, instanceID, method, pathQuery, itoa(t), nonce, HexSHA256(body))
 }
 
-// ResponseText is signed by the relay identity key for every /v1 response. nonce is "-" when the request
-// carried none.
-func ResponseText(host, nonce string, status int, body []byte) string {
-	return join("hl-relay-resp-v1", host, nonce, strconv.Itoa(status), HexSHA256(body))
+// ResponseText is signed by the relay identity key for every response. It binds the response to the request
+// by method, path with query (the raw request target) and nonce. nonce is "-" only for the public monitoring
+// endpoints (/healthz, /version) and for the refusal of a request that carried no valid nonce; a client must
+// treat a response bound to "-" as untrusted.
+func ResponseText(host, method, pathQuery, nonce string, status int, body []byte) string {
+	return join("hl-relay-resp-v2", host, method, pathQuery, nonce, strconv.Itoa(status), HexSHA256(body))
 }
 
 // StatusFileText is signed by the relay identity key for the out-of-band status file.

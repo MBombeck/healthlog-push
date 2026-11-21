@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/MBombeck/healthlog-push/internal/apns"
@@ -47,6 +48,7 @@ type devQuota struct {
 	silentHour limits.Window
 	laDay      limits.Window
 	throttled  map[wire.Class]time.Time
+	app        *limits.Bucket // verified app-direct calls for this token
 }
 
 type idemEntry struct {
@@ -81,6 +83,9 @@ type Relay struct {
 	instances    map[string]*instState
 	byKey        map[string]string // raw public key to instance id
 	bindings     map[string]*store.Binding
+	byInst       map[string]map[string]struct{} // instance id to the MACs of its bindings
+	dirtyInst    map[string]bool                // instances whose record changed since the last flush
+	bodyBytes    atomic.Int64                   // request body bytes currently reserved
 	dirty        map[string]bool
 	devs         map[string]*devQuota
 	idem         map[string]*idemEntry
@@ -119,6 +124,7 @@ type Relay struct {
 }
 
 type summary struct {
+	events    map[string]int64 // registrations, rotations, deletions, resolved challenges in the period
 	pushes    int64
 	errors    map[string]int64
 	latencies []int64
@@ -155,7 +161,8 @@ func New(cfg Config, st *store.Store, sender Sender) (*Relay, error) {
 		dbWritable: true, probationMin: limits.Window{Size: time.Minute}, standardMin: limits.Window{Size: time.Minute},
 		minuteAll: limits.Window{Size: time.Minute}, lastDay: store.Day(now),
 	}
-	r.summary = summary{errors: map[string]int64{}, start: now}
+	r.summary = summary{errors: map[string]int64{}, events: map[string]int64{}, start: now}
+	r.byInst, r.dirtyInst = map[string]map[string]struct{}{}, map[string]bool{}
 	r.global = map[[3]string]int64{}
 	if err := st.GetControl(&r.control); err != nil && !errors.Is(err, store.ErrNotFound) {
 		return nil, err
@@ -174,7 +181,9 @@ func New(cfg Config, st *store.Store, sender Sender) (*Relay, error) {
 	if err != nil {
 		return nil, err
 	}
-	r.bindings = bs
+	for m, b := range bs {
+		r.setBindingLocked(m, b)
+	}
 	today := store.Day(now)
 	for d := today - 7; d < today; d++ {
 		r.peaks7 = append(r.peaks7, st.Global(d, "all", "peak_minute"))
@@ -228,8 +237,8 @@ func (r *Relay) tokenMAC(token []byte) string {
 		old := mac(k, token)
 		if b, ok := r.bindings[old]; ok {
 			if err := r.st.RenameBinding([]byte(old), []byte(cur), b); err == nil {
-				delete(r.bindings, old)
-				r.bindings[cur] = b
+				r.dropBindingLocked(old)
+				r.setBindingLocked(cur, b)
 				if d, ok := r.devs[old]; ok {
 					r.devs[cur] = d
 					delete(r.devs, old)
@@ -284,10 +293,38 @@ func newChallenge() string {
 	return wire.EncodeB64(b[:])
 }
 
-// counts returns active and provisional bindings of an instance.
+// setBindingLocked stores a binding in memory and keeps the per-instance index in step.
+func (r *Relay) setBindingLocked(m string, b *store.Binding) {
+	if old := r.bindings[m]; old != nil && old.InstanceID != b.InstanceID {
+		delete(r.byInst[old.InstanceID], m)
+	}
+	r.bindings[m] = b
+	set := r.byInst[b.InstanceID]
+	if set == nil {
+		set = map[string]struct{}{}
+		r.byInst[b.InstanceID] = set
+	}
+	set[m] = struct{}{}
+	delete(r.dirty, m)
+}
+
+// dropBindingLocked removes a binding from memory and from the index.
+func (r *Relay) dropBindingLocked(m string) {
+	if b := r.bindings[m]; b != nil {
+		delete(r.byInst[b.InstanceID], m)
+		if len(r.byInst[b.InstanceID]) == 0 {
+			delete(r.byInst, b.InstanceID)
+		}
+	}
+	delete(r.bindings, m)
+	delete(r.dirty, m)
+}
+
+// counts returns active and provisional bindings of an instance, from the per-instance index.
 func (r *Relay) counts(id string) (active, provisional int) {
-	for _, b := range r.bindings {
-		if b.InstanceID != id {
+	for m := range r.byInst[id] {
+		b := r.bindings[m]
+		if b == nil {
 			continue
 		}
 		if b.State == store.StateProvisional {
@@ -307,6 +344,7 @@ func (r *Relay) dev(m string) *devQuota {
 		d = &devQuota{
 			all: limits.Window{Size: 24 * time.Hour}, alerts: limits.NewBucket(dl.AlertBurst, dl.AlertPerHour/3600, now),
 			silentHour: limits.Window{Size: time.Hour}, laDay: limits.Window{Size: 24 * time.Hour}, throttled: map[wire.Class]time.Time{},
+			app: limits.NewBucket(10, 10.0/3600, now),
 		}
 		r.devs[m] = d
 	}

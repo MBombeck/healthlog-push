@@ -10,9 +10,19 @@ info:
     JSON value make the body invalid (`422 invalid_item`).
 
     Every response produced by the relay's JSON reply path, including every `204`, carries the header
-    `HL-Relay-Signature`: the relay identity key's Ed25519 signature over the `hl-relay-resp-v1` text
-    (`spec/statements.md`). A response without a valid signature is a transport error. The plain-text
-    pages `/`, `/privacy` and `/terms` are not signed.
+    `HL-Relay-Signature`: the relay identity key's Ed25519 signature over the `hl-relay-resp-v2` text
+    (`spec/statements.md`): host, request method, raw request path with query, the request's `HL-Nonce`,
+    status and the hex SHA-256 of the body. A response without a valid signature, or bound to `-` although
+    the request carried a nonce, is a transport error. Clients take retry hints only from the signed
+    `retryAfter` field (capped at 86400 seconds), never from the unsigned `Retry-After` header. The
+    plain-text pages `/`, `/privacy` and `/terms` are not signed.
+
+    `HL-Nonce` is mandatory on every `/v1` request, including registration and the app's direct calls;
+    without a valid one the relay answers `400 nonce_required` (signed with nonce `-`). Only `GET /healthz`
+    and `GET /version` may omit it. `POST` and `DELETE` requests must declare `Content-Length`
+    (`411 length_required`); a declared length above 128 KiB is refused with `413 too_large` before the
+    body is read, and when the bodies in flight would exceed 32 MiB in total the answer is
+    `503 overloaded`. Response bodies are at most 65536 bytes; clients refuse more than 262144.
 
     Keys and signatures are unpadded base64url. Tokens are hex. Token tags are 32 lowercase hex
     characters. Times are unix seconds.
@@ -50,10 +60,13 @@ paths:
         Not signed with `hl-relay-v1`. The body proves possession of the new key: `proof` is the
         signature of `publicKey` over `hl-register-v1`. A key that is already registered gets its existing
         instance id back with `200`.
-        Errors: `413 too_large`, `422 invalid_item`, `401 stale_timestamp`, `401 bad_signature`,
-        `403 instance_revoked`, `403 instance_suspended`, `403 invite_required`,
-        `503 storage_unavailable`, `503 registration_paused`.
+        Errors: `400 nonce_required`, `411 length_required`, `413 too_large`, `422 invalid_item`,
+        `401 stale_timestamp`, `401 bad_signature`, `403 instance_revoked`, `403 instance_suspended`,
+        `403 invite_required`, `503 storage_unavailable`, `503 registration_paused`, `503 overloaded`.
+        In invite mode the code is spent only when the registration passes every limit.
       security: []
+      parameters:
+        - $ref: "#/components/parameters/HL-Nonce"
       requestBody:
         required: true
         content:
@@ -72,8 +85,10 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/RegisterResponse" }
+        "400": { $ref: "#/components/responses/NonceRequired" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
+        "411": { $ref: "#/components/responses/LengthRequired" }
         "413": { $ref: "#/components/responses/TooLarge" }
         "422": { $ref: "#/components/responses/Invalid" }
         "503": { $ref: "#/components/responses/Unavailable" }
@@ -101,9 +116,11 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/RegisterResponse" }
+        "400": { $ref: "#/components/responses/NonceRequired" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "409": { $ref: "#/components/responses/Conflict" }
+        "411": { $ref: "#/components/responses/LengthRequired" }
         "413": { $ref: "#/components/responses/TooLarge" }
         "422": { $ref: "#/components/responses/Invalid" }
         "426": { $ref: "#/components/responses/UpgradeRequired" }
@@ -118,8 +135,10 @@ paths:
         - $ref: "#/components/parameters/HL-Client"
       responses:
         "204": { $ref: "#/components/responses/NoContent" }
+        "400": { $ref: "#/components/responses/NonceRequired" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
+        "411": { $ref: "#/components/responses/LengthRequired" }
         "413": { $ref: "#/components/responses/TooLarge" }
         "426": { $ref: "#/components/responses/UpgradeRequired" }
         "429": { $ref: "#/components/responses/TooMany" }
@@ -133,8 +152,9 @@ paths:
         The instance forwards the device statement (`hl-bind-v1`, signed by `bindingKey`) unchanged.
         `201` when the token was not bound to this instance before, `200` when it was (including an
         idempotent repeat of the stored statement). `409 binding_conflict` when a live binding holds
-        another key: `reason` is `challenge_sent` (a challenge push went to the token) or
-        `challenge_quota` (no push was sent).
+        another key: `reason` is `challenge_sent` (a challenge push went to the token), `challenge_quota`
+        (no push was sent) or `challenge_unsent` (the push could not be queued; the quota was given back,
+        retry after `retryAfter`).
         Errors besides request signing: `422 invalid_item`, `422 env_unsupported`, `401 stale_timestamp`,
         `403 binding_refused`, `409 binding_conflict`, `429 binding_quota`, `503 storage_unavailable`.
       parameters:
@@ -157,9 +177,11 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/BindResponse" }
+        "400": { $ref: "#/components/responses/NonceRequired" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "409": { $ref: "#/components/responses/Conflict" }
+        "411": { $ref: "#/components/responses/LengthRequired" }
         "413": { $ref: "#/components/responses/TooLarge" }
         "422": { $ref: "#/components/responses/Invalid" }
         "426": { $ref: "#/components/responses/UpgradeRequired" }
@@ -180,8 +202,10 @@ paths:
             schema: { $ref: "#/components/schemas/TokenBody" }
       responses:
         "204": { $ref: "#/components/responses/NoContent" }
+        "400": { $ref: "#/components/responses/NonceRequired" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
+        "411": { $ref: "#/components/responses/LengthRequired" }
         "413": { $ref: "#/components/responses/TooLarge" }
         "422": { $ref: "#/components/responses/Invalid" }
         "426": { $ref: "#/components/responses/UpgradeRequired" }
@@ -195,12 +219,17 @@ paths:
       description: |
         Sent by the app. `signature` is the `hl-challenge-v1` signature by `bindingKey`, which must be the
         key of the conflicting bind request. A challenge is valid for 30 minutes and can be used once.
-        Errors: `429 global`, `413 too_large`, `422 invalid_item`, `403 challenge_refused`,
-        `503 storage_unavailable`.
+        The request is parsed and verified first; only failed attempts are charged to a relay-wide bucket
+        (100, refilling 20 per second), and once it is empty failed attempts answer `429 global`. A verified
+        call is limited per device token (10, refilling 10 per hour, `429 device_quota`). The answer also
+        checks that the instance is still active and applies its binding quotas (`429 binding_quota`).
+        Errors: `400 nonce_required`, `411 length_required`, `413 too_large`, `422 invalid_item`,
+        `403 challenge_refused`, `429 global`, `429 device_quota`, `429 binding_quota`,
+        `503 storage_unavailable`, `503 overloaded`.
       security: []
       x-signed-by: device binding key (statement and signature in the body)
       parameters:
-        - $ref: "#/components/parameters/HL-Nonce-Optional"
+        - $ref: "#/components/parameters/HL-Nonce"
       requestBody:
         required: true
         content:
@@ -213,7 +242,9 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/BindResponse" }
+        "400": { $ref: "#/components/responses/NonceRequired" }
         "403": { $ref: "#/components/responses/Forbidden" }
+        "411": { $ref: "#/components/responses/LengthRequired" }
         "413": { $ref: "#/components/responses/TooLarge" }
         "422": { $ref: "#/components/responses/Invalid" }
         "429": { $ref: "#/components/responses/TooMany" }
@@ -226,13 +257,15 @@ paths:
       description: |
         The direct opt-out. `signature` is the `hl-unbind-v1` signature by `bindingKey`. On success the
         binding is deleted and the pair (token, instance) is blocked for 365 days. Any mismatch answers
-        `404 binding_unknown`.
-        Errors: `429 global`, `413 too_large`, `422 invalid_item`, `401 stale_timestamp`,
-        `404 binding_unknown`, `503 storage_unavailable`.
+        `404 binding_unknown`. Failed attempts are charged to the relay-wide bucket (`429 global` once it is
+        empty); a verified call is limited per device token (`429 device_quota`).
+        Errors: `400 nonce_required`, `411 length_required`, `413 too_large`, `422 invalid_item`,
+        `401 stale_timestamp`, `404 binding_unknown`, `429 global`, `429 device_quota`,
+        `503 storage_unavailable`, `503 overloaded`.
       security: []
       x-signed-by: device binding key (statement and signature in the body)
       parameters:
-        - $ref: "#/components/parameters/HL-Nonce-Optional"
+        - $ref: "#/components/parameters/HL-Nonce"
       requestBody:
         required: true
         content:
@@ -240,8 +273,10 @@ paths:
             schema: { $ref: "#/components/schemas/UnbindBody" }
       responses:
         "204": { $ref: "#/components/responses/NoContent" }
+        "400": { $ref: "#/components/responses/NonceRequired" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "411": { $ref: "#/components/responses/LengthRequired" }
         "413": { $ref: "#/components/responses/TooLarge" }
         "422": { $ref: "#/components/responses/Invalid" }
         "429": { $ref: "#/components/responses/TooMany" }
@@ -252,15 +287,17 @@ paths:
       summary: Read the own binding (app)
       description: |
         `HL-Signature` is the `hl-selfread-v1` signature by the key in `HL-Binding-Key`. Any mismatch
-        answers `404 binding_unknown`.
-        Errors: `429 global`, `422 invalid_item`, `401 stale_timestamp`, `404 binding_unknown`.
+        answers `404 binding_unknown`. Failed attempts are charged to the relay-wide bucket (`429 global` once
+        it is empty); a verified call is limited per device token (`429 device_quota`).
+        Errors: `400 nonce_required`, `422 invalid_item`, `401 stale_timestamp`, `404 binding_unknown`,
+        `429 global`, `429 device_quota`.
       security:
         - bindingKeySignature: []
       parameters:
         - $ref: "#/components/parameters/HL-Token"
         - $ref: "#/components/parameters/HL-Binding-Key"
         - $ref: "#/components/parameters/HL-Iat"
-        - $ref: "#/components/parameters/HL-Nonce-Optional"
+        - $ref: "#/components/parameters/HL-Nonce"
       responses:
         "200":
           description: What the relay holds about the binding.
@@ -268,6 +305,7 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/SelfReadResponse" }
+        "400": { $ref: "#/components/responses/NonceRequired" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
         "422": { $ref: "#/components/responses/Invalid" }
@@ -296,8 +334,10 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/PushResponse" }
+        "400": { $ref: "#/components/responses/NonceRequired" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
+        "411": { $ref: "#/components/responses/LengthRequired" }
         "413": { $ref: "#/components/responses/TooLarge" }
         "422": { $ref: "#/components/responses/Invalid" }
         "426": { $ref: "#/components/responses/UpgradeRequired" }
@@ -309,8 +349,10 @@ paths:
       operationId: reportReceipts
       summary: Report device-confirmed deliveries (counts only)
       description: |
-        At most once per instance per 50 minutes. Counts are summed across instances in memory and feed
-        the `delivery` field of `/healthz`.
+        At most once per instance per 45 minutes (servers report every 55). Only `standard` instances count;
+        a report of another tier is answered `204` and ignored. The reported `accepted` is capped at what the
+        relay accepted for that instance in the last three days (today and the two days before). Counts are
+        summed across instances in memory and feed the display-only `delivery` field of `/healthz`.
         Errors besides request signing: `422 invalid_item`, `429 instance_rate`.
       parameters:
         - $ref: "#/components/parameters/HL-Client"
@@ -321,8 +363,10 @@ paths:
             schema: { $ref: "#/components/schemas/ReceiptsBody" }
       responses:
         "204": { $ref: "#/components/responses/NoContent" }
+        "400": { $ref: "#/components/responses/NonceRequired" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
+        "411": { $ref: "#/components/responses/LengthRequired" }
         "413": { $ref: "#/components/responses/TooLarge" }
         "422": { $ref: "#/components/responses/Invalid" }
         "426": { $ref: "#/components/responses/UpgradeRequired" }
@@ -342,6 +386,7 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/StatusResponse" }
+        "400": { $ref: "#/components/responses/NonceRequired" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "413": { $ref: "#/components/responses/TooLarge" }
@@ -353,7 +398,14 @@ paths:
       tags: [public]
       operationId: getHealth
       summary: Coarse public health
+      description: |
+        `status` depends only on the relay's own facts: `down` without a usable provider token or after
+        Apple rejected a renewed one, `degraded` when the store is not writable, otherwise `ok`. The HTTP
+        code follows it. `breaker` and `delivery` are display only. `HL-Nonce` is optional; without it the
+        response signature is bound to `-`.
       security: []
+      parameters:
+        - $ref: "#/components/parameters/HL-Nonce-Optional"
       responses:
         "200":
           description: "`status` is `ok`."
@@ -373,6 +425,8 @@ paths:
       operationId: getVersion
       summary: Build version, commit and image digest
       security: []
+      parameters:
+        - $ref: "#/components/parameters/HL-Nonce-Optional"
       responses:
         "200":
           description: Version.
@@ -432,7 +486,7 @@ components:
       type: apiKey
       in: header
       name: HL-Nonce
-      description: 16 random bytes, unpadded base64url (22 characters), used once per instance.
+      description: 16 random bytes from a CSPRNG, unpadded base64url (22 characters), used once per instance. Mandatory on every `/v1` request (`400 nonce_required`).
     instanceSignature:
       type: apiKey
       in: header
@@ -440,8 +494,10 @@ components:
       description: |
         Ed25519 signature of the instance key over the `hl-relay-v1` text: host, `HL-Instance`, method,
         path with query as sent, `HL-Timestamp`, `HL-Nonce` and the hex SHA-256 of the body, joined by line
-        feeds. The four instance headers are required together. Check order: body size, known instance,
-        time window, bad-signature budget, signature, tier, request rate, nonce, minimum client version.
+        feeds. The four instance headers are required together. Check order: nonce present and declared
+        body length (before any endpoint), known instance and time window from the headers, body size,
+        body, signature, tier, request rate, nonce replay, minimum client version. The signature is always
+        verified; failed attempts never cause a valid request to be refused.
     bindingKeySignature:
       type: apiKey
       in: header
@@ -453,12 +509,14 @@ components:
   headers:
     HL-Relay-Signature:
       description: |
-        Ed25519 signature of the relay identity key over `hl-relay-resp-v1`: host, the request's
-        `HL-Nonce` (or `-`), the status code and the hex SHA-256 of the body.
+        Ed25519 signature of the relay identity key over `hl-relay-resp-v2`: host, request method, raw
+        request path with query, the request's `HL-Nonce` (`-` only for `/healthz` and `/version` without a
+        nonce, the `400 nonce_required` refusal and the router's `404`), the status code and the hex
+        SHA-256 of the body.
       required: true
       schema: { $ref: "#/components/schemas/Signature" }
     Retry-After:
-      description: Seconds until a retry can succeed, spread by plus or minus 30 %. Sent on request-level refusals that carry `retryAfter`.
+      description: Seconds until a retry can succeed, spread by plus or minus 30 %. Sent on request-level refusals that carry `retryAfter`. Not signed; HealthLog clients ignore it and use the body's `retryAfter`.
       schema: { type: integer, minimum: 1 }
   parameters:
     HL-Client:
@@ -472,11 +530,20 @@ components:
         type: string
         pattern: '^[a-z0-9-]{1,32}/\d{1,4}\.\d{1,4}\.\d{1,6}$'
         examples: ["healthlog/1.49.0"]
+    HL-Nonce:
+      name: HL-Nonce
+      in: header
+      required: true
+      description: |
+        16 random bytes from a CSPRNG, unpadded base64url, fresh for every request. Mandatory on every
+        `/v1` request (`400 nonce_required`); bound into the response signature. On registration and the
+        app endpoints it is not recorded for replay detection.
+      schema: { $ref: "#/components/schemas/Nonce" }
     HL-Nonce-Optional:
       name: HL-Nonce
       in: header
       required: false
-      description: Optional on app calls. When well formed it is bound into the response signature; it is neither checked nor recorded.
+      description: Optional on `/healthz` and `/version`. When well formed it is bound into the response signature; otherwise the signature is bound to `-`.
       schema: { $ref: "#/components/schemas/Nonce" }
     HL-Token:
       name: HL-Token
@@ -520,14 +587,26 @@ components:
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
+    NonceRequired:
+      description: "`nonce_required`: the `/v1` request carried no valid `HL-Nonce`. Signed with nonce `-`."
+      headers: { HL-Relay-Signature: { $ref: "#/components/headers/HL-Relay-Signature" } }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    LengthRequired:
+      description: "`length_required`: a `POST` or `DELETE` without a declared `Content-Length`."
+      headers: { HL-Relay-Signature: { $ref: "#/components/headers/HL-Relay-Signature" } }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
     Conflict:
-      description: "`key_in_use`, or `binding_conflict` with `reason` `challenge_sent` or `challenge_quota`."
+      description: "`key_in_use`, or `binding_conflict` with `reason` `challenge_sent`, `challenge_quota` or `challenge_unsent` (with `retryAfter`)."
       headers: { HL-Relay-Signature: { $ref: "#/components/headers/HL-Relay-Signature" } }
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
     TooLarge:
-      description: "`too_large` (body over the limit) or `too_many_items` (more than 50 push items)."
+      description: "`too_large` (declared or actual body over the limit) or `too_many_items` (more than 50 push items)."
       headers: { HL-Relay-Signature: { $ref: "#/components/headers/HL-Relay-Signature" } }
       content:
         application/json:
@@ -545,7 +624,7 @@ components:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
     TooMany:
-      description: "`instance_rate`, `binding_quota` or `global`, with `scope` and `retryAfter`; `limits` on the request-rate refusal and on `binding_quota`."
+      description: "`instance_rate`, `binding_quota`, `device_quota` (verified app calls per device token) or `global` (failed app calls), with `scope` and `retryAfter`; `limits` on the request-rate refusal and on `binding_quota`."
       headers:
         HL-Relay-Signature: { $ref: "#/components/headers/HL-Relay-Signature" }
         Retry-After: { $ref: "#/components/headers/Retry-After" }
@@ -642,7 +721,7 @@ components:
         pushesPerMinute: { type: integer, format: int64 }
         invalidTokensPerDay: { type: integer, format: int64 }
         challengesPerDay: { type: integer, format: int64 }
-        badSignatureBurst: { type: integer, format: int64, description: Failed signatures before refusal; refills within one minute. }
+        badSignatureBurst: { type: integer, format: int64, description: "Failed signatures counted in metrics before counting pauses; refills within one minute. Never refuses a request." }
     Statement:
       description: The `hl-bind-v1` device statement.
       type: object
@@ -728,7 +807,7 @@ components:
         env: { $ref: "#/components/schemas/Env" }
         boundDay: { $ref: "#/components/schemas/Day" }
         lastUsedWeekOf:
-          description: First day of the week of the last use; weeks are blocks of seven UTC days from the Unix epoch.
+          description: First day (a Monday) of the week of the last use; weeks run Monday to Sunday, UTC.
           allOf: [{ $ref: "#/components/schemas/Day" }]
         consentVersion: { type: string }
         consentDay: { type: string }
@@ -929,18 +1008,18 @@ components:
       properties:
         error:
           type: string
-          enum: [not_found, too_large, too_many_items, invalid_item, env_unsupported, unknown_instance, stale_timestamp, bad_signature, replayed, instance_revoked, instance_suspended, invite_required, binding_refused, challenge_refused, binding_unknown, key_in_use, binding_conflict, min_server_version, instance_rate, binding_quota, global, overloaded, storage_unavailable, registration_paused, maintenance, relay_misconfigured, apns_unavailable, internal]
+          enum: [not_found, nonce_required, length_required, too_large, too_many_items, invalid_item, env_unsupported, unknown_instance, stale_timestamp, bad_signature, replayed, instance_revoked, instance_suspended, invite_required, binding_refused, challenge_refused, binding_unknown, key_in_use, binding_conflict, min_server_version, instance_rate, binding_quota, device_quota, global, overloaded, storage_unavailable, registration_paused, maintenance, relay_misconfigured, apns_unavailable, internal]
         scope:
           type: string
           enum: [device, instance, tier, global]
         retryAfter:
-          description: Seconds, spread by plus or minus 30 %; also sent as `Retry-After`.
+          description: Seconds, spread by plus or minus 30 %; also sent as the unsigned `Retry-After` header, which clients ignore. Clients cap it at 86400.
           type: integer
           minimum: 1
         relayTime:
           description: Relay clock, on `stale_timestamp`.
           allOf: [{ $ref: "#/components/schemas/UnixTime" }]
         reason:
-          description: Suspension reason (`abuse`, `spam`, `invalid_tokens`, `harassment`, `legal`, `compromised`, `terms`, `operator_request`) or conflict outcome (`challenge_sent`, `challenge_quota`).
+          description: Suspension reason (`abuse`, `spam`, `invalid_tokens`, `harassment`, `legal`, `compromised`, `terms`, `operator_request`) or conflict outcome (`challenge_sent`, `challenge_quota`, `challenge_unsent`).
           type: string
         limits: { $ref: "#/components/schemas/TierLimits" }

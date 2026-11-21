@@ -83,14 +83,44 @@ func TestResponseSignatureBindsNonce(t *testing.T) {
 	nonce := randNonce()
 	rp := i.doRaw(http.MethodGet, "/v1/status", nil, h.clk.Now().Unix(), nonce, nil)
 	sig, _ := wire.ParseSignature(rp.Header.Get("HL-Relay-Signature"))
-	if wire.Verify(h.relayP, wire.ResponseText(host, randNonce(), rp.Status, rp.Raw), sig) {
-		t.Fatal("signature verifies for a different nonce")
+	ok := func(method, path, n string, status int, hst string) bool {
+		return wire.Verify(h.relayP, wire.ResponseText(hst, method, path, n, status, rp.Raw), sig)
 	}
-	if wire.Verify(h.relayP, wire.ResponseText(host, nonce, 410, rp.Raw), sig) {
-		t.Fatal("signature verifies for a different status")
+	if !ok("GET", "/v1/status", nonce, rp.Status, host) {
+		t.Fatal("genuine response does not verify")
 	}
-	if wire.Verify(h.relayP, wire.ResponseText("other.example.org", nonce, rp.Status, rp.Raw), sig) {
-		t.Fatal("signature verifies for a different host")
+	for name, bad := range map[string]bool{
+		"other nonce":  ok("GET", "/v1/status", randNonce(), rp.Status, host),
+		"no nonce":     ok("GET", "/v1/status", "-", rp.Status, host),
+		"other status": ok("GET", "/v1/status", nonce, 410, host),
+		"other host":   ok("GET", "/v1/status", nonce, rp.Status, "other.example.org"),
+		"other method": ok("POST", "/v1/status", nonce, rp.Status, host),
+		"other path":   ok("GET", "/v1/push", nonce, rp.Status, host),
+	} {
+		if bad {
+			t.Errorf("signature verifies for %s", name)
+		}
+	}
+}
+
+// TestNonceMandatoryOnV1 (M4): every /v1 request needs a nonce, including registration and the app-direct
+// endpoints; the refusal itself is bound to "-" and is never a valid answer to anything.
+func TestNonceMandatoryOnV1(t *testing.T) {
+	h := newHarness(t)
+	for _, c := range []struct{ method, path string }{
+		{http.MethodPost, "/v1/instances"}, {http.MethodDelete, "/v1/bindings/self"}, {http.MethodGet, "/v1/bindings/self"},
+		{http.MethodPost, "/v1/bindings/challenge"}, {http.MethodGet, "/v1/status"},
+	} {
+		req, _ := http.NewRequest(c.method, h.srv.URL+c.path, strings.NewReader("{}"))
+		req.Header.Set("HL-Nonce", "not-a-nonce")
+		resp, err := h.client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("%s %s without a valid nonce: %d", c.method, c.path, resp.StatusCode)
+		}
 	}
 }
 
@@ -138,24 +168,36 @@ func TestNonceReplayAndTimeWindow(t *testing.T) {
 	}
 }
 
-func TestUnknownInstanceAndBadSignatureBudget(t *testing.T) {
+func TestUnknownInstance(t *testing.T) {
 	h := newHarness(t)
 	i := h.register()
 	ghost := &instance{h: h, key: i.key, id: "00000000-0000-4000-8000-000000000000"}
 	if rp := ghost.do(http.MethodGet, "/v1/status", nil); rp.Status != 401 || rp.str("error") != "unknown_instance" {
 		t.Fatalf("unknown: %d %s", rp.Status, rp.Raw)
 	}
+}
+
+// TestForgedSignaturesCannotLockOutAnInstance (H1, ported from the pre-launch review): the instance id is
+// not secret, so failed signatures by a third party must never refuse a correctly signed request.
+func TestForgedSignaturesCannotLockOutAnInstance(t *testing.T) {
+	h := newHarness(t, withDefaultLimits)
+	victim := h.register()
 	_, other, _ := ed25519.GenerateKey(rand.Reader)
-	forger := &instance{h: h, key: other, id: i.id}
-	var last response
-	for range 40 {
-		last = forger.do(http.MethodGet, "/v1/status", nil)
-		if last.Status == 429 {
-			break
+	forger := &instance{h: h, key: other, id: victim.id}
+	for range 100 {
+		if rp := forger.do(http.MethodGet, "/v1/status", nil); rp.Status != 401 {
+			t.Fatalf("forged request: %d %s", rp.Status, rp.Raw)
 		}
 	}
-	if last.Status != 429 || last.str("error") != "instance_rate" {
-		t.Fatalf("bad signature budget not enforced: %d", last.Status)
+	if rp := victim.do(http.MethodGet, "/v1/status", nil); rp.Status != 200 {
+		t.Fatalf("valid request after 100 forged ones: %d %s", rp.Status, rp.Raw)
+	}
+	for range 15 {
+		h.clk.Add(2 * time.Second)
+		forger.do(http.MethodGet, "/v1/status", nil)
+		if rp := victim.do(http.MethodGet, "/v1/status", nil); rp.Status != 200 {
+			t.Fatalf("victim refused while the forger keeps going: %d", rp.Status)
+		}
 	}
 }
 
@@ -385,8 +427,9 @@ func TestUnregisteredIsTheOnlyFinalDeletion(t *testing.T) {
 	if res := i.push1(alertItem("s1", soft)); res.Status != 200 || res.Result != "soft_invalid" {
 		t.Fatalf("soft: %+v", res)
 	}
-	if res := i.push1(alertItem("s2", soft)); res.Result != "soft_invalid" || h.state(soft) != store.StateSoftInvalid {
-		t.Fatalf("second soft hit on the same day deleted or changed: %+v %s", res, h.state(soft))
+	// A soft-invalid binding gets no further push on the day it failed (K1), and nothing is deleted.
+	if res := i.push1(alertItem("s2", soft)); res.Status != 429 || res.Error != "binding_quota" || h.state(soft) != store.StateSoftInvalid {
+		t.Fatalf("second push on the same day: %+v %s", res, h.state(soft))
 	}
 	if res := i.push1(alertItem("f", flaky)); res.Status != 503 || res.Error != "apns_unavailable" {
 		t.Fatalf("5xx: %+v", res)
@@ -438,11 +481,13 @@ func TestBreakerProtectsBindings(t *testing.T) {
 	if rp, _ := insts[0].push(alertItem("while-open", devs[0])); rp.Status != 503 || rp.str("error") != "relay_misconfigured" {
 		t.Fatalf("open breaker answer: %d %s", rp.Status, rp.Raw)
 	}
-	if hz, _ := h.r.Health(); hz.Status != "degraded" || hz.Breaker != BreakerOpen {
+	// The breaker is shown, but it never turns the health status or the deploy gate (M1).
+	if hz, ok := h.r.Health(); hz.Status != "ok" || !ok || hz.Breaker != BreakerOpen {
 		t.Fatalf("health: %+v", hz)
 	}
-	// Cool-down, then Apple accepts again: half-open, then closed.
-	h.clk.Add(11 * time.Minute)
+	// Cool-down (a day, so the bindings marked before it opened may take their daily probe), then Apple
+	// accepts again: half-open, then closed.
+	h.clk.Add(24 * time.Hour)
 	h.apns.setAnswer(func(string, apnsReq) (int, string) { return 200, "" })
 	for k, d := range devs[:25] {
 		insts[k%3].push1(alertItem("h"+strconv.Itoa(k), d))
@@ -843,23 +888,50 @@ func TestAppleDeviceThrottle(t *testing.T) {
 	}
 }
 
+// TestReceiptsDriveDeliveryHealth: receipts feed the delivery signal, but only from standard instances, never
+// above what the relay itself accepted for them, and never into the health status (M1).
 func TestReceiptsDriveDeliveryHealth(t *testing.T) {
 	h := newHarness(t)
-	i := h.register()
-	if rp := i.do(http.MethodPost, "/v1/receipts", wire.ReceiptsBody{Accepted: 100, Confirmed: 40}); rp.Status != 204 {
+	fresh := h.register() // probation: ignored
+	if rp := fresh.do(http.MethodPost, "/v1/receipts", wire.ReceiptsBody{Accepted: 100000, Confirmed: 0}); rp.Status != 204 {
 		t.Fatal(rp.Status)
 	}
-	if hz, _ := h.r.Health(); hz.Delivery != "unknown" || hz.Status != "ok" {
-		t.Fatalf("a single instance turned the health red: %+v", hz)
+	if hz, _ := h.r.Health(); hz.Delivery != "unknown" {
+		t.Fatalf("a probation instance moved the delivery signal: %+v", hz)
 	}
-	for range 2 {
-		h.register().do(http.MethodPost, "/v1/receipts", wire.ReceiptsBody{Accepted: 10, Confirmed: 4})
+	_, _ = h.r.SetRecovery(99999, nil) // registrations start as standard
+	var std []*instance
+	for n := range 3 {
+		in := h.register()
+		for k := range 8 {
+			in.activate(newDevice(byte(0x40 + n*8 + k)))
+		}
+		std = append(std, in)
 	}
-	if hz, _ := h.r.Health(); hz.Delivery != "degraded" || hz.Status != "degraded" {
+	for _, in := range std {
+		if rp := in.do(http.MethodPost, "/v1/receipts", wire.ReceiptsBody{Accepted: 100000, Confirmed: 4}); rp.Status != 204 {
+			t.Fatal(rp.Status)
+		}
+	}
+	hz, ok := h.r.Health()
+	if hz.Delivery != "degraded" || hz.Status != "ok" || !ok {
 		t.Fatalf("health: %+v", hz)
 	}
-	if rp := i.do(http.MethodPost, "/v1/receipts", wire.ReceiptsBody{Accepted: 1, Confirmed: 1}); rp.Status != 429 {
-		t.Fatal("receipts more than once per hour")
+	h.r.mu.Lock()
+	var acc int64
+	for _, s := range h.r.receipts {
+		acc += s.accepted
+	}
+	h.r.mu.Unlock()
+	if acc != 24 {
+		t.Fatalf("reported accepted not capped by the relay's own count: %d", acc)
+	}
+	if rp := std[0].do(http.MethodPost, "/v1/receipts", wire.ReceiptsBody{Accepted: 1, Confirmed: 1}); rp.Status != 429 {
+		t.Fatal("receipts more often than every 45 minutes")
+	}
+	h.clk.Add(46 * time.Minute)
+	if rp := std[0].do(http.MethodPost, "/v1/receipts", wire.ReceiptsBody{Accepted: 1, Confirmed: 1}); rp.Status != 204 {
+		t.Fatal("receipts after 46 minutes refused")
 	}
 }
 

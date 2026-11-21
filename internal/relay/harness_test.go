@@ -193,9 +193,14 @@ type response struct {
 
 func (rp response) str(k string) string { s, _ := rp.Body[k].(string); return s }
 
-// send performs a request and verifies the response signature against the relay identity key and nonce.
+// send performs a request and verifies the response signature against the relay identity key, the method,
+// the path and the nonce. A /v1 request without a nonce gets a fresh one, as every client must send.
 func (h *harness) send(req *http.Request, nonce string) response {
 	h.t.Helper()
+	if nonce == "" && strings.HasPrefix(req.URL.Path, "/v1/") && req.Header.Get("HL-Nonce") == "" {
+		nonce = randNonce()
+		req.Header.Set("HL-Nonce", nonce)
+	}
 	resp, err := h.client.Do(req)
 	if err != nil {
 		h.t.Fatal(err)
@@ -206,7 +211,7 @@ func (h *harness) send(req *http.Request, nonce string) response {
 		nonce = "-"
 	}
 	sig, err := wire.ParseSignature(resp.Header.Get("HL-Relay-Signature"))
-	if err != nil || !wire.Verify(h.relayP, wire.ResponseText(host, nonce, resp.StatusCode, raw), sig) {
+	if err != nil || !wire.Verify(h.relayP, wire.ResponseText(host, req.Method, req.URL.RequestURI(), nonce, resp.StatusCode, raw), sig) {
 		h.t.Fatalf("%s %s: response signature invalid (status %d)", req.Method, req.URL.Path, resp.StatusCode)
 	}
 	out := response{Status: resp.StatusCode, Raw: raw, Header: resp.Header}

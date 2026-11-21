@@ -69,8 +69,14 @@ func TestRegistrationLimits(t *testing.T) {
 	if n != 15 {
 		t.Fatalf("halved global cap allowed %d, want 15", n)
 	}
-	if !r.Allow(netip.MustParseAddr("192.0.2.1"), t0, true) {
-		t.Fatal("recovery window must ignore the global cap")
+	n = 0
+	for k := range 400 {
+		if r.Allow(netip.AddrFrom4([4]byte{192, 0, byte(k / 256), byte(k)}), t0, true) {
+			n++
+		}
+	}
+	if n != 30*RecoveryFactor-15 {
+		t.Fatalf("recovery window allowed %d more, want a raised but finite cap", n)
 	}
 }
 
