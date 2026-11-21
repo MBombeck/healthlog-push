@@ -926,7 +926,7 @@ no field for a raw device token, an address, or a push class per instance.
 | instance | instance id | Ed25519 public key, tier, suspension reason, creation day, last contact week, device limit, first delivery day, last rotation day, quiet-since day, last delivery day, client version string |
 | instance key index | hex public key | instance id |
 | binding | HMAC-SHA256 of the raw token under the token MAC key | instance id, SHA-256 of the binding key, `seq`, environment, state (`provisional`, `active`, `soft_invalid`), binding day, last-used week, last success day, soft-invalid day, consent text version, consent day, alerts today and their day |
-| blocked pair | token MAC and instance id | day of the opt-out |
+| blocked pair | SHA-256("hl-blocked-pair\n" ‖ token MAC ‖ "\n" ‖ instance id) | day of the opt-out |
 | blocked token | token MAC | day of the block |
 | denylist | instance id | reason (closed set), day |
 | instance day counters | day and instance id | pushes accepted, invalid tokens, rebinds; no class |
@@ -943,8 +943,11 @@ binding whose MAC matches no configured key can no longer be found and does not 
 **Store failures.** When a write fails the store is treated as read-only: the push path keeps working from
 memory, new bindings and registrations are refused with `503 storage_unavailable`, and `/healthz` reports
 `db_writable: false`. A consistency check runs at start and daily. A damaged file is moved aside and the
-relay starts empty, imports the instances and the denylist from its daily registry export and opens a
-recovery window of 14 days. Bindings are not exported; devices bind again through the normal binding path.
+relay starts empty, imports the instances, the denylist and the device opt-out blocks from its daily
+registry export and opens a recovery window of 14 days. Each exported block is `{pair, reason, expiresDay}`
+with `pair` the hex pair hash above and `reason` always `device_opt_out`; blocks past their expiry are
+neither exported nor imported. Bindings and operator token blocks are not exported; devices bind again
+through the normal binding path.
 
 ## Retention
 

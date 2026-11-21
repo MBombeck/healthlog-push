@@ -5,6 +5,7 @@
 package store
 
 import (
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -312,8 +313,15 @@ func (s *Store) Bindings() (map[string]*Binding, error) {
 	return out, err
 }
 
+// pairKey is the stored form of a device-instance pair: SHA-256 over a label, the token MAC (itself keyed
+// with the relay's token MAC key) and the instance id. It is the only form in which a pair is kept or
+// exported; neither the token nor its MAC can be read back from it.
 func pairKey(mac []byte, instanceID string) []byte {
-	return append(append([]byte(nil), mac...), instanceID...)
+	h := sha256.New()
+	h.Write([]byte("hl-blocked-pair\n"))
+	h.Write(mac)
+	h.Write([]byte("\n" + instanceID))
+	return h.Sum(nil)
 }
 
 // BlockPair records that the device opted out of this instance.

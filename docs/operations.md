@@ -229,7 +229,9 @@ export ([Restore](#restore)).
 
 ### export
 
-Writes `/export/registry.json` now: instances and the denylist, no bindings, no counters, no secrets. The
+Writes `/export/registry.json` now: instances, the denylist and the device opt-out blocks (keyed pair hash,
+reason `device_opt_out`, expiry day; blocks past 365 days are left out), no bindings, no counters, no
+secrets. The
 relay also writes it at start and at every UTC day change.
 
 ```sh
@@ -487,7 +489,10 @@ Only `/export/registry.json` is backed up. The database, the certificate cache a
 
 Device bindings are not restored. The first push for a device answers `404 binding_unknown`; the instance
 submits its stored device statement again, or gets a fresh one from the app. Bindings come back over a few
-hours. Opt-out blocks and token blocks live only in the database and are not restored either.
+hours. Device opt-out blocks are restored from the export, so a server a device opted out of stays blocked;
+the restore must use the same token MAC keys (current and previous) from the secret store, because the pair
+hash is built from the token MAC. Operator token blocks (`block-token`) are not exported; set them again
+from the abuse records after a restore.
 
 Test a restore regularly: start a relay with an empty `/data` and a copy of the export on a test host, and
 check that `admin stats` shows the imported instances.

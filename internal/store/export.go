@@ -1,10 +1,16 @@
 package store
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"strconv"
+
 	"errors"
 	"os"
 	"path/filepath"
+
+	bolt "go.etcd.io/bbolt"
 )
 
 // ExportFormat identifies the registry export file.
@@ -17,6 +23,19 @@ type Export struct {
 	Day       string         `json:"day"`
 	Instances []ExportedInst `json:"instances"`
 	Denylist  []*DenyEntry   `json:"denylist"`
+	// BlockedPairs are the device opt-outs ("stop pushes from this server"). They must survive a restore,
+	// so they travel in the export in their minimal form only.
+	BlockedPairs []ExportedBlock `json:"blockedPairs"`
+}
+
+// ReasonDeviceOptOut is the reason code of a pair blocked by the device itself.
+const ReasonDeviceOptOut = "device_opt_out"
+
+// ExportedBlock is a blocked device-instance pair: the keyed pair hash, the reason code and the expiry day.
+type ExportedBlock struct {
+	Pair       string `json:"pair"`       // hex of the stored pair hash
+	Reason     string `json:"reason"`     // ReasonDeviceOptOut
+	ExpiresDay string `json:"expiresDay"` // YYYY-MM-DD; the block is dropped after this day
 }
 
 // ExportedInst is the exported subset of an instance.
@@ -43,6 +62,20 @@ func (s *Store) BuildExport(today int) (*Export, error) {
 	ex := &Export{Format: ExportFormat, Day: DayString(today), Instances: []ExportedInst{}, Denylist: deny}
 	if ex.Denylist == nil {
 		ex.Denylist = []*DenyEntry{}
+	}
+	ex.BlockedPairs = []ExportedBlock{}
+	err = s.db.View(func(tx *bolt.Tx) error {
+		return tx.Bucket(bBlockedPairs).ForEach(func(k, v []byte) error {
+			d, _ := strconv.Atoi(string(v))
+			if today-d > RetainBlocks { // expired blocks never leave the database
+				return nil
+			}
+			ex.BlockedPairs = append(ex.BlockedPairs, ExportedBlock{Pair: hex.EncodeToString(k), Reason: ReasonDeviceOptOut, ExpiresDay: DayString(d + RetainBlocks)})
+			return nil
+		})
+	})
+	if err != nil {
+		return nil, err
 	}
 	for _, in := range ins {
 		ex.Instances = append(ex.Instances, ExportedInst{
@@ -122,7 +155,22 @@ func (s *Store) Import(ex *Export, today int) (int, error) {
 		n++
 	}
 	for _, d := range ex.Denylist {
+		if today-d.Day > RetainBlocks {
+			continue
+		}
 		if err := s.PutDeny(d); err != nil {
+			return n, err
+		}
+	}
+	for _, b := range ex.BlockedPairs {
+		k, err := hex.DecodeString(b.Pair)
+		exp, derr := ParseDayString(b.ExpiresDay)
+		if err != nil || len(k) != sha256.Size || derr != nil || b.Reason != ReasonDeviceOptOut || exp < today {
+			continue
+		}
+		if err := s.db.Update(func(tx *bolt.Tx) error {
+			return tx.Bucket(bBlockedPairs).Put(k, []byte(strconv.Itoa(exp-RetainBlocks)))
+		}); err != nil {
 			return n, err
 		}
 	}

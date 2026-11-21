@@ -14,7 +14,7 @@ Prometheus text output, which is written by hand in `internal/metrics`.
 
 | Module | Version | Used by | Why |
 |---|---|---|---|
-| `go.etcd.io/bbolt` | v1.5.0 | `internal/store` | Storage. One process, a few thousand records, transactions and a built-in consistency check, in pure Go with no cgo. SQLite was rejected because its pure-Go port is a large tree of C code translated to Go; a separate database server is more moving parts than the relay itself. Maintained by the etcd project. |
+| `go.etcd.io/bbolt` | v1.5.0 | `internal/store` | Storage. One process, a few thousand records, transactions and a built-in consistency check, in pure Go with no cgo. SQLite was considered and rejected: the cgo driver brings a C toolchain into a static distroless build, and the pure-Go port is a large tree of C code translated to Go, so either way the dependency would dwarf the relay; a separate database server is more moving parts than the relay itself. Maintained by the etcd project. |
 | `golang.org/x/crypto` | v0.59.0 | `cmd/healthlog-push` | Only the packages `acme` and `acme/autocert`: certificates from Let's Encrypt over TLS-ALPN-01 on port 443, so the relay needs no port 80 and no separate ACME client. Maintained by the Go team. The relay code imports no cryptographic primitive from this module; a structural test refuses its `chacha20poly1305`, `curve25519` and `hkdf` packages. |
 
 ### Indirect

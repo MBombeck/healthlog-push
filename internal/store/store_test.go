@@ -93,3 +93,30 @@ func TestWeeksStartOnMonday(t *testing.T) {
 		t.Fatal("week boundaries")
 	}
 }
+
+// TestExportBlocksRetention: only unexpired pair blocks are exported, and an import drops expired ones too.
+func TestExportBlocksRetention(t *testing.T) {
+	s := open(t)
+	today := 20000
+	_ = s.BlockPair([]byte("old-mac"), "i", today-366)
+	_ = s.BlockPair([]byte("new-mac"), "i", today-10)
+	ex, err := s.BuildExport(today)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ex.BlockedPairs) != 1 || ex.BlockedPairs[0].ExpiresDay != DayString(today-10+RetainBlocks) {
+		t.Fatalf("export: %+v", ex.BlockedPairs)
+	}
+	ex.BlockedPairs = append(ex.BlockedPairs, ExportedBlock{Pair: ex.BlockedPairs[0].Pair[:62] + "00", Reason: ReasonDeviceOptOut, ExpiresDay: DayString(today - 1)})
+	s2 := open(t)
+	if _, err := s2.Import(ex, today); err != nil {
+		t.Fatal(err)
+	}
+	if !s2.PairBlocked([]byte("new-mac"), "i") {
+		t.Fatal("block lost on import")
+	}
+	ex2, _ := s2.BuildExport(today)
+	if len(ex2.BlockedPairs) != 1 {
+		t.Fatalf("expired block imported: %d", len(ex2.BlockedPairs))
+	}
+}

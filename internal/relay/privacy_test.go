@@ -285,3 +285,42 @@ func TestRevokedRecordsExpireWithTheDenylist(t *testing.T) {
 		t.Fatal("revoked record kept beyond 12 months")
 	}
 }
+
+// TestOptOutSurvivesRestore: a device opt-out ("stop pushes from this server") travels in the export and is
+// still in force on a relay rebuilt from it. Losing it would silently reopen the channel for a hostile
+// instance operator.
+func TestOptOutSurvivesRestore(t *testing.T) {
+	old := newHarness(t)
+	hostile, other := old.register(), old.register()
+	d := newDevice(0x62)
+	hostile.activate(d)
+	if rp := old.unbindSelf(d, d.key, hostile.id); rp.Status != 204 {
+		t.Fatal(rp.Status)
+	}
+	if err := old.r.ExportNow(); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(filepath.Join(old.dir, "registry.json"))
+	var ex store.Export
+	_ = json.Unmarshal(raw, &ex)
+	if len(ex.BlockedPairs) != 1 || ex.BlockedPairs[0].Reason != store.ReasonDeviceOptOut || len(ex.BlockedPairs[0].Pair) != 64 {
+		t.Fatalf("export blocks: %+v", ex.BlockedPairs)
+	}
+	for _, f := range []string{d.hex(), hex.EncodeToString([]byte(mac(old.r.cfg.MACKeys[0], d.token)))} {
+		if bytes.Contains(raw, []byte(f)) {
+			t.Fatal("export leaks the token or its MAC")
+		}
+	}
+	restored := newHarness(t, func(c *Config) { c.MACKeys = old.r.cfg.MACKeys })
+	if _, err := restored.r.SetRecovery(store.Day(restored.clk.Now())+14, &ex); err != nil {
+		t.Fatal(err)
+	}
+	h2 := &instance{h: restored, key: hostile.key, id: hostile.id}
+	if rp := h2.bind(d); rp.Status != 403 || rp.str("error") != "binding_refused" {
+		t.Fatalf("opt-out lost on restore: %d %s", rp.Status, rp.Raw)
+	}
+	o2 := &instance{h: restored, key: other.key, id: other.id}
+	if rp := o2.bind(d); rp.Status != 201 {
+		t.Fatalf("another instance after restore: %d %s", rp.Status, rp.Raw)
+	}
+}

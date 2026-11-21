@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/MBombeck/healthlog-push/internal/store"
 )
@@ -19,7 +20,9 @@ func TestDamagedStoreRecovers(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = st.PutInstance(&store.Instance{ID: "6f1c2a4e-1b9d-4c3e-8a7f-0d2b5e9c1a37", PublicKey: bytes.Repeat([]byte{1}, 32), Tier: store.TierStandard})
-	ex, _ := st.BuildExport(20000)
+	today := store.Day(time.Now())
+	_ = st.BlockPair([]byte("token-mac"), "6f1c2a4e-1b9d-4c3e-8a7f-0d2b5e9c1a37", today)
+	ex, _ := st.BuildExport(today)
 	_ = st.Close()
 	if err := store.WriteExport(export, ex); err != nil {
 		t.Fatal(err)
@@ -33,6 +36,9 @@ func TestDamagedStoreRecovers(t *testing.T) {
 	}
 	defer func() { _ = got.Close() }()
 	ins, _ := got.Instances()
+	if !got.PairBlocked([]byte("token-mac"), "6f1c2a4e-1b9d-4c3e-8a7f-0d2b5e9c1a37") {
+		t.Fatal("device opt-out lost when the damaged database was rebuilt from the export")
+	}
 	if !recovered || len(ins) != 1 {
 		t.Fatalf("recovered=%v instances=%d", recovered, len(ins))
 	}

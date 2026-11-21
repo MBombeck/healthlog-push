@@ -74,8 +74,9 @@ All times in the relay's database are day or week numbers (UTC), never a time of
   Deleted when you opt out, when your server removes it, when your server unregisters or is revoked, when
   Apple reports the token as no longer valid, when the binding has had no notification for about 90 days
   (13 weeks), or when it is still provisional more than two days after it was created.
-- Opt-out block: after you opt out directly, the pair of your token HMAC and that server's instance id, with
-  the day. Kept for 365 days, so that this server cannot bind your device again.
+- Opt-out block: after you opt out directly, a keyed hash of the pair of your device token and that
+  server's instance id, with the day. Kept for 365 days, so that this server cannot bind your device again.
+  Neither your token nor its HMAC can be read back from the hash.
 - Token block: an HMAC of a token the operator blocked against abuse, with the day. Kept for 365 days.
 - HealthLog server (instance): instance id, public key, tier, a suspension reason from a fixed list, the day
   of registration, the week of last contact, its device limit, the day of its first and of its last accepted
@@ -97,9 +98,12 @@ Kept in memory only, gone at the latest on restart: the device token during a re
 requests, recent push results for retries (10 minutes), per-device rate counters, the hashed address
 counters of the registration limit (reset daily) and pending conflict challenges (30 minutes).
 
-The daily backup contains only the list of registered servers and the denylist: instance id, public key,
-tier, reason, day of registration, device limit and day of first delivery. It contains no device bindings,
-no tokens or token HMACs and no counters.
+The daily backup contains only the list of registered servers, the denylist and the opt-out blocks:
+instance id, public key, tier, reason, day of registration, device limit and day of first delivery; for each
+opt-out block only the keyed pair hash, the reason code `device_opt_out` and the expiry day. Blocks older
+than 365 days are not exported. The backup contains no device bindings, no tokens or token HMACs and no
+counters. Opt-outs are in the backup so that a restore can never silently let a server you left reach your
+device again.
 
 
 ## 6. Usage figures
