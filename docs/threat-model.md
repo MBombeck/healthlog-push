@@ -1,7 +1,7 @@
 # Threat model
 
-This document describes what the relay protects, against whom, what it cannot protect, and which tests hold
-the properties in place. It describes the code in this repository. Rules that the HealthLog app and server
+This document describes what the relay protects, against whom and what it cannot protect. The tests that
+hold each property in place are listed in [SECURITY-INVARIANTS.md](../SECURITY-INVARIANTS.md). It describes the code in this repository. Rules that the HealthLog app and server
 must follow are named where the relay depends on them; they are enforced in those projects, not here.
 
 ## Assets
@@ -113,7 +113,8 @@ that time: device tokens, instance ids, envelopes (unreadable) and timing. They 
   nonce, status and body hash. `HL-Nonce` is mandatory on every `/v1` request, so a recorded answer (for
   example a `204` to an opt-out) cannot be replayed onto another request. A HealthLog server and the app treat
   a missing or wrong signature, and an answer bound to no nonce, as a transport error, and take retry hints
-  only from the signed body. `/privacy`, `/terms` and `/` are plain text and not signed;
+  only from the signed body. A non-canonical path gets a signed `404`, never an unsigned redirect.
+  `/privacy`, `/terms`, `/.well-known/security.txt` and `/` are plain text and not signed;
 - replay instance requests elsewhere: the request signature covers the host name, the instance id, method,
   path and query, time, nonce and body hash;
 - bind devices: a binding needs a statement signed by the device's binding key for that host and instance.
@@ -124,17 +125,28 @@ restricts certificate issuance to its own ACME account and to TLS-ALPN-01 with a
 ## Hostile instance operator
 
 An instance operator can push to the devices of its own users until they leave. The device leaves without
-the operator's cooperation: `DELETE /v1/bindings/self`, signed with the binding key, deletes the binding and
-blocks the pair of token HMAC and instance id for 365 days, so the instance cannot bind that token again with
-any statement it holds. Only a statement by the same binding key with a `seq` higher than that of the
-binding that left lifts the block, which is the person turning the relay on again in the app. Until then the per-device limits bound the harassment: an alert bucket of 20 that
-refills 6 per hour, at most 100 alerts per day, 300 pushes of all classes per day.
+the operator's cooperation: `DELETE /v1/bindings/self`, signed with the binding key, deletes the binding,
+blocks the pair of token HMAC and instance id for 365 days, and pins the hash of the binding key to the token
+for 365 days. The instance cannot bind that token again with any statement it holds. Only a statement by the
+same binding key with a `seq` higher than that of the binding that left, signed after the opt-out and after
+the relay start, lifts the block, which is the person turning the relay on again in the app.
 
-An instance that knows a token bound elsewhere learns nothing from the relay: pushes and unbinds for a
-token not bound to the asking instance answer exactly as for an unknown token. A different binding key for a
-live token is never resolved by last writer wins; the relay sends a challenge push to the token and only the
-app holding the new key can answer it. Without an answer, the new key wins only after the existing binding
-has had no accepted push for seven days.
+The pin closes the way around the pair block: the operator registers a second instance, makes up its own
+Ed25519 key and signs a bind statement with it. The relay cannot tell a made-up key from a device key, but
+while the token is unbound, any key other than the pinned one is a conflict that needs the challenge push,
+and only the app holding the key can answer it. Each instance can trigger at most one challenge per token and
+day. A pin restored from the export carries no key, so after a restore every new binding of the token needs
+the challenge. Until the person leaves, the per-device limits bound the harassment: an alert bucket of 20
+that refills 6 per hour, at most 100 alerts per day, 300 pushes of all classes per day.
+
+An instance that knows a token bound elsewhere learns nothing from the relay: pushes and unbinds for a token
+not bound to the asking instance answer exactly as for an unknown token, and the app-direct endpoints verify
+the signature first for every request, so the response time does not show whether a binding exists either.
+A different binding key for a live token is never resolved by last writer wins; the relay sends a challenge
+push to the token and only the app holding the new key can answer it. Without an answer, only the instance
+that holds the binding can replace it with a new key directly, and only after the binding has had no
+accepted push for seven days (a restored app whose challenge did not arrive). A former instance that kept
+the token and the old binding key can never take over a binding that went quiet.
 
 ## Mass registration and token spam
 
@@ -154,8 +166,8 @@ has had no accepted push for seven days.
   bindings still count against the invalid-token budget.
 - The operator finds such an instance with the admin command `suspects`, which lists instances with invalid
   tokens, rebinds or challenges in the last seven days, worst first.
-- Connections are capped at 2,000 in total and 50 per IPv4 address or IPv6 /64, with at most 16 HTTP/2
-  streams each; header size and timeouts are bounded. A request body must declare its length and is checked
+- Connections are capped at 2,000 in total, 8 per IPv4 address or IPv6 /64 and 64 per IPv6 /48, with at
+  most 16 HTTP/2 streams each (a HealthLog server needs one connection); header size and timeouts are bounded. A request body must declare its length and is checked
   against the endpoint limit before a byte is read; an instance request is checked for a known instance and a
   valid time stamp from the headers before its body is read; all bodies in flight together are capped at
   32 MiB (`503 overloaded` above that), and the Go heap is kept below the container limit.
@@ -184,11 +196,22 @@ app does not depend on the relay for anything else. Protections against a self-i
   burning tokens;
 - `TooManyProviderTokenUpdates` pauses sends for 20 minutes; Apple throttling of more than 2 % of sends in
   five minutes switches silent pushes off for 15 minutes;
+- the send queue always admits when it is empty, so a run of slow sends during an Apple outage cannot lock it
+  shut; the APNs warm-up (one request at a time) ends after the first attempt, whatever its outcome;
+- a provider-token rejection is forgotten once Apple accepts a newer token, so an old rejection followed much
+  later by a single new one does not stop the relay;
 - a store that cannot be written keeps the push path working from memory and refuses only new bindings and
   registrations;
 - a database with proven damage is moved aside at start (under a new name, never over an earlier copy) and
   the registry is restored from the export; any other error opening it stops the relay instead, so a held
   lock or a permission problem never costs the bindings;
+- the export is the root of trust after a database loss, so it is signed with the relay identity key
+  (`hl-relay-export-v1`). An unsigned export is never written; an edited, unsigned or foreign export, or one
+  with an instance outside the closed sets (id, key length, tier, reason, device limit), fails the whole
+  import and the relay does not start, so a change in the backup path cannot lift a suspension, drop an
+  opt-out or create a `standard` instance;
+- in a recovery window only the instances from the export keep their tier; any other key registers in
+  probation;
 - `/healthz` and the deploy gate depend only on the relay's own facts (provider token, writable store);
   third parties can move `breaker` and `delivery`, which are shown but never change the status.
 
@@ -200,13 +223,14 @@ app does not depend on the relay for anything else. Protections against a self-i
   soft failures mark theirs, before it opens; with fewer than three instances sending, it does not open at
   all. Those devices rebind through their server.
 - **A conflict challenge needs the silent push to arrive.** Apple may throttle or drop it, or the device
-  may be off. The fallback then waits seven days without an accepted push.
+  may be off. The fallback then waits seven days without an accepted push, and only the instance that
+  holds the binding may use it; a binding of an opted-out token waits for the device in every case.
 - **Time patterns stay visible** to the relay and to Apple at the moment of sending, as described above.
-- **Blocks depend on the configured MAC keys.** Opt-out and token blocks are looked up under the current and
+- **Blocks depend on the configured MAC keys.** Opt-out blocks, opt-out pins and token blocks are looked up under the current and
   the previous token MAC key, so they survive one rotation. Once the previous key is removed from the
   secrets, blocks recorded under it no longer match (bindings have moved by then; blocks are not rewritten).
 - **A restore needs the same token MAC keys.** All blocks travel in the daily export and are restored, but
-  opt-out and token blocks are hashes over the token MAC; a restore with a different MAC key would not match
+  opt-out blocks, pins and token blocks are hashes over the token MAC; a restore with a different MAC key would not match
   them. The MAC keys come from the secret store, never from the old disk.
 - **Receipt counts are self-reported.** `POST /v1/receipts` sums counts from `standard` instances, at most
   one report per 45 minutes each, and caps each reported `accepted` at what the relay itself accepted for that
@@ -215,65 +239,48 @@ app does not depend on the relay for anything else. Protections against a self-i
   display only and changes neither the `/healthz` status nor the deploy gate.
 - **A restart forgets in-memory counters.** Per-device silent and Live Activity limits and the global
   registration caps are halved until midnight to compensate; the alert bucket starts full; the nonce cache
-  is empty, which is why time stamps from before the start are refused.
+  is empty, which is why time stamps from before the start are refused. Only each binding's alert count of
+  the day and each instance's push count of the day are restored (and the instance flag, which is stored as
+  a day). The per-instance counts of new bindings and challenges of the day, the record of which token each
+  instance challenged that day, and the 24-hour block after an exceeded invalid-token budget start again
+  from zero, so each restart gives every instance these allowances afresh for the rest of the day.
+- **Apple's timestamp on a `410` is not used.** Apple reports when it learned that a token became invalid;
+  the relay deletes the binding on any `410`, even one created after that time. The device binds again
+  through its server.
+- **A panic in a send worker ends the process.** It is not recovered; the container is restarted, with the
+  restart rules above.
+- **One global lock.** All mutable relay state is guarded by one mutex; signatures are verified and bodies
+  read outside it. This keeps the invariants simple to check but bounds throughput to one handler in the
+  critical section at a time. The concurrency model is in
+  [SECURITY-INVARIANTS.md](../SECURITY-INVARIANTS.md).
 - **Failed app calls share one global bucket** of 100, refilling 20 per second. Only failed attempts are
   charged to it, so flooding it with junk refuses other failing calls (`429 global`) but never a correctly
   signed opt-out, self-read or challenge answer. Verified calls are limited per device token (10, refilling
   10 per hour).
-- **Suspended and revoked instance records expire with their denylist entry after 365 days**; after that the
-  same key could register again as a new instance in probation.
+- **Suspended and revoked instance records expire 365 days after their reason day**; after that the same key
+  could register again as a new instance in probation.
 - **The connection limiter keeps the IPv4 address or IPv6 /64 of open connections in memory** while they are
   open. Nothing writes it to disk or logs.
-- **`/privacy`, `/terms` and `/` are not signed.** The authoritative texts are also in this repository.
+- **`/privacy`, `/terms`, `/.well-known/security.txt` and `/` are not signed.** The authoritative texts are
+  also in this repository.
 - **The admin socket trusts the host.** Anyone who can run `docker compose exec` on the host is an operator.
 - **One host, one person.** See [operations.md](operations.md#absence-checklist).
 
-## Review findings and the tests that hold them
+## Properties and the tests that hold them
 
-| Finding | Property | Tests |
-|---|---|---|
-| The relay must not be able to open envelopes | no HPKE, X25519 or AEAD import anywhere; envelopes checked only by frame | `TestRelayCannotOpenEnvelopes`, `TestEnvelopeFrameChecked`, `TestVectorsEnvelopeFrame`, `FuzzCheckEnvelopeFrame` |
-| The APNs key must stay out of the networked process | ECDSA only in the signer and the CLI; signer renews on schedule and at most every 20 minutes on request | `TestECDSAOnlyInSignerAndCLI`, `TestParseKeyFromP8`, `TestJWTShape`, `TestRenewalTiming` |
-| Instances must not control visible content | payload keys exist only in the APNs templates; alert and silent templates fixed | `TestPayloadTemplatesOnlyInAPNs`, `TestTemplates`, `TestEndToEndAlert`, `TestSilentTemplateAndPriority` |
-| Addresses must not reach logs | `RemoteAddr` read only for the limiters; no forwarding headers | `TestClientAddressConfined` |
-| Logs must not carry free text | one logger, closed key set, silent HTTP server error log | `TestOnlyOneLogger`, `TestLogFieldsAreClosed`, `TestServerErrorLogIsSet` |
-| Logs, metrics and stats must not identify instances or devices | real traffic, then search for ids, tokens, MACs and addresses | `TestNothingIdentifyingReachesLogsMetricsOrStats` |
-| Small populations must not be timeable from metrics | snapshot refreshed hourly below 20 instances | `TestMetricsCoarseBelowThreshold` |
-| Usage figures must be counts of completed periods | no current day, no per-instance values | `TestUsageAggregates` |
-| Responses must be bound to the request | signature covers host, method, path with query, nonce, status and body; nonce mandatory on every `/v1` request; responses stay within 64 KiB | `TestResponseSignatureBindsNonce`, `TestNonceMandatoryOnV1`, `TestResponseSizeBounded`, `TestStatusFileSigned` |
-| Requests must not be replayable or re-targetable | signature scope, nonce cache, time window, start time | `TestRequestSignatureScope`, `TestNonceReplayAndTimeWindow`, `TestUnknownInstance` |
-| Forged signatures must not lock out an instance | the signature is always verified; the failure budget only limits counting | `TestForgedSignaturesCannotLockOutAnInstance` |
-| Unauthenticated bodies must not exhaust memory | headers checked before the body, declared length, global budget for buffered bodies | `TestHeadersCheckedBeforeBody`, `TestBufferedBodyBudget` |
-| Junk must not block a device's opt-out | app calls verified first, only failures charged globally, verified calls limited per device | `TestJunkCannotStarveOptOut`, `TestAppEndpointsLimitedPerDevice` |
-| Knowing a token must not allow binding it | device-signed statement, higher sequence for a move | `TestBindingProofOfPossession`, `TestParseBind`, `FuzzParseBind` |
-| The relay must not be an oracle for foreign bindings | uniform `404 binding_unknown` and `204` on foreign unbind | `TestUniformAnswers` |
-| Conflicts must not be last writer wins | challenge push, seven-day fallback | `TestChallengeFlow`, `TestConflictFallbackAfterSevenQuietDays` |
-| A device must be able to leave a hostile instance | direct opt-out and pair block | `TestDirectOptOut` |
-| A bad deploy must not delete every binding | only `Unregistered` is final; breaker stops deletion; fixed deletion paths | `TestUnregisteredIsTheOnlyFinalDeletion`, `TestBreakerProtectsBindings`, `TestBreakerHalfOpenDoesNotDelete`, `TestBreakerThresholds`, `TestBreakerStillOpensOnRealMisconfiguration`, `TestDeletionOnlyThroughKnownPaths` |
-| Invented tokens must not open the breaker for everybody | only established bindings count, failures from at least three instances, one probe a day for soft-invalid bindings, non-active bindings blocked over the budget | `TestInventedTokensCannotOpenTheBreaker`, `TestBreakerNeedsThreeInstances` |
-| Harassment of one device must be bounded | alert bucket, day caps, silent and Live Activity caps, persisted alert count | `TestDeviceAlertBucketAndSilentLimit`, `TestDeviceDayCapAllClasses`, `TestAlertDayCapSurvivesRestart`, `TestLiveActivityEndsPerDay` |
-| One instance must not starve the others | instance quotas, binding quotas, probation pool, fair queue | `TestInstanceRateLimits`, `TestPushesPerMinuteProbation`, `TestBindingQuotas`, `TestProvisionalNeedsRoomBelowDeviceLimit`, `TestProbationPoolIsSeparate`, `TestFairAndPrioritised`, `TestAdmissionControl`, `TestEstimatedWaitRefuses`, `TestStaleJobsDropped` |
-| Mass registration must be bounded | per-prefix and global caps, finite caps in a recovery window, registration modes, invite spent only on success | `TestRegistrationLimits`, `TestPrefixes`, `TestRegistration`, `TestRegistrationModes`, `TestInviteKeptWhenLimitRefuses`, `TestConnLimiter` |
-| Token spam must not pay off | invalid-token budget, provisional expiry, promotion rules | `TestInvalidTokenBudget`, `TestProvisionalAndInstanceRetention`, `TestPromotionAfterSevenDays` |
-| Apple's signals must slow the relay down | per-device throttle, silent pause, provider token errors | `TestAppleDeviceThrottle`, `TestSilentPausedOnAppleThrottling`, `TestProviderTokenErrors`, `TestClassify` |
-| Retries must not double-send | idempotency by instance and `ref` | `TestIdempotency` |
-| Live Activity ends must be device-authorised | activity statement checked against the binding key | `TestLiveActivityEnd` |
-| Malformed input must be refused, not guessed | strict JSON, size limits, fuzzed parsers | `TestParsePushBodyRefusesUnknownFields`, `TestValidateItem`, `TestParseRegistration`, `TestParseUnixAndNonce`, `TestParseClient`, `TestRequestLevelRefusals`, `FuzzParseRegistration`, `FuzzPushItems`, `FuzzParseUnbind`, `FuzzParseChallenge`, `FuzzParseSelfRead`, `FuzzHeaders`, `FuzzParseReceipts` |
-| The store must hold only what the protocol allows | closed bucket list, retention, weeks start on Monday | `TestStoreBucketsAreClosed`, `TestRetention`, `TestWeeksStartOnMonday` |
-| A backup must not contain bindings or tokens | export holds instances, denylist and keyed block hashes only; restore keeps ids | `TestExportRoundTrip`, `TestMigrationExportRestore` |
-| An abuse block must survive a restore | token blocks, denylist and blocked instance tiers in the export, 12-month retention on export and import | `TestAbuseBlocksSurviveRestore`, `TestExportBlocksRetention` |
-| A device opt-out must survive a restore | opt-out blocks in the export, 12-month retention applied on export and import | `TestOptOutSurvivesRestore`, `TestExportBlocksRetention`, `TestDamagedStoreRecovers` |
-| MAC key rotation must not orphan bindings in use | bindings move to the current key on use | `TestMACKeyRotation` |
-| An opt-out must survive a MAC key rotation | blocks are checked under every configured MAC key | `TestBlocksSurviveMACRotation` |
-| Records of revoked instances must expire | removed with the denylist entry after 365 days | `TestRevokedRecordsExpireWithTheDenylist`, `TestRetention` |
-| A storage failure must not stop delivery | push path works from memory, new bindings refused | `TestStorageFailureKeepsSending` |
-| The minute flush must not stall the relay | one write transaction for all changes, unchanged instances not written | `TestFlushIsOneTransaction` |
-| A start error must not discard the database | moved aside only on proven damage, under a name that is never overwritten | `TestStoreNotMovedWithoutProof`, `TestDamagedAsideNeverOverwritten`, `TestDamagedStoreRecovers` |
-| A deleted instance must not keep bindings | binding refused when the instance vanished after authentication | `TestBindAfterInstanceDeletion` |
-| A relay that answers 200 and sends nothing must show | receipts feed the `delivery` signal, capped by the relay's own accepted count, display only | `TestReceiptsDriveDeliveryHealth` |
-| TLS 1.2 must serve only certificate validation | the 1.2 configuration only for a handshake offering nothing but `acme-tls/1` | `TestTLS12OnlyForPureACMEValidation` |
-| `/healthz` must not leak details | exactly five fields, security headers on every page | `TestPublicEndpoints` |
-| Operator commands must take closed values | invalid classes, reasons, limits and notice ids refused | `TestAdminCommands`, `TestParse`, `TestPauseNoticeSuspendRevoke`, `TestBlockToken`, `TestRotateAndDelete` |
-| Sandbox must be off unless served | bindings for an unserved environment refused | `TestSandboxRefusedWhenNotServed` |
-| Implementations must agree | shared vectors for token tags, statements and envelope frames | `TestVectorsTokenTags`, `TestVectorsStatements`, `TestVectorsEnvelopeFrame` |
-| Text rules | no forbidden characters in tracked files | `TestTextRules` |
+[SECURITY-INVARIANTS.md](../SECURITY-INVARIANTS.md) is the authoritative map from each invariant to the
+tests that fail when it breaks, and a test keeps that map honest: it fails when a test named there no longer
+exists. In short, it covers:
+
+- **confidentiality**: the relay cannot open envelopes, and instances cannot choose visible content;
+- **authenticity**: requests and responses are signed and bound to each other, nonces are single use, paths
+  are canonical, and forged signatures cannot lock out an instance;
+- **device bindings**: proof of possession, conflicts resolved only by the device, the seven-day fallback
+  only for the holder, the opt-out with its key pin, uniform answers in content and in work done;
+- **deletion and failure**: only `410` deletes at once, the breaker, the provider-token rule, store
+  failures, the queue and warm-up recovery, races between rotation and deletion;
+- **availability and fairness**: body budgets, per-instance, per-device and pool limits, registration and
+  connection limits, health that depends only on the relay's own facts;
+- **data minimisation**: logs, metrics, the store and the signed export hold only what the protocol allows;
+- **implementations and texts**: shared vectors, fuzzed parsers with a committed corpus, one source for the
+  legal texts.

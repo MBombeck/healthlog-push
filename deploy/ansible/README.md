@@ -205,6 +205,10 @@ yamllint -c deploy/.yamllint deploy/
 docker compose -f deploy/compose/compose.yaml --env-file deploy/compose/.env.example config -q
 ```
 
-CI runs the first three in the `deploy-lint` job with pinned linter versions.
+CI runs the first three in the `deploy-lint` job. The linters are installed with
+`pip install --require-hashes --no-deps -r .github/deploy-lint-requirements.txt`: every package, the
+dependencies included, is pinned by version and SHA-256. To update them, edit
+`.github/deploy-lint-requirements.in` and regenerate the file with `pip-compile --generate-hashes
+--allow-unsafe`.
 
 Moving to another host: `docs/migration.md`.

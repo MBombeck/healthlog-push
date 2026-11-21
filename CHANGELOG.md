@@ -23,7 +23,10 @@ First release.
   suite, class and exact length and never opened. Envelopes exist for alert and silent only; the Live
   Activity class byte `0x03` is reserved and the vectors carry no envelope of that class.
 - Direct opt-out with a device-only return: the pair stays blocked against the instance, and only a later
-  bind statement by the same binding key with a higher `seq` lifts the block.
+  bind statement by the same binding key with a higher `seq`, signed after the opt-out and after the relay
+  start, lifts the block. The binding key that opted out is pinned to the token for 365 days (bucket
+  `optout_pins`): while the token is unbound, a binding with any other key, also by a newly registered
+  instance, is `409 binding_conflict` with a challenge push that only the device can answer.
 - Signer process without network access that holds the APNs key and writes an ES256 provider token to a
   shared tmpfs every 30 minutes, or on request at most every 20 minutes.
 - Per-instance, per-device, per-tier and relay-wide limits, registration limits by IPv4 address and IPv6
@@ -38,9 +41,10 @@ First release.
   on too many token updates, a full stop on a rejected renewed token, per-device back-off on
   `TooManyRequests`, and a relay-wide 15-minute silent pause when Apple throttles more than 2 % of sends.
 - bbolt storage with day and week granularity only, token MACs instead of tokens, retention and pruning,
-  a consistency check at start and daily, a daily registry export of instances and the denylist, automatic
-  recovery from a damaged or missing database with a 14-day recovery window, and MAC key rotation with a
-  previous key.
+  a consistency check at start and daily, a daily registry export (`healthlog-push-registry-v2`: instances
+  with tier and reason, opt-out blocks, opt-out pins and token blocks) signed with the relay identity key
+  (`hl-relay-export-v1`), automatic recovery from a damaged or missing database with a 14-day recovery
+  window, and MAC key rotation with a previous key.
 - Probation tier with automatic promotion after seven days, a delivered push and no anomaly; automatic
   device limit raise for quiet, well-used standard instances.
 - Operator commands over a unix socket: `stats`, `instance`, `pause`, `resume`, `registration`, `invite`,
@@ -53,7 +57,7 @@ First release.
   counted and discarded. Metrics without instance labels on `127.0.0.1:9464`, refreshed hourly while fewer
   than 20 instances are active.
 - TLS 1.3 with certificates from Let's Encrypt over TLS-ALPN-01, or certificate files.
-- Privacy notice and terms served at `/privacy` and `/terms`.
+- Privacy notice and terms served at `/privacy` and `/terms`, and `/.well-known/security.txt` (RFC 9116).
 - Compose file with two hardened containers and an Ansible deployment that verifies the cosign signature and
   SLSA provenance before starting a digest-pinned image, gates on health and rolls back.
 - Release workflow with multi-arch images, keyless signatures, SBOM attestation, SLSA provenance and signed
@@ -83,8 +87,29 @@ First release.
   what the relay accepted for that instance in the last three days.
 - TLS 1.2 is offered only to a handshake whose only ALPN protocol is `acme-tls/1`.
 - During a recovery window the global registration caps are ten times higher instead of lifted; per-address
-  caps still apply.
-- The challenge answer checks that the instance is still active and applies its binding quotas.
+  caps still apply. Only instances from the export keep their tier; any other key registers in probation.
+- The challenge answer checks that the instance is still active and applies its binding quotas; a binding
+  made through a challenge counts against `newBindingsPerDay`. Challenges are limited to one per token,
+  instance and day, so one instance cannot use up the challenge of another.
+- The seven-day direct replacement of a silent binding with a new key is allowed only to the instance that
+  holds the binding; every other instance needs the challenge.
+- The registry export is signed and checked on import: signature, host, and every instance inside the
+  closed sets (UUIDv4 id, 32-byte key, known tier and reason, device limit 1 to 150). Anything else fails the
+  whole import, and the relay does not start. An unsigned export is never written.
+- Suspension and revocation live in the instance record (tier, reason, reason day) and expire after 365 days;
+  there is no separate denylist. A revoked instance cannot be suspended, and a revocation is one
+  transaction.
+- The stored opt-out block holds the day, the key hash and `seq` only, as JSON; the opt-out time is kept in
+  memory for 10 minutes and never stored. Reads of blocks and pins fail closed.
+- Non-canonical request paths get a signed `404 not_found` instead of a redirect, and `/v1` itself needs a
+  nonce.
+- The app endpoints check the signature first for every request, so the response time does not reveal
+  whether a binding exists.
+- Strict JSON also refuses keys that match a field only when case is ignored, and duplicate keys.
+- Connections are limited to 2,000 in total, 8 per IPv4 address or IPv6 /64 and 64 per IPv6 /48.
+- `DELETE /v1/instances/self` refuses a non-empty body with `422 invalid_item`. No response body exceeds
+  65,536 bytes.
+- A rotation that races a deletion can no longer bring a deleted instance back.
 - Release workflow: no QEMU step, BuildKit pinned by digest, no `# syntax` line in the Dockerfile, the SBOM
   generated in a job without `id-token` and attested in a separate job, and the tag must point to a commit
   on `main`.
@@ -108,7 +133,22 @@ First release.
 - An invite code is spent only when the registration passes every limit. A challenge push that cannot be
   queued gives the quota back and answers `409 binding_conflict` with reason `challenge_unsent`.
 - The documented week start is Monday, matching the code.
-- CI runs yamllint, a playbook syntax check and ansible-lint on the deploy code; `.gitleaks.toml` allowlists
-  the synthetic key material in `spec/vectors` and `spec/tools`.
+- CI runs yamllint, a playbook syntax check and ansible-lint on the deploy code, with the linters installed
+  hash-pinned from `.github/deploy-lint-requirements.txt`; `.gitleaks.toml` allowlists the synthetic key
+  material in `spec/vectors` and `spec/tools`. The fuzz corpus is committed.
+- The send queue always admits when it is empty, and the APNs warm-up ends after the first attempt whatever
+  its outcome, so the push path recovers after an Apple outage.
+- A provider-token rejection is forgotten once a newer token is accepted; only a rejection of the next
+  renewed token stops the relay.
+- An instance flag (challenge started, invalid-token budget exceeded) is stored as a day and blocks promotion
+  on that day and the next, also across a restart. The suspicious-instance window is seven days, as in
+  `suspects`.
+- Daily retention deletes stale bindings in one transaction, and a metrics scrape writes nothing.
+- After the batch deadline a result that is already there is reported as it is.
+- Configuration: Apple's endpoints are constants (no `HLP_APNS_URL` or `HLP_APNS_SANDBOX_URL`);
+  `HLP_APNS_TOPIC` is required; `HLP_PUBLIC_HOST` must be a lower-case DNS name without port and
+  `HLP_APNS_ENVIRONMENT` only `production` or `sandbox`, both checked at start; the compose file passes
+  `HLP_MIN_CLIENT_VERSION`; the admin socket default follows `HLP_DATA_DIR` for server and client; a failing
+  listener makes the process exit with an error.
 
 [1.0.0]: https://github.com/MBombeck/healthlog-push/releases/tag/v1.0.0

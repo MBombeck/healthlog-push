@@ -144,7 +144,7 @@ verify), and for the `400 nonce_required` refusal itself.
   direct calls, against the pinned relay identity keys.
 - A response replayed onto another request (other nonce, method or path), a changed status or a changed body
   fails.
-- The plain-text pages `/`, `/privacy` and `/terms` are not signed.
+- The plain-text pages `/`, `/privacy`, `/terms` and `/.well-known/security.txt` are not signed.
 - **Vectors:** `response` (`POST /v1/push`, status 200, body `{"items":[]}`), `responseAppEndpoint`
   (`DELETE /v1/bindings/self`, status 204, empty body), `responseWithoutNonce` (`GET /healthz`, status 200).
   Negative: `responseOtherNonce`, `responseOtherStatus`, `responseOtherMethod`, `responseOtherPath`,
@@ -165,6 +165,28 @@ hl-relay-status-v1
   from a location other than the relay (see `spec/protocol.md`, "Status file").
 - `body` is the exact byte string of the `body` member of the status file, not a re-serialisation of it.
 - **Vector:** `statusFile` (body `{"notice":null}`).
+
+## hl-relay-export-v1
+
+Signature of the relay over its daily registry export (`spec/protocol.md`, "Registry export").
+
+```
+hl-relay-export-v1
+<host>
+<hex(SHA-256(export))>
+```
+
+| Field | Value |
+|---|---|
+| `host` | the relay's configured public host name; must equal the export's `host` field |
+| export hash | lowercase hex SHA-256 over the export marshaled as JSON without its `signature` field (Go `encoding/json` of the export object with `signature` empty and therefore omitted) |
+
+- **Signs:** the relay identity key, when it writes `registry.json`. An unsigned export is never written. The
+  signature travels as unpadded base64url in the export's `signature` field.
+- **Verifies:** the relay itself, on import (start with an empty data directory or after a damaged store was
+  moved aside, and the operator's `recovery --from`), against its own identity public key and configured
+  host. A missing or invalid signature, or another host, makes the whole import fail.
+- **Vector:** `registryExport` (body `{"format":"healthlog-push-registry-v2"}`).
 
 ## hl-bind-v1
 
@@ -213,8 +235,9 @@ hl-unbind-v1
 - **Verifies:** the relay, on `DELETE /v1/bindings/self`, sent by the app itself. The key must be the one
   stored for the binding of that token and instance.
 - `iat` within 300 s of the relay clock.
-- The relay keeps this `iat` with the opt-out block. Only an `hl-bind-v1` statement by the same key with a
-  later `iat` and a higher `seq` returns the device to that instance (`spec/protocol.md`, "Returning").
+- The relay keeps this `iat` in memory for 10 minutes, never in the store. Only an `hl-bind-v1` statement by
+  the same key with a higher `seq` and an `iat` later than the opt-out (while it is in memory) and than the
+  start of the relay process returns the device to that instance (`spec/protocol.md`, "Returning").
 - **Vector:** `unbind`. Negative: `unbindOtherInstance`.
 
 ## hl-challenge-v1
@@ -291,6 +314,7 @@ hl-selfread-v1
 | `hl-register-v1` | new instance key | relay | `time` within 300 s | `register`, `rotateNewKeyProof` |
 | `hl-relay-v1` | instance key | relay | `HL-Timestamp` within 300 s, not before relay start | `request`, `requestWithQuery` |
 | `hl-relay-resp-v2` | relay identity key | server, app | none (method, path and nonce bind) | `response`, `responseAppEndpoint`, `responseWithoutNonce` |
+| `hl-relay-export-v1` | relay identity key | relay (on import) | none (`day` in the export) | `registryExport` |
 | `hl-relay-status-v1` | relay identity key | server | none (`issued` in the body) | `statusFile` |
 | `hl-bind-v1` | binding key | relay | `iat` within 300 s | `bind` |
 | `hl-unbind-v1` | binding key | relay | `iat` within 300 s | `unbind` |

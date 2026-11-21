@@ -51,9 +51,10 @@ reads system and SSH logs. A community blocklist of known attacking addresses is
 integrity checking, image scanning, live patching and the address blocklist belong to the operator's host baseline
 and are not part of the published Ansible role, so they cannot be verified from this repository.
 
-**Backups.** Only a daily export of registered instances, the denylist and the blocks (device opt-outs and
-operator token blocks, as keyed hashes) is backed up, encrypted, to a separate
-storage account in Germany. Device bindings, counters, TLS keys and the signing key are never backed up. The server is
+**Backups.** Only a daily export of registered instances (suspended and revoked ones with their tier and reason) and
+the blocks (device opt-outs, opt-out key pins and operator token blocks, as keyed hashes) is backed up, encrypted, to a
+separate storage account in Germany. The export is signed with the relay's identity key, and the relay refuses to
+import an export that was changed. Device bindings, counters, TLS keys and the signing key are never backed up. The server is
 not snapshotted; it is rebuilt from code.
 
 **What is not guaranteed.** Anyone with full control of the host could read the relay's keys and the metadata passing

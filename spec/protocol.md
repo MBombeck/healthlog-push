@@ -35,21 +35,27 @@ What each party learns:
   next to anything else gets the TLS 1.3 configuration.
 - HTTP/1.1 and HTTP/2; at most 16 concurrent streams per HTTP/2 connection.
 - Server timeouts: read header 5 s, read 10 s, write 15 s, idle 60 s. Request headers at most 8 KiB.
-- At most 2000 concurrent connections in total and 50 per IPv4 address or IPv6 /64. Connections over a limit
-  are closed at accept, without a response.
+- At most 2000 concurrent connections in total, 8 per IPv4 address or IPv6 /64 and 64 per IPv6 /48. A
+  HealthLog server needs one connection. Connections over a limit are closed at accept, without a response.
 - Every response carries `Cache-Control: no-store`, `X-Content-Type-Options: nosniff`,
   `Strict-Transport-Security: max-age=31536000` and `Content-Security-Policy: default-src 'none'`.
 - The relay sends no CORS headers.
 - An unknown path, or a known path with another method, answers `404 not_found` (signed).
-- Every `/v1` request carries a valid `HL-Nonce` (see "Headers"); otherwise the relay answers `400
-  nonce_required` before anything else. Only `GET /healthz` and `GET /version` may omit it.
+- Only canonical paths are routed. A path that `path.Clean` would change (for example `/v1//push` or
+  `/v1/push/`) answers `404 not_found` (signed). The relay never answers with a redirect.
+- Every `/v1` request (the path `/v1` itself and every path under `/v1/`) carries a valid `HL-Nonce` (see
+  "Headers"); otherwise the relay answers `400 nonce_required` before anything else, before the path check.
+  Only `GET /healthz` and `GET /version` may omit it.
 - `POST` and `DELETE` requests declare their body length with `Content-Length` (`0` for no body; an HTTP/2
   request whose headers end the stream counts as `0`). A body of unknown length, for example chunked, is
   refused with `411 length_required`, a declared length above 128 KiB with `413 too_large`, both before a
   byte of the body is read. The declared length is reserved against a relay-wide budget of 32 MiB for request
   bodies in flight; when it would be exceeded the answer is `503 overloaded` with a retry of about 2 s.
-- A response body is never longer than 65 536 bytes. Clients refuse a response body longer than 262 144
-  bytes without reading it further.
+- A response body is never longer than 65 536 bytes: a body that would be longer is replaced by `500
+  internal`. Clients refuse a response body longer than 262 144 bytes without reading it further.
+- Every JSON body is parsed strictly: an unknown field, trailing data after the value, a key that matches a
+  field only when case is ignored (`Token` for `token`) and a key that appears twice in one object are all
+  refused with `422 invalid_item`. A body therefore parses in exactly one way.
 
 The client address is read only for the registration limiter and the connection limiter, in memory, and is
 never stored or logged.
@@ -138,7 +144,8 @@ Every refused request and every refused push item uses the same JSON shape. Only
 | `reason` | string | on `instance_suspended` (closed set: `abuse`, `spam`, `invalid_tokens`, `harassment`, `legal`, `compromised`, `terms`, `operator_request`) and on `binding_conflict` (`challenge_sent`, `challenge_quota`, `challenge_unsent`) |
 | `limits` | object | on `instance_rate` from the request-rate check and on `binding_quota`: the tier limits of the instance |
 
-A JSON encoding failure on the relay answers `500` with `{"error":"internal"}`.
+A JSON encoding failure on the relay, or a response body that would exceed 65 536 bytes, answers `500` with
+`{"error":"internal"}`.
 
 ### Retry-After
 
@@ -164,7 +171,7 @@ Registers a new instance. Not signed with `hl-relay-v1`; the body carries a proo
 - `client` (optional): the `HL-Client` format.
 - `invite` (optional, at most 64 characters): a one-time code, required only while registration is in invite
   mode.
-- Unknown fields, trailing data or a malformed value make the body invalid.
+- Unknown fields, trailing data, case-folded or duplicate keys, or a malformed value make the body invalid.
 
 Checks in order:
 
@@ -190,7 +197,10 @@ Checks in order:
 
 A new instance starts in tier `probation`. While the operator has opened a recovery window (after the relay
 lost its database and imported its registry export), the global registration caps are ten times higher
-(never unlimited), the per-address caps still apply, and a new instance starts in `standard`. No host name, address or contact detail is part of a registration.
+(never unlimited) and the per-address caps still apply. Only the instances that came back from the export
+keep their tier: their keys are already known, so they get their old id back at step 5. Any other key
+registers in `probation`, as outside the window. No host name, address or contact detail is part of a
+registration.
 
 ### POST /v1/instances/self/rotate
 
@@ -212,8 +222,8 @@ key, and the stolen instance cannot take them back.
 
 ### DELETE /v1/instances/self
 
-Deletes the instance and all its bindings. Body empty. `204` on success, `503 storage_unavailable` when the
-store write fails. Afterwards the instance id is unknown (`401 unknown_instance`).
+Deletes the instance and all its bindings. The body must be empty (`Content-Length: 0`); any body is `422
+invalid_item`. `204` on success, `503 storage_unavailable` when the store write fails. Afterwards the instance id is unknown (`401 unknown_instance`).
 
 ### Tiers
 
@@ -224,9 +234,11 @@ store write fails. Afterwards the instance id is unknown (`401 unknown_instance`
 | `suspended` | set by the operator with a reason; bindings stay; every signed request answers `403 instance_suspended` |
 | `revoked` | set by the operator; bindings deleted; the record stays so the key cannot register again |
 
-Promotion runs once a day. An instance is not promoted while it is flagged that day (it started a conflict
-challenge or exceeded its invalid-token budget) or while the last 7 days show more than 20 rebinds, or more
-than 20 % invalid tokens over at least 10 sends. A `standard` instance whose device limit is the default 50
+Promotion runs once a day. An instance is not promoted while it is flagged (it started a conflict challenge
+or exceeded its invalid-token budget): the flag is stored in the instance record as a day (`flaggedDay`) and
+blocks promotion on that day and the next, so neither the day change nor a restart drops it. Nor is it
+promoted while the last 7 days (today and the six days before, the same window as the operator's suspects
+list) show more than 20 rebinds, or more than 20 % invalid tokens over at least 10 sends. A `standard` instance whose device limit is the default 50
 is raised to 80 after 30 quiet days with more than 80 % of the limit in use. The operator can set a device
 limit from 1 to 150.
 
@@ -281,11 +293,12 @@ Rules, in order:
 | 2 | the store does not accept writes | `503 storage_unavailable`, retry about 5 min |
 | 3 | the pair (token, this instance) is blocked by a direct opt-out, and the statement is not the device's return (see "DELETE /v1/bindings/self") | `403 binding_refused` |
 | 4 | the token is blocked by the operator and not currently bound to this instance | `403 binding_refused` |
-| 5 | same binding key as the stored binding, same instance, same `seq` | `200` with the stored state (idempotent repeat) |
-| 6 | same binding key, `seq` not higher than the stored one | `403 binding_refused` |
-| 7 | a different binding key, and the stored binding had an accepted push or was bound less than 7 days ago | `409 binding_conflict`, see "Conflict" |
-| 8 | the binding is new to this instance and a quota is exhausted (see below) | `429 binding_quota`, scope `instance`, with `limits` |
-| 9 | stored | `201` when the token was not bound to this instance before, `200` when it was |
+| 5 | the token is unbound, its device opted out within the last 365 days (opt-out pin), and the binding key is not the pinned key (or the pin has no key, after a restore) | `409 binding_conflict`, see "Conflict" |
+| 6 | same binding key as the stored binding, same instance, same `seq` | `200` with the stored state (idempotent repeat) |
+| 7 | same binding key, `seq` not higher than the stored one | `403 binding_refused` |
+| 8 | a different binding key than the stored binding, and either the request comes from another instance than the holder, or the binding's last accepted push (without one, its binding day) is less than 7 days ago | `409 binding_conflict`, see "Conflict" |
+| 9 | the binding is new to this instance and a quota is exhausted (see below) | `429 binding_quota`, scope `instance`, with `limits` |
+| 10 | stored | `201` when the token was not bound to this instance before, `200` when it was |
 
 Response body on success: `{ "state": "provisional" }` (or the stored state on an idempotent repeat or a
 re-bind by the same instance).
@@ -295,8 +308,13 @@ re-bind by the same instance).
 - **Moving to another instance** needs a statement by the same key with a higher `seq`. A former instance
   does not have the key; an old statement names the old instance and carries a lower `seq`.
 - **Seven-day fallback.** A binding whose last accepted push (or, without one, whose binding day) is 7 or
-  more days ago can be replaced by a statement with a different key directly, without a challenge. This
-  covers a restored device whose challenge push cannot arrive.
+  more days ago can be replaced by a statement with a different key directly, without a challenge, but only
+  by the instance that holds the binding. This covers a restored device with a new key whose challenge push
+  cannot arrive. Any other instance always needs the challenge, which only the device can answer, so a
+  former instance that kept the token cannot take over a binding that went quiet.
+- **Opt-out pin.** After a direct opt-out the token is unbound, but the hash of the binding key that opted
+  out stays pinned to the token for 365 days. While the token is unbound, a binding with any other key, for
+  example a key that a second instance made up, is a conflict that only the device can resolve.
 - **Provisional.** A new binding is `provisional` until Apple accepts the first push to it, then `active`.
   Provisional bindings do not count against the device limit. A provisional binding without an accepted
   push for more than 2 days is removed.
@@ -308,14 +326,15 @@ Binding quotas, checked only for a binding that is new to the instance:
 | Condition | Retry |
 |---|---|
 | the instance exceeded its invalid-token budget in the last 24 h | until the block ends |
-| (the same quotas apply when a conflict is resolved through `POST /v1/bindings/challenge`) | |
+| (the same quotas apply when a conflict is resolved through `POST /v1/bindings/challenge`, and such a binding counts against `newBindingsPerDay`) | |
 | new bindings today at the tier limit `newBindingsPerDay` | 1 day |
 | provisional bindings at `provisional`, or active bindings at `devices` | 1 h |
 
 ### Conflict
 
-A bind request with a valid statement but a different key than the live binding never replaces it on the
-spot. The relay sends a challenge to the device token instead and answers `409`:
+A bind request with a valid statement but a different key than the live binding (rule 8), or than the opt-out
+pin of an unbound token (rule 5), never takes the token on the spot. The relay sends a challenge to the
+device token instead and answers `409`:
 
 ```json
 { "error": "binding_conflict", "reason": "challenge_sent" }
@@ -324,12 +343,14 @@ spot. The relay sends a challenge to the device token instead and answers `409`:
 - The challenge is 32 random bytes, unpadded base64url. It is sent as a background push to the token in the
   request's environment, payload `{"aps":{"content-available":1},"c":"<challenge>"}`, priority 5, push type
   `background`, expiration 30 minutes.
-- At most one challenge per token per UTC day and at most `challengesPerDay` (20) per instance per day.
-  Over either limit the answer is `409 binding_conflict` with `reason: challenge_quota` and no push is sent.
+- At most one challenge per token, instance and UTC day, and at most `challengesPerDay` (20) per instance
+  per day. One instance therefore cannot use up the challenge of another, and an instance can wake a device
+  at most once a day. Over either limit the answer is `409 binding_conflict` with `reason: challenge_quota`
+  and no push is sent.
 - When the challenge push cannot be queued, the token's and the instance's challenge counts are given back,
   the pending challenge is dropped, and the answer is `409 binding_conflict` with `reason: challenge_unsent`
   and `retryAfter` (about 1 minute).
-- Starting a challenge flags the instance for the day (it is not promoted that day).
+- Starting a challenge flags the instance (`flaggedDay`; it is not promoted that day or the next).
 - Pending challenges live in memory only, for 30 minutes.
 
 ### POST /v1/bindings/challenge
@@ -352,7 +373,10 @@ Sent by the app directly, not by the instance.
 | done | `200 { "state": "provisional" }` |
 
 On success the binding of the conflicting request (instance, new key, its `seq`, `env`, consent) replaces
-the old binding. The old holder gets `404 binding_unknown` on its next push to that token.
+the old binding, or takes the unbound token. It passes the same binding quotas as a direct binding and, when
+it is new to that instance, counts against `newBindingsPerDay`. When the token has an opt-out pin, the pin
+now names the key the device proved. The old holder gets `404 binding_unknown` on its next push to that
+token.
 
 ### DELETE /v1/bindings
 
@@ -366,7 +390,9 @@ The app talks to the relay only on these three endpoints, without any account id
 credential, each signed with its binding key and carrying `HL-Nonce`. It verifies every answer against the
 pinned relay identity keys.
 
-Each endpoint parses and verifies the request first. A failed attempt (too large, malformed, stale, unknown
+Each endpoint parses the request and then checks the signature first, outside the relay lock and for every
+request, before it looks up any binding; so the response time does not reveal whether a binding exists (see
+"Uniform answers"). A failed attempt (too large, malformed, stale, unknown
 binding or bad signature) is charged to one relay-wide token bucket (capacity 100, refill 20 per second);
 when it is empty, failed attempts are answered `429 global`, scope `global`, retry about 2 s, instead of
 their own refusal. A request that verifies is never charged there, so junk traffic cannot block an opt-out,
@@ -391,18 +417,31 @@ The direct opt-out. The device leaves an instance without the instance's coopera
 | store write failed | `503 storage_unavailable` |
 | done | `204` |
 
-On success the relay deletes the binding, drops pending challenges for the token and blocks the pair
-(token MAC, instance id) for 365 days. With the block it keeps the SHA-256 of the binding key, the `seq` of
-the binding that left and the `iat` of the opt-out statement. Another instance can bind the token at once.
-The instance that was left cannot bind it again with anything it holds: a statement made before the opt-out
-has an older `iat`, and it cannot make a new one without the binding key.
+On success the relay deletes the binding, drops pending challenges for the token, blocks the pair (token
+MAC, instance id) for 365 days and pins the binding key to the token for 365 days:
+
+- The pair block stores the day, the SHA-256 of the binding key that opted out and the `seq` of the binding
+  it left, as JSON. No time of day is stored.
+- The opt-out pin stores the day and the same key hash, keyed by the token alone. While the token is
+  unbound, a binding by any instance with another key is `409 binding_conflict` with a challenge push (rule
+  5); only the device can answer it. A binding with the pinned key itself (the device moving to another
+  server) goes ahead as usual.
+- The `iat` of the opt-out statement is kept in memory for 10 minutes only, never stored.
+
+The instance that was left cannot bind the token again with anything it holds: a statement made before the
+opt-out is older than the opt-out, and it cannot make a new one without the binding key. A second instance
+it registers cannot bind it either: its own key is not the pinned one.
 
 **Returning.** Only the device lifts the block. A `POST /v1/bindings` from that instance whose statement is
-signed by the same binding key, with a `seq` higher than the stored one and an `iat` later than the opt-out
-statement's, removes the block and is then handled as a new binding (rules 4 to 9, `provisional`, the
-binding quotas apply). Any other statement for the pair still gets `403 binding_refused`. A block restored
-from the registry export carries no key and can be lifted by nobody; after a restore a device returns to that
-instance only with a new token.
+signed by the same binding key, with a `seq` higher than the stored one and an `iat` later than both the
+opt-out statement (while that is still in memory) and the start of the relay process, removes the block and
+is then handled as a new binding (rules 4 to 10, `provisional`, the binding quotas apply). A statement made
+shortly before the opt-out is at most 300 s old when it is used, so 10 minutes in memory are enough, and
+after a restart every statement must be newer than the start. Any other statement for the pair still gets
+`403 binding_refused`. A block restored from the registry export carries no key and can be lifted by
+nobody; after a restore a device returns to that instance only with a new token. A pin restored from the
+export carries no key either, so after a restore every new binding of that token needs the challenge; a
+resolved challenge updates the pin to the key the device proved.
 
 The app signs such a statement only when the person turns the relay on again for that server. After a
 direct opt-out it treats the relay as off for that account: a later `rebind_needed` or any other server
@@ -444,6 +483,11 @@ binding_unknown` for push items and the self endpoints, `204` for `DELETE /v1/bi
 `binding_moved`, and no answer distinguishes "never bound", "bound elsewhere", "wrong key" and "bad
 signature". `409 binding_conflict` is only ever sent to an instance that presented a valid device statement
 for that very token.
+
+The same holds for the work done. The app-direct endpoints verify the signature first, for every request,
+before the binding is looked up, so each answer costs one Ed25519 verification whether or not a binding
+exists; a party that knows a token and a former binding key cannot learn from the response time whether
+the device is still bound with that key.
 
 ## Push
 
@@ -537,15 +581,16 @@ counted against any limit only when every check passed.
 | | standard instance: the standard pool has room this minute for the class share | `429 global`, scope `global` |
 | 13 | the send queue admits the item | `503 queue_full`, retry about 2 s; scope `instance` when the instance's own queue share is full |
 
-The item then waits for Apple. A batch waits at most 8 s in total. An item without an answer by then is
-reported as `503 apns_unavailable` with `retryAfter` about 30 s; its send may still complete, and that
-result is then kept for replay.
+The item then waits for Apple. A batch waits at most 8 s in total. After that deadline, a result that is
+already there is reported as it is; an item still without an answer is reported as `503 apns_unavailable`
+with `retryAfter` about 30 s. Its send may still complete, and that result is then kept for replay.
 
 ## What the relay sends to Apple
 
 Every push is one HTTP/2 `POST` to `https://api.push.apple.com/3/device/<hex token>` (sandbox:
 `https://api.sandbox.push.apple.com`), using one shared client with at most four connections, a ping after
-an hour without traffic, and one request in flight until the first response arrives. Each request to Apple
+an hour without traffic, and one request in flight at a time until the first attempt ends, whatever its
+outcome (a warm-up, so that the first connection is set up once). Each request to Apple
 times out after 3 s and is never retried by the relay; the instance owns retries and deadlines.
 
 Headers on every request:
@@ -644,13 +689,13 @@ reported as `other`.
 | 403 | `binding_refused` | `POST /v1/bindings` | |
 | 403 | `challenge_refused` | `POST /v1/bindings/challenge` | |
 | 404 | `binding_unknown` | `DELETE /v1/bindings/self`, `GET /v1/bindings/self` | |
-| 404 | `not_found` | any unknown route | |
+| 404 | `not_found` | any unknown route, a known path with another method, any non-canonical path | |
 | 409 | `key_in_use` | rotation | |
 | 409 | `binding_conflict` | `POST /v1/bindings` | `reason`: `challenge_sent`, `challenge_quota`, or `challenge_unsent` with `retryAfter` |
 | 411 | `length_required` | every `POST` and `DELETE` | |
 | 413 | `too_large` | every endpoint with a body | |
 | 413 | `too_many_items` | `POST /v1/push` | |
-| 422 | `invalid_item` | every endpoint with a body or inputs | |
+| 422 | `invalid_item` | every endpoint with a body or inputs; `DELETE /v1/instances/self` with a non-empty body | |
 | 422 | `env_unsupported` | `POST /v1/bindings` | |
 | 426 | `min_server_version` | instance endpoints | |
 | 429 | `instance_rate` | instance endpoints (request rate), rotation (once a day), receipts (once per 45 minutes) | `scope: instance`, `retryAfter`, `limits` on the request-rate refusal |
@@ -663,7 +708,7 @@ reported as `other`.
 | 503 | `maintenance` | `POST /v1/push` | `retryAfter` |
 | 503 | `relay_misconfigured` | `POST /v1/push` | |
 | 503 | `apns_unavailable` | `POST /v1/push` | `retryAfter` |
-| 500 | `internal` | any | |
+| 500 | `internal` | any (an encoding failure, or a body that would exceed 65 536 bytes) | |
 
 Refusals without `retryAfter` (`relay_misconfigured`, `apns_rejected`, `storage_unavailable` on some
 endpoints) carry no timing promise; a client applies its own backoff.
@@ -676,12 +721,12 @@ deletes a binding outright.
 | Apple answer | Item result | Effect at the relay | Kept for replay |
 |---|---|---|---|
 | `200` | `200 accepted` | binding becomes `active`, last success day and last-used week updated, the instance's first and last delivery day updated | yes |
-| `410` | `410 unregistered` (liveactivity: `200 activity_gone`) | binding deleted; counts against the instance's invalid-token budget | yes |
+| `410` | `410 unregistered` (liveactivity: `200 activity_gone`) | binding deleted; counts against the instance's invalid-token budget. Apple's `timestamp` in the answer is not used (known limitation) | yes |
 | `400 BadDeviceToken`, `400 DeviceTokenNotForTopic` | `200 soft_invalid` with `reason` (liveactivity: `200 activity_gone`) | binding set to `soft_invalid`; a second such answer on a later day deletes it; counts against the invalid-token budget | yes |
 | any of the three above while the breaker is open or half-open | `503 relay_misconfigured` | nothing is deleted or marked; the invalid-token budget is still charged unless the binding is established (has had an accepted push) | no |
 | `429 TooManyRequests` | `429 device_quota`, scope `device`, retry about 1 h | this class is suspended for this device for 1 h | no |
 | `403 ExpiredProviderToken` | `503 apns_unavailable`, retry about 30 s | a provider token refresh is requested | no |
-| `403 InvalidProviderToken` | `503 relay_misconfigured` | the first rejection is recorded; when a newer token is rejected as well, the relay stops sending to Apple until the operator resets it | no |
+| `403 InvalidProviderToken` | `503 relay_misconfigured` | the first rejection is recorded; it is forgotten once Apple accepts a push with a newer token. When the next renewed token is rejected as well, the relay stops sending to Apple until the operator resets it | no |
 | `429 TooManyProviderTokenUpdates` | `503 apns_unavailable`, retry about 20 min | every push request is refused with `503 apns_unavailable` for 20 minutes | no |
 | other `4xx` | `502 apns_rejected` with `reason` | nothing | yes |
 | `5xx`, timeout, connection error | `503 apns_unavailable`, retry about 30 s | nothing | no |
@@ -690,7 +735,8 @@ deletes a binding outright.
 **Invalid-token budget.** Each `Unregistered` or soft invalid answer for a device push counts against the
 instance's `invalidTokensPerDay`. Over the budget, for 24 hours the instance gets no new bindings (also not
 through a challenge answer) and every binding that is not `active` (provisional and soft-invalid) receives no
-pushes (`429 binding_quota`, scope `instance`); it is also flagged for the day.
+pushes (`429 binding_quota`, scope `instance`); it is also flagged (`flaggedDay`: not promoted that day or
+the next).
 
 **Soft-invalid bindings.** A binding marked `soft_invalid` receives no push on the UTC day it failed (`429
 binding_quota`, scope `device`, retry until midnight UTC), so it gets at most one probe push per day. An
@@ -764,8 +810,11 @@ Sends go through an in-memory queue, never through disk.
 | workers | 256 |
 | priority | alert and Live Activity before silent |
 | fairness | round robin across instances within each priority |
-| admission | an item whose estimated wait exceeds 2 s is refused at once (`503 queue_full`) |
+| admission | an empty queue always admits; otherwise an item whose estimated wait exceeds 2 s is refused at once (`503 queue_full`) |
 | drop | an item that waited longer than 2 s anyway is dropped at dequeue (`503 queue_full`) |
+
+A panic in a send worker is not recovered: it ends the process, and the container is restarted (known
+limitation; the restart rules under "After a restart" apply).
 
 ## Limits
 
@@ -804,7 +853,7 @@ The same for every tier.
 | Live Activity `end` per day | 12 | `429 device_quota` |
 | soft-invalid binding | no push on the day it failed (one probe per day) | `429 binding_quota`, scope `device` |
 | Apple `429 TooManyRequests` | the class is suspended for 1 h | `429 device_quota` |
-| conflict challenges | 1 per token per day | `409 binding_conflict`, `reason: challenge_quota` |
+| conflict challenges | 1 per token, instance and day | `409 binding_conflict`, `reason: challenge_quota` |
 | verified app calls (opt-out, self-read, challenge answer) | token bucket of 10, refilled at 10 per hour | `429 device_quota`, scope `device` |
 
 ### Global pools
@@ -841,7 +890,16 @@ Counts kept only in memory are lost on a restart. So that a restart does not han
   day) are halved;
 - the per-device alert count of the day is stored with the binding (flushed every minute) and survives;
 - the per-instance daily push count is restored from the stored day counters;
-- timestamps from before the start are refused, which covers the emptied nonce store.
+- an instance flag is stored as a day and survives;
+- timestamps from before the start are refused, which covers the emptied nonce store and the opt-out times
+  that were kept in memory.
+
+Known limitation: the other in-memory counters start from zero after a restart. These are, per instance, the
+new bindings of the day (`newBindingsPerDay`), the challenges of the day (`challengesPerDay`) and the
+24-hour block after an exceeded invalid-token budget, and the per token, instance and day challenge record.
+The per-instance invalid-token count of the day is restored from the stored day counters, but a block that
+was already running ends with the restart. Each restart therefore gives every instance these allowances
+afresh for the rest of the day.
 
 ### Other bounds
 
@@ -990,8 +1048,9 @@ the container image digest the operator configured. Signed; `HL-Nonce` is option
 
 ### Plain-text pages
 
-`GET /` (index), `GET /privacy` (privacy notice) and `GET /terms` (terms of use) return
-`text/plain; charset=utf-8`, unsigned.
+`GET /` (index), `GET /privacy` (privacy notice), `GET /terms` (terms of use) and
+`GET /.well-known/security.txt` (RFC 9116: contact `relay@healthlog.dev` and the repository's GitHub
+security advisories, with an `Expires` date) return `text/plain; charset=utf-8`, unsigned.
 
 ## State
 
@@ -1001,18 +1060,27 @@ no field for a raw device token, an address, or a push class per instance.
 
 | Record | Key | Fields |
 |---|---|---|
-| instance | instance id | Ed25519 public key, tier, suspension reason, creation day, last contact week, device limit, first delivery day, last rotation day, quiet-since day, last delivery day, client version string |
+| instance | instance id | Ed25519 public key, tier, reason of a suspension or revocation (closed set) and its day, creation day, last contact week, device limit, first delivery day, last rotation day, quiet-since day, last delivery day, flagged day |
 | instance key index | hex public key | instance id |
 | binding | HMAC-SHA256 of the raw token under the token MAC key | instance id, SHA-256 of the binding key, `seq`, environment, state (`provisional`, `active`, `soft_invalid`), binding day, last-used week, last success day, soft-invalid day, consent text version, consent day, alerts today and their day |
-| blocked pair | SHA-256("hl-blocked-pair\n" ‖ token MAC ‖ "\n" ‖ instance id) | day of the opt-out; SHA-256 of the binding key that opted out, the `seq` of the binding it left, the `iat` of its opt-out statement |
-| blocked token | SHA-256("hl-blocked-token\n" ‖ token MAC) | day of the block |
-| denylist | instance id | reason (closed set), day |
+| blocked pair (`blocked_pairs`) | SHA-256("hl-blocked-pair\n" ‖ token MAC ‖ "\n" ‖ instance id) | JSON: day of the opt-out, SHA-256 of the binding key that opted out, the `seq` of the binding it left |
+| blocked token (`blocked_tokens`) | SHA-256("hl-blocked-token\n" ‖ token MAC) | day of the block |
+| opt-out pin (`optout_pins`) | SHA-256("hl-optout-pin\n" ‖ token MAC) | JSON: day of the opt-out, SHA-256 of the binding key that opted out (none after a restore) |
 | instance day counters | day and instance id | pushes accepted, invalid tokens, rebinds; no class |
 | global day counters | day, class or category, result | count, without any instance |
 | operator control | fixed | pauses, registration mode, notice, recovery window, invite codes (as hashes) |
 
 Only in memory: nonces, idempotency entries, per-device counters (except the alert count), pending
-challenges, registration counters (keyed by salted prefix hashes), receipts, Apple throttling counts.
+challenges, the per token, instance and day challenge record, the per-instance counts of new bindings and
+challenges of the day and the 24-hour invalid-budget block, the `iat` of an opt-out (10 minutes),
+registration counters (keyed by salted prefix hashes), receipts, Apple throttling counts.
+
+Suspension and revocation live in the instance record (tier, reason, reason day); there is no separate
+list. A revocation writes the record and deletes the bindings in one transaction. A suspension of a revoked
+instance is refused, so a revocation cannot be undone by suspending and unsuspending.
+
+Reads of the pair blocks, the token blocks and the opt-out pins fail closed: a read error counts as blocked
+or pinned.
 
 **Token MAC keys.** The relay holds a current and optionally a previous MAC key. A binding found only under
 the previous key is moved to the current key on first use, so a MAC key rotation needs no downtime. A
@@ -1021,18 +1089,44 @@ binding whose MAC matches no configured key can no longer be found and does not 
 **Store failures.** When a write fails the store is treated as read-only: the push path keeps working from
 memory, new bindings and registrations are refused with `503 storage_unavailable`, and `/healthz` reports
 `db_writable: false` and `status: degraded`. Changed bindings, changed instance records and the counters are
-written once a minute in a single write transaction. A consistency check runs at start and daily. Only
+written once a minute in a single write transaction; the daily retention deletes stale bindings in one
+transaction as well. A metrics scrape writes nothing: usage counts not yet flushed are added from memory. A consistency check runs at start and daily. Only
 proven damage at start (a failed consistency check, a bbolt error for an invalid file, a version or checksum
 mismatch, a mapping error, or a truncated file) moves the file aside, as
 `relay.db.damaged-YYYYMMDDTHHMMSSZ` with a numeric suffix if that name exists, so no earlier copy is ever
 overwritten. Any other error opening the store (a held lock, wrong permissions, a full disk) stops the relay
-with an error and leaves the file in place. After moving a damaged file aside the relay starts empty, imports the instances (suspended and revoked ones keep their tier), the denylist and
-all blocks from its daily registry export and opens a recovery window of 14 days. Denylist entries are
-exported as `{instanceId, reason, expiresDay}`; opt-out and token blocks as `{pair, reason, expiresDay}` with
-`pair` the hex keyed hash above and `reason` `device_opt_out` (field `blockedPairs`) or `operator_block`
-(field `blockedTokens`). Entries past their expiry are neither exported nor imported. The binding key hash,
-`seq` and `iat` of an opt-out are not exported, so a restored opt-out cannot be lifted by the device's
-return statement. Bindings are not exported; devices bind again through the normal binding path.
+with an error and leaves the file in place. After moving a damaged file aside (or when it starts with an
+empty data directory), the relay starts empty, imports the instances (suspended and revoked ones keep their
+tier, reason and reason day) and all blocks and pins from its daily registry export and opens a recovery
+window of 14 days.
+
+### Registry export
+
+The relay writes `registry.json` once a day (format `healthlog-push-registry-v2`):
+
+| Field | Content |
+|---|---|
+| `format` | `healthlog-push-registry-v2` |
+| `host` | the relay's public host name |
+| `day` | `YYYY-MM-DD` of the export |
+| `instances` | `{id, publicKey, tier, reason, createdDay, deviceLimit, firstDeliveryDay, reasonDay}` per instance; suspended and revoked ones only while their reason day is at most 365 days old |
+| `blockedPairs` | `{pair, reason: "device_opt_out", expiresDay}` per device opt-out |
+| `blockedTokens` | `{pair, reason: "operator_block", expiresDay}` per operator token block |
+| `optOutPins` | `{pair, reason: "device_opt_out_pin", expiresDay}` per opt-out pin |
+| `signature` | the relay identity key's Ed25519 signature over `hl-relay-export-v1` (`spec/statements.md`) |
+
+`pair` is the hex keyed hash of the stored record above. Entries past their expiry are neither exported nor
+imported. The binding key hash and `seq` of an opt-out and the key of a pin are not exported, so a restored
+opt-out cannot be lifted by the device's return statement and a restored pin sends every new binding of the
+token through the challenge. Bindings are not exported; devices bind again through the normal binding path.
+
+The signature covers the export marshaled as JSON without its `signature` field. An unsigned export is never
+written. On import (at start with an empty data directory or after a damaged store was moved aside, and
+through the operator's `recovery --from`) the relay checks the signature against its own identity key and
+the `host` against its configured name, and every instance must be inside the closed sets the relay writes:
+a lowercase UUIDv4 id, a 32-byte key, a tier of `probation`, `standard`, `suspended` or `revoked`, a reason
+from the closed list (or none) and a device limit from 1 to 150. Any failure makes the whole import fail;
+at start the relay then does not start. Instances whose id or key already exists are skipped.
 
 ## Retention
 
@@ -1042,7 +1136,8 @@ return statement. Bindings are not exported; devices bind again through the norm
 | provisional binding | more than 2 days after its binding day without an accepted push |
 | instance without authenticated contact | 13 weeks after its last contact week, with its bindings |
 | instance that never had an accepted push | more than 2 days after its creation day, with its bindings |
-| blocked pairs, blocked tokens, denylist entries | 365 days |
+| blocked pairs, blocked tokens, opt-out pins | 365 days |
+| suspended and revoked instance records | 365 days after the reason day, with their bindings |
 | instance day counters | 7 days |
 | global day counters | 400 days |
 | pending challenges | 30 minutes |
@@ -1078,14 +1173,14 @@ controls do is visible in the protocol:
 
 | Control | Effect |
 |---|---|
-| suspend, unsuspend | tier `suspended` with a reason (`403 instance_suspended`), back to `probation` |
-| revoke | tier `revoked`, bindings deleted (`403 instance_revoked`) |
+| suspend, unsuspend | tier `suspended` with a reason (`403 instance_suspended`), back to `probation`; a revoked instance cannot be suspended |
+| revoke | tier `revoked`, bindings deleted in the same transaction (`403 instance_revoked`) |
 | block token | the token can no longer be bound by any instance except its current holder (`403 binding_refused`) |
 | device limit | an instance's active device limit, 1 to 150 |
 | pause | a class (`all`, `alert`, `silent`, `liveactivity`) for a tier (`all`, `probation`) for up to 7 days (`503 maintenance`) |
 | registration | mode `open`, `invite` (one-time codes valid for 7 days) or `closed` |
 | notice | set or clear the notice |
-| recovery | open a recovery window, optionally importing a registry export |
+| recovery | open a recovery window, optionally importing a registry export (verified as above) |
 | breaker | open or close the breaker, or clear the stop after a rejected provider token |
 | status file | produce a signed status file |
 | suspects | list instances with invalid tokens, rebinds or challenges in the last 7 days, worst first, with their counts; instance ids appear only here and in `instance`, on the operator interface |

@@ -1,8 +1,7 @@
 # Moving the relay to a new host
 
 This procedure moves a running healthlog-push relay to a new machine: a
-larger plan at the same provider (for example Hetzner Cloud CPX11 to CX23) or
-a different provider altogether. It keeps the public name, the relay
+larger plan at the same provider or a different provider altogether. It keeps the public name, the relay
 identity, every issued token, and the registry of instances. It does not
 carry over device bindings; those come back on their own.
 
@@ -16,7 +15,7 @@ Example values: public name `push.example.org`, old host `203.0.113.10` /
 | Image | The same digest, deployed by the Ansible role, verified again by cosign |
 | Relay identity key, token MAC keys, ACME account key | From the secret store, same values. Pinned relay keys and token MACs stay valid. |
 | APNs key | From the secret store, into the signer path only |
-| Instance registry, denylist, device opt-out blocks and operator token blocks | `/srv/healthlog-push/export/registry.json`, the only file copied from the old host |
+| Instance registry (suspended and revoked instances with tier and reason), device opt-out blocks, opt-out key pins and operator token blocks | `/srv/healthlog-push/export/registry.json`, the only file copied from the old host. It is signed with the relay identity key for the public name, so the new host must use the same identity key and `HLP_PUBLIC_HOST`; otherwise the import fails and the relay does not start |
 | bbolt database (`/data`) | **Not moved.** The new host starts with an empty `/data`. |
 | TLS certificate and key (`/acme`) | **Not moved.** The new host obtains a fresh certificate via TLS-ALPN-01. |
 | Device bindings | **Not moved.** They return through the rebind path. |
@@ -138,8 +137,12 @@ Bindings revoked before the move stay revoked, because they are not in the
 export at all. Expect the number of bindings to climb back over a few hours.
 
 During the 14-day recovery window, instances that register again with a
-public key present in the export get their old identity and tier back.
-Nothing needs to be done by hand.
+public key present in the export get their old identity and tier back; any
+other key registers in probation. The global registration caps are ten times
+higher during the window, the per-address caps are unchanged. Devices that
+had opted out of a server stay blocked for it, and their opt-out key pins come
+back without the key: a new binding of such a token goes through the conflict
+challenge, which only the device can answer. Nothing needs to be done by hand.
 
 ## Rollback
 

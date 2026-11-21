@@ -44,9 +44,31 @@ The container image builds with:
 docker build -t healthlog-push:dev .
 ```
 
+The release pipeline (multi-arch build, signature, SBOM and provenance attestations, signed binary checksums,
+and their verification) is rehearsed locally against a throwaway registry and key with:
+
+```sh
+scripts/release-dry-run.sh [version]
+```
+
+It needs docker with buildx, cosign, syft, crane and Go. Run it before tagging a release; what a real
+release produces and how to verify it is in [docs/release-verification.md](docs/release-verification.md).
+
 ## Tests
 
 A change to a rule (a limit, a validation, a protocol check) comes with a test that fails when the rule is broken. Write the test, break the rule on purpose, watch the test fail, then restore it. A test that cannot fail does not count.
+
+A change to a security property also updates [SECURITY-INVARIANTS.md](SECURITY-INVARIANTS.md), which maps every invariant to the tests that hold it; `TestInvariantsNameRealTests` fails when a test named there does not exist.
+
+## Privacy notice and terms
+
+The served texts have one source: `internal/notice/privacy.md` and `internal/notice/terms.md`. Edit only those, then copy them to `docs/` with:
+
+```sh
+scripts/sync-notice.sh
+```
+
+`TestLegalTextsInSync` fails while the copies differ.
 
 ## Dependencies
 

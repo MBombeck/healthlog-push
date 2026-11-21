@@ -76,7 +76,8 @@ rollback does not touch `/data`, `/export` or `/acme`.
 
 ## Operator commands
 
-Every command goes over the admin unix socket (`/data/admin.sock`, mode 0600) and takes effect at once,
+Every command goes over the admin unix socket (`admin.sock` in `HLP_DATA_DIR`, so `/data/admin.sock` in the
+container; mode 0600; `HLP_ADMIN_SOCKET` overrides it for the server and the client alike) and takes effect at once,
 without a restart. The answer is JSON; a refused command prints `{"error": "..."}` and exits with status 1.
 Use `exec -T` in scripts. Commands that change state write a log line when they run (`admin.pause`,
 `admin.suspend`, `admin.block_token` and so on) without any id.
@@ -212,15 +213,17 @@ docker compose exec relay /healthlog-push admin notice clear
 
 `suspend <id> <reason>` keeps the bindings and refuses every request of the instance with `403
 instance_suspended` and the reason. Reasons are a closed set: `abuse`, `spam`, `invalid_tokens`,
-`harassment`, `legal`, `compromised`, `terms`, `operator_request`. A denylist entry is written (kept 365
-days, part of the export).
+`harassment`, `legal`, `compromised`, `terms`, `operator_request`. The tier, the reason and the day are
+stored in the instance record and travel in the export; the record is kept for 365 days after that day.
+A revoked instance cannot be suspended (the command is refused), so a revocation cannot be undone by a
+suspend and an unsuspend.
 
-`unsuspend <id>` returns the instance to `probation` (not to its previous tier) and removes the denylist
-entry.
+`unsuspend <id>` returns a suspended instance to `probation` (not to its previous tier) and clears the
+reason.
 
-`revoke <id> [reason]` deletes every binding of the instance and keeps its record as `revoked`, so the key
-cannot register again; the reason defaults to `abuse`. There is no command to undo a revocation; the
-operator registers a new key.
+`revoke <id> [reason]` deletes every binding of the instance and keeps its record as `revoked`, in one
+transaction, so the key cannot register again; the reason defaults to `abuse`. The record expires 365 days
+after the revocation. There is no command to undo a revocation; the operator registers a new key.
 
 ```sh
 docker compose exec relay /healthlog-push admin suspend 6f1c2a4e-8b3d-4c5e-9a7f-0d1e2f3a4b5c spam
@@ -251,7 +254,10 @@ docker compose exec relay /healthlog-push admin limits 6f1c2a4e-8b3d-4c5e-9a7f-0
 
 Opens the recovery window until a day (UTC), optionally importing an export first. During the window the
 global registration caps are ten times higher (300 per hour, 2000 per day with the defaults), never
-unlimited, the per-address caps still apply, and a new registration starts as `standard`. Instances whose key is in the imported export get their old id and tier back.
+unlimited, and the per-address caps still apply. Instances whose key is in the imported export get their
+old id and tier back; any other key registers in `probation`, as outside the window. The export given with
+`--from` is verified like the one read at start: signed by this relay's identity key, for this host, every
+instance inside the closed sets. Otherwise nothing is imported and the command fails.
 
 ```sh
 docker compose exec relay /healthlog-push admin recovery --until 2026-12-05 --from /export/registry.json
@@ -266,11 +272,14 @@ export ([Restore](#restore)).
 
 ### export
 
-Writes `/export/registry.json` now: instances (suspended and revoked ones with their tier), the denylist
-(instance id, reason code, expiry day), the device opt-out blocks and the operator token blocks (keyed hash,
-reason `device_opt_out` or `operator_block`, expiry day). Entries past the 365-day retention are left out; no bindings, no counters, no
-secrets. The
-relay also writes it at start and at every UTC day change.
+Writes `/export/registry.json` now, in format `healthlog-push-registry-v2`: `host`, `day`, the instances
+(suspended and revoked ones with their tier, reason and reason day), the device opt-out blocks
+(`blockedPairs`, reason `device_opt_out`), the operator token blocks (`blockedTokens`, reason
+`operator_block`) and the opt-out key pins (`optOutPins`, reason `device_opt_out_pin`), each as keyed hash,
+reason and expiry day. Entries past the 365-day retention are left out; no bindings, no counters, no
+secrets, no binding key hashes. The file carries a `signature` by the relay identity key over
+`hl-relay-export-v1` ([spec/statements.md](../spec/statements.md#hl-relay-export-v1)); an unsigned export is
+never written. The relay also writes it at start and at every UTC day change.
 
 ```sh
 docker compose exec relay /healthlog-push admin export
@@ -356,15 +365,17 @@ time it is used.
 1. `keygen token-mac` for the new value.
 2. Move the current value to `secrets/relay/token_mac_key_previous`, write the new one to `token_mac_key`.
 3. `docker compose up -d --force-recreate relay`.
-4. Keep the previous key for at least 14 weeks. Bindings without a push for about 13 weeks are deleted by
-   retention anyway, so after that no binding is left under the old key.
+4. Keep the previous key for 365 days, the block retention. Bindings move to the new key when they are
+   used, and bindings without a push for about 13 weeks are deleted by retention, but opt-out blocks,
+   opt-out pins and token blocks stay under the old key for their full 365 days.
 5. Remove `token_mac_key_previous` and recreate the relay.
 
-Opt-out blocks and token blocks are stored as hashes over the token MAC and are not rewritten. While the
-old key is configured as `token_mac_key_previous` the relay checks blocks under both keys. Once it is
-removed, blocks recorded under it no longer match: re-apply the token blocks you still need with
-`admin block-token --token`; opt-out blocks cannot be re-created, because the relay never knew the tokens.
-Keep the previous key for the 365-day block retention, or rotate this key only when it is exposed.
+Opt-out blocks, opt-out pins and token blocks are stored as hashes over the token MAC and are not
+rewritten. While the old key is configured as `token_mac_key_previous` the relay checks them under both
+keys. Once it is removed, those recorded under it no longer match: re-apply the token blocks you still need
+with `admin block-token --token`; opt-out blocks and pins cannot be re-created, because the relay never knew
+the tokens. There is one slot for a previous key, so rotate this key at most once a year, or when it is
+exposed.
 
 ### ACME account key
 
@@ -541,23 +552,30 @@ Only `/export/registry.json` is backed up. The database, the certificate cache a
   (owner 65532, group 65530, mode 0640) before the first start.
 - **On a running relay**, `admin recovery --until <day> --from /export/registry.json` imports instances that
   are missing and opens the window.
+- **The export must verify.** It is imported only when its signature verifies against this relay's identity
+  key, its `host` is `HLP_PUBLIC_HOST`, and every instance is inside the closed sets (UUIDv4 id, 32-byte key,
+  known tier and reason, device limit 1 to 150). Otherwise the import fails as a whole and the relay does not
+  start (log and exit code tell why); a restore therefore needs the same identity key and host name. An
+  export written before format `healthlog-push-registry-v2` is refused.
 
 Device bindings are not restored. The first push for a device answers `404 binding_unknown`; the instance
 submits its stored device statement again, or gets a fresh one from the app. Bindings come back over a few
 hours. Device opt-out blocks are restored from the export, so a server a device opted out of stays blocked;
 the restore must use the same token MAC keys (current and previous) from the secret store, because the pair
-hash is built from the token MAC. Operator token blocks (`block-token`, reason `operator_block`) and the
-denylist travel in the export as well, and suspended or revoked instances keep their tier, so every abuse
-block is still in force after a restore. Check with `admin stats` (tiers) and one `admin instance <id>` of a
+hash is built from the token MAC. The opt-out key pins are restored without the key, so every new binding
+of such a token goes through the challenge that only the device can answer. Operator token blocks
+(`block-token`, reason `operator_block`) travel in the export as well, and suspended or revoked instances
+keep their tier and reason, so every abuse block is still in force after a restore. Check with `admin stats` (tiers) and one `admin instance <id>` of a
 blocked instance.
 
-Test a restore regularly: start a relay with an empty `/data` and a copy of the export on a test host, and
-check that `admin stats` shows the imported instances.
+Test a restore regularly: start a relay with an empty `/data` and a copy of the export on a test host with
+the same identity key and `HLP_PUBLIC_HOST` (the signature binds both), and check that `admin stats` shows
+the imported instances.
 
 ## Hosting and certifications
 
-The hosted relay runs on a dedicated Hetzner Cloud server (CX23) operated by Hetzner Online GmbH in
-Falkenstein, Germany (location fsn1). The certification wording for users is section 13 of
+The hosted relay runs on a dedicated Hetzner Cloud server operated by Hetzner Online GmbH in
+Falkenstein, Germany. The certification wording for users is section 13 of
 [privacy.md](privacy.md#13-hosting-and-certifications); keep both in step and re-check the sources there at
 least once a year (ISO/IEC 27001 certificate, BSI C5 Type 2 attestation period, sub-processor list). Before
 the notice may say that processing is governed by a concluded data processing agreement, confirm in the

@@ -77,7 +77,7 @@ ones in `cmd/healthlog-push/main.go`.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `HLP_PUBLIC_HOST` | required | public host name; part of every signed text, the only name a certificate is requested for |
+| `HLP_PUBLIC_HOST` | required | public host name; part of every signed text, the only name a certificate is requested for. Must be a lower-case DNS name without port or trailing dot (`push.example.org`); anything else stops the relay at start |
 | `HLP_LISTEN` | `:8443` | public TLS listener |
 | `HLP_TLS_MODE` | `acme` | `acme` (Let's Encrypt over TLS-ALPN-01) or `files` |
 | `HLP_ACME_ACCOUNT_KEY_FILE` | `/run/secrets/relay/acme_account_key` | ACME account key, PEM EC |
@@ -92,9 +92,9 @@ ones in `cmd/healthlog-push/main.go`.
 | `HLP_METRICS_LISTEN` | `127.0.0.1:9464` | `/metrics` and a local `/healthz`; keep it on loopback |
 | `HLP_JWT_DIR` | `/run/jwt` | where the signer writes the provider token |
 | `HLP_JWT_REFRESH_DIR` | `/run/jwt-refresh` | where the relay touches the refresh marker |
-| `HLP_APNS_TOPIC` | required | your app's bundle id |
-| `HLP_APNS_ENVIRONMENT` | `production` | comma-separated list of served environments: `production`, `sandbox` |
-| `HLP_MIN_CLIENT_VERSION` | none | refuse instance requests whose `HL-Client` version is lower, for example `1.49.0` (`426 min_server_version`) |
+| `HLP_APNS_TOPIC` | required | your app's bundle id; there is no default |
+| `HLP_APNS_ENVIRONMENT` | `production` | comma-separated list of served environments; only `production` and `sandbox` are accepted, any other value stops the relay at start |
+| `HLP_MIN_CLIENT_VERSION` | none | refuse instance requests whose `HL-Client` version is lower, for example `1.49.0` (`426 min_server_version`); the compose file passes it from `.env`, and a value that is not `major.minor.patch` stops the relay at start |
 | `HLP_IMAGE_DIGEST` | empty | shown at `/version`; the compose file requires it |
 
 ### Signer (`healthlog-push signer`)
@@ -107,7 +107,9 @@ ones in `cmd/healthlog-push/main.go`.
 | `HLP_JWT_DIR`, `HLP_JWT_REFRESH_DIR` | as above | the shared tmpfs volumes (1 MB each, mounted `noexec`, `nosuid`, `nodev`) |
 
 The limits (`DefaultLimits`, `DefaultRegistrationLimits`) are compiled in; there is no variable for them in
-this version. So are Apple's endpoints (`api.push.apple.com` and `api.sandbox.push.apple.com`): no setting
+this version. If one of the three listeners (public, metrics, admin socket) fails, the relay logs
+`relay.listener_failed` with the listener's name, shuts down and exits with an error, so the container
+restarts. So are Apple's endpoints (`api.push.apple.com` and `api.sandbox.push.apple.com`): no setting
 can send the provider token or device tokens to another host. Per-instance device limits can be raised with `admin limits`.
 
 ### Serving development builds (sandbox)
@@ -203,4 +205,5 @@ HealthLog server documentation for its relay settings. Every response of your re
 Running a relay for other people makes you responsible for what it processes. Publish your own privacy
 notice and terms: the relay serves the texts compiled into the binary at `/privacy` and `/terms`, which
 describe the hosted relay of the HealthLog project, so build your own binary with your texts in
-`internal/notice/` if you serve anyone but yourself.
+`internal/notice/` if you serve anyone but yourself. The same applies to `/.well-known/security.txt` and the
+index page (`internal/notice/notice.go`), which name the HealthLog project's contacts.

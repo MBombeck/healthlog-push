@@ -7,7 +7,8 @@ info:
     Machine-readable companion to `spec/protocol.md`, which defines the check order, the limits and the
     semantics. Schemas follow the JSON tags of the Go structs in `internal/wire/bodies.go` and
     `internal/relay/*.go`. Request bodies are decoded strictly: unknown fields, trailing data or a second
-    JSON value make the body invalid (`422 invalid_item`).
+    JSON value, a key that matches a field only when case is ignored, and a key that appears twice in one
+    object make the body invalid (`422 invalid_item`).
 
     Every response produced by the relay's JSON reply path, including every `204`, carries the header
     `HL-Relay-Signature`: the relay identity key's Ed25519 signature over the `hl-relay-resp-v2` text
@@ -15,14 +16,17 @@ info:
     status and the hex SHA-256 of the body. A response without a valid signature, or bound to `-` although
     the request carried a nonce, is a transport error. Clients take retry hints only from the signed
     `retryAfter` field (capped at 86400 seconds), never from the unsigned `Retry-After` header. The
-    plain-text pages `/`, `/privacy` and `/terms` are not signed.
+    plain-text pages `/`, `/privacy`, `/terms` and `/.well-known/security.txt` are not signed.
 
-    `HL-Nonce` is mandatory on every `/v1` request, including registration and the app's direct calls;
-    without a valid one the relay answers `400 nonce_required` (signed with nonce `-`). Only `GET /healthz`
-    and `GET /version` may omit it. `POST` and `DELETE` requests must declare `Content-Length`
+    `HL-Nonce` is mandatory on every `/v1` request (the path `/v1` itself and everything under `/v1/`),
+    including registration and the app's direct calls; without a valid one the relay answers
+    `400 nonce_required` (signed with nonce `-`). Only `GET /healthz` and `GET /version` may omit it. An
+    unknown path, a known path with another method, and a non-canonical path (one that `path.Clean` would
+    change, such as `/v1//push` or `/v1/push/`) answer a signed `404 not_found`; the relay never redirects. `POST` and `DELETE` requests must declare `Content-Length`
     (`411 length_required`); a declared length above 128 KiB is refused with `413 too_large` before the
     body is read, and when the bodies in flight would exceed 32 MiB in total the answer is
-    `503 overloaded`. Response bodies are at most 65536 bytes; clients refuse more than 262144.
+    `503 overloaded`. Response bodies are at most 65536 bytes (a longer one would be replaced by
+    `500 internal`); clients refuse more than 262144.
 
     Keys and signatures are unpadded base64url. Tokens are hex. Token tags are 32 lowercase hex
     characters. Times are unix seconds.
@@ -131,6 +135,9 @@ paths:
       tags: [instance]
       operationId: deleteInstance
       summary: Delete the instance and all its bindings
+      description: |
+        The body must be empty (`Content-Length: 0`); any body is `422 invalid_item`.
+        Errors besides request signing: `422 invalid_item`, `503 storage_unavailable`.
       parameters:
         - $ref: "#/components/parameters/HL-Client"
       responses:
@@ -140,6 +147,7 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "411": { $ref: "#/components/responses/LengthRequired" }
         "413": { $ref: "#/components/responses/TooLarge" }
+        "422": { $ref: "#/components/responses/Invalid" }
         "426": { $ref: "#/components/responses/UpgradeRequired" }
         "429": { $ref: "#/components/responses/TooMany" }
         "503": { $ref: "#/components/responses/Unavailable" }
@@ -152,8 +160,11 @@ paths:
         The instance forwards the device statement (`hl-bind-v1`, signed by `bindingKey`) unchanged.
         `201` when the token was not bound to this instance before, `200` when it was (including an
         idempotent repeat of the stored statement). `409 binding_conflict` when a live binding holds
-        another key: `reason` is `challenge_sent` (a challenge push went to the token), `challenge_quota`
-        (no push was sent) or `challenge_unsent` (the push could not be queued; the quota was given back,
+        another key (the holding instance may replace its own binding directly after seven days without an
+        accepted push; any other instance always gets the challenge), or when the token is unbound and its
+        opt-out pin names another key or no key: `reason` is `challenge_sent` (a challenge push went to the
+        token), `challenge_quota` (one challenge per token, instance and day, or `challengesPerDay` reached;
+        no push was sent) or `challenge_unsent` (the push could not be queued; the quota was given back,
         retry after `retryAfter`).
         Errors besides request signing: `422 invalid_item`, `422 env_unsupported`, `401 stale_timestamp`,
         `403 binding_refused`, `409 binding_conflict`, `429 binding_quota`, `503 storage_unavailable`.
@@ -219,10 +230,13 @@ paths:
       description: |
         Sent by the app. `signature` is the `hl-challenge-v1` signature by `bindingKey`, which must be the
         key of the conflicting bind request. A challenge is valid for 30 minutes and can be used once.
-        The request is parsed and verified first; only failed attempts are charged to a relay-wide bucket
-        (100, refilling 20 per second), and once it is empty failed attempts answer `429 global`. A verified
-        call is limited per device token (10, refilling 10 per hour, `429 device_quota`). The answer also
-        checks that the instance is still active and applies its binding quotas (`429 binding_quota`).
+        The request is parsed and its signature checked first, for every request and before any lookup, so
+        the response time does not reveal whether a challenge or binding exists; only failed attempts are
+        charged to a relay-wide bucket (100, refilling 20 per second), and once it is empty failed attempts
+        answer `429 global`. A verified call is limited per device token (10, refilling 10 per hour,
+        `429 device_quota`). The answer also checks that the instance is still active and that the pair is
+        not blocked, and applies its binding quotas (`429 binding_quota`); the new binding counts against
+        `newBindingsPerDay`. An opt-out pin of the token is updated to the proven key.
         Errors: `400 nonce_required`, `411 length_required`, `413 too_large`, `422 invalid_item`,
         `403 challenge_refused`, `429 global`, `429 device_quota`, `429 binding_quota`,
         `503 storage_unavailable`, `503 overloaded`.
@@ -256,9 +270,11 @@ paths:
       summary: Leave an instance directly (app)
       description: |
         The direct opt-out. `signature` is the `hl-unbind-v1` signature by `bindingKey`. On success the
-        binding is deleted and the pair (token, instance) is blocked for 365 days. Only a later bind
-        statement by the same binding key, with a higher `seq` and a later `iat`, lifts the block
-        (`spec/protocol.md`, "Returning"). Any mismatch answers
+        binding is deleted, the pair (token, instance) is blocked for 365 days, and the binding key is
+        pinned to the token for 365 days: while the token is unbound, a binding with any other key needs
+        the challenge. Only a later bind statement by the same binding key, with a higher `seq` and an
+        `iat` after the opt-out and after the relay start, lifts the block (`spec/protocol.md`,
+        "Returning"). The signature is checked first for every request. Any mismatch answers
         `404 binding_unknown`. Failed attempts are charged to the relay-wide bucket (`429 global` once it is
         empty); a verified call is limited per device token (`429 device_quota`).
         Errors: `400 nonce_required`, `411 length_required`, `413 too_large`, `422 invalid_item`,
@@ -288,8 +304,8 @@ paths:
       operationId: readOwnBinding
       summary: Read the own binding (app)
       description: |
-        `HL-Signature` is the `hl-selfread-v1` signature by the key in `HL-Binding-Key`. Any mismatch
-        answers `404 binding_unknown`. Failed attempts are charged to the relay-wide bucket (`429 global` once
+        `HL-Signature` is the `hl-selfread-v1` signature by the key in `HL-Binding-Key`, checked first for
+        every request. Any mismatch answers `404 binding_unknown`. Failed attempts are charged to the relay-wide bucket (`429 global` once
         it is empty); a verified call is limited per device token (`429 device_quota`).
         Errors: `400 nonce_required`, `422 invalid_item`, `401 stale_timestamp`, `404 binding_unknown`,
         `429 global`, `429 device_quota`.
@@ -460,6 +476,21 @@ paths:
           content:
             text/plain:
               schema: { type: string }
+  /.well-known/security.txt:
+    get:
+      tags: [public]
+      operationId: getSecurityTxt
+      summary: Security contact (RFC 9116, plain text, unsigned)
+      description: |
+        Contact `relay@healthlog.dev` and the repository's GitHub security advisories, with an `Expires`
+        date that is renewed every year.
+      security: []
+      responses:
+        "200":
+          description: security.txt.
+          content:
+            text/plain:
+              schema: { type: string }
   /:
     get:
       tags: [public]
@@ -584,7 +615,7 @@ components:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
     NotFound:
-      description: "`binding_unknown`, or `not_found` for an unknown route."
+      description: "`binding_unknown`, or `not_found` for an unknown route, a known path with another method or a non-canonical path (never a redirect)."
       headers: { HL-Relay-Signature: { $ref: "#/components/headers/HL-Relay-Signature" } }
       content:
         application/json:

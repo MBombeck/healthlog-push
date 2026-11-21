@@ -75,7 +75,9 @@ flowchart LR
   device token cannot bind it.
 - The app can leave an instance directly (`DELETE /v1/bindings/self`) without the instance's cooperation.
   The pair is then blocked for 12 months; only the same device can lift the block, with a newly signed
-  binding statement.
+  binding statement. The binding key is pinned to the token for the same time, so another instance, even
+  one the same operator registers with a made-up key, cannot bind the token without a challenge that only
+  the device can answer.
 - The relay builds every APNs payload from constants. An instance chooses the class, the opaque envelope,
   the lifetime and a collapse id, never visible text, a category or `userInfo` keys.
 
@@ -182,7 +184,7 @@ day), never from the unsigned header. Request-rate and binding-quota refusals in
 | Silent pushes per hour | 6 | `429 device_quota` |
 | Live Activity ends per day | 12 | `429 device_quota` |
 | Soft-invalid binding | no push on the day it failed, then one probe a day | `429 binding_quota`, scope `device` |
-| Challenges per token | 1 per day | `409 binding_conflict`, `challenge_quota` |
+| Challenges per token | 1 per token, instance and day | `409 binding_conflict`, `challenge_quota` |
 | Verified app calls (opt-out, self-read, challenge answer) | bucket of 10, refills 10 per hour | `429 device_quota` |
 
 | Relay-wide | Value |
@@ -192,15 +194,17 @@ day), never from the unsigned header. Request-rate and binding-quota refusals in
 | Pool of all probation instances per minute | 10 % of the global limit, at least 60, at most 600 |
 | Registrations | 3 per day per IPv4 address or IPv6 /64, 10 per IPv6 /48, 30 per hour and 200 per day globally (ten times the global caps during a recovery window) |
 | Failed app calls | token bucket of 100, refills 20 per second, shared by all callers; only failed attempts are charged |
-| Connections | 2,000 in total, 50 per IPv4 address or IPv6 /64, 16 HTTP/2 streams per connection |
+| Connections | 2,000 in total, 8 per IPv4 address or IPv6 /64, 64 per IPv6 /48, 16 HTTP/2 streams per connection |
 | Request bodies | `Content-Length` required on `POST` and `DELETE` (`411 length_required`); push batch at most 50 items and 128 KiB, other bodies 4 KiB; 32 MiB in flight in total (`503 overloaded`) |
 | Response bodies | at most 64 KiB; clients refuse more than 256 KiB |
-| Send queue | 4,096 jobs, 256 per instance, refused when the estimated wait exceeds 2 s |
+| Send queue | 4,096 jobs, 256 per instance; an empty queue always admits, otherwise a job is refused when the estimated wait exceeds 2 s |
 | Signed time window | plus or minus 300 s |
 
 After a restart, counts held in memory are gone. Until the next UTC midnight the relay therefore halves the
 global registration caps and the per-device silent and Live Activity limits. The daily alert count of a
-device is stored with its binding and survives a restart.
+device, the daily push count of an instance and an instance's anomaly flag are stored and survive a restart.
+The per-instance counts of new bindings and challenges and the 24-hour block after an exceeded invalid-token
+budget do not; see the known limitations in [docs/threat-model.md](docs/threat-model.md#known-limitations).
 
 ## Verifying releases
 
@@ -237,6 +241,9 @@ sha256sum -c SHA256SUMS --ignore-missing
 The hosted relay reports its version, commit and image digest at `https://push.healthlog.dev/version`.
 That answer comes from the server being checked, so it is a statement, not proof.
 
+[docs/release-verification.md](docs/release-verification.md) walks through checking a release end to end.
+The pipeline can be rehearsed locally, with a throwaway registry and key, with `scripts/release-dry-run.sh`.
+
 ### Hosted relay identity keys
 
 The public identity keys of the hosted relay `push.healthlog.dev`, `current` and `next`, are published with
@@ -246,7 +253,13 @@ base64url Ed25519 public keys). Clients pin them at build time. The HealthLog se
 relay pins, the iOS app as its `HLPushRelayKeys` build setting. Neither fetches them from the relay at
 run time, because an answer from the relay cannot vouch for the key that signs it. A new `next` key is
 published in the release notes of the release that ships it, before the relay switches to it (see
-[docs/operations.md](docs/operations.md), "Relay identity key").
+[docs/operations.md](docs/operations.md), "Relay identity key", and [docs/key-ceremony.md](docs/key-ceremony.md)
+for how the keys are made and kept).
+
+| Key | Public key (unpadded base64url Ed25519) | Since |
+|---|---|---|
+| `current` | to be published with the first release | |
+| `next` | to be published with the first release | |
 
 ## Project layout
 
@@ -261,7 +274,7 @@ internal/limits/       token buckets, windows, registration and connection limit
 internal/queue/        fair, bounded in-memory send queue
 internal/logx/         the only logger: JSON lines with a closed set of keys
 internal/metrics/      coarse Prometheus counters without instance labels
-internal/notice/       the texts served at /privacy, /terms and /
+internal/notice/       the texts served at /privacy, /terms, /.well-known/security.txt and /
 internal/admin/        operator command line over the admin socket
 spec/                  protocol specification, test vectors and their tools
 deploy/compose/        compose file for relay and signer
@@ -293,7 +306,10 @@ locally. Dependencies and the policy for adding one: [docs/dependencies.md](docs
 - [docs/operations.md](docs/operations.md): deploy, rollback, admin commands, key rotation, alerts, runbooks
 - [docs/self-hosting.md](docs/self-hosting.md): running your own relay for your own app build
 - [docs/api.md](docs/api.md): API reference with examples; the contract is `spec/protocol.md` and `spec/relay-api.yaml`
-- [docs/threat-model.md](docs/threat-model.md): assets, actors, limitations, tests
+- [docs/threat-model.md](docs/threat-model.md): assets, actors, limitations
+- [SECURITY-INVARIANTS.md](SECURITY-INVARIANTS.md): every security invariant and the tests that fail when it breaks
+- [docs/key-ceremony.md](docs/key-ceremony.md): how the relay identity, MAC and APNs keys are made, kept and rotated
+- [docs/release-verification.md](docs/release-verification.md): verifying a release and rehearsing one locally
 - [docs/hardening.md](docs/hardening.md): how the hosted relay's host is hardened
 - [docs/privacy.md](docs/privacy.md) and [docs/terms.md](docs/terms.md): the texts of the hosted relay
 - [docs/migration.md](docs/migration.md): moving the relay to a new host

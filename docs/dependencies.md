@@ -46,9 +46,10 @@ when it signs.
 | `actions/checkout`, `actions/setup-go`, `actions/setup-node` | all workflows | check out, install Go from `go.mod`, install Node 22 |
 | `golangci-lint` v2.15.0 (`golangci/golangci-lint-action`) | `ci.yml` | linters, configured in `.golangci.yml` |
 | `golang.org/x/vuln/cmd/govulncheck` v1.10.0 | `ci.yml` | known vulnerabilities in reachable code |
-| Go fuzzing (`go test -fuzz`) | `ci.yml` | every `Fuzz` target for 20 seconds; the job fails if none is found |
+| Go fuzzing (`go test -fuzz`) | `ci.yml` | every `Fuzz` target for 20 seconds, starting from the corpus committed under `testdata/fuzz`; the job fails if none is found |
 | Node 22, no npm packages | `ci.yml` | `spec/tools/check-vectors.mjs` regenerates and checks the test vectors with `node:crypto` only |
 | `scripts/check-text.sh` | `ci.yml` | text rules for every tracked file |
+| `ansible-lint`, `yamllint`, `ansible-core` | `ci.yml` (`deploy-lint` job) | lint and syntax-check the deploy code; installed with `pip install --require-hashes --no-deps` from `.github/deploy-lint-requirements.txt`, which pins every package and its dependencies by version and SHA-256 (generated with `pip-compile --generate-hashes` from `.github/deploy-lint-requirements.in`) |
 | `docker/setup-qemu-action`, `docker/setup-buildx-action`, `docker/build-push-action`, `docker/login-action` | `ci.yml`, `release.yml` | multi-arch image builds (amd64, arm64) and the push to GHCR |
 | `sigstore/cosign-installer` | `release.yml` | keyless signing of the image, the SBOM attestation and the binaries' checksum file |
 | `anchore/sbom-action` | `release.yml` | SPDX SBOM of the released image |

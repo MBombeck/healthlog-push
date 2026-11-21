@@ -13,15 +13,20 @@ characters), public keys 32 bytes (43 characters).
 ## Conventions
 
 - TLS 1.3 (TLS 1.2 only for a certificate validation handshake that offers nothing but `acme-tls/1`). JSON
-  bodies, decoded strictly: unknown fields, trailing data or a wrong type give `422 invalid_item`.
+  bodies, decoded strictly: unknown fields, trailing data, a wrong type, a key that matches a field only when
+  case is ignored (`Token` for `token`) and a key that appears twice in one object give `422 invalid_item`.
 - `HL-Nonce` (16 random bytes, base64url, 22 characters, fresh for every request) is mandatory on every
-  `/v1` request, including registration and the app's direct calls; without a valid one the relay answers
-  `400 nonce_required`. Only `GET /healthz` and `GET /version` may omit it.
+  `/v1` request (the path `/v1` itself and everything under it), including registration and the app's
+  direct calls; without a valid one the relay answers `400 nonce_required`. Only `GET /healthz` and
+  `GET /version` may omit it.
+- Only canonical paths are routed: a path that `path.Clean` would change (`/v1//push`, `/v1/push/`) gets a
+  signed `404 not_found`. The relay never redirects.
 - `POST` and `DELETE` must declare their body length in `Content-Length` (`0` for no body); a body of unknown
   length gets `411 length_required`. Bodies are limited to 128 KiB for `POST /v1/push` and 4 KiB for
   everything else (`413 too_large`, checked against the declared length before the body is read). When the
   bodies in flight across all connections would exceed 32 MiB, the relay answers `503 overloaded`.
-- Response bodies are at most 64 KiB. A client refuses a response body over 256 KiB without reading on.
+- Response bodies are at most 64 KiB (65,536 bytes; a body that would be longer is answered `500 internal`).
+  A client refuses a response body over 256 KiB without reading on.
 - At most 16 concurrent streams per HTTP/2 connection.
 - Binary values are unpadded base64url. Device and activity tokens are hex (32 to 100 bytes). Token tags
   are lowercase hex of `SHA-256("hl-push-token" || token)[0:16]`.
@@ -59,7 +64,7 @@ only limits how often failures are counted in the metrics.
 
 ### Response signing
 
-Every response except `/privacy`, `/terms` and `/` has `HL-Relay-Signature`: an Ed25519 signature by the
+Every response except `/privacy`, `/terms`, `/.well-known/security.txt` and `/` has `HL-Relay-Signature`: an Ed25519 signature by the
 relay identity key over
 
 ```
@@ -104,6 +109,7 @@ cap them at 86,400 seconds.
 | 426 | `min_server_version` |
 | 429 | `instance_rate`, `instance_quota`, `binding_quota`, `device_quota`, `global` |
 | 502 | `apns_rejected` (item) |
+| 500 | `internal` |
 | 503 | `maintenance`, `relay_misconfigured`, `apns_unavailable`, `queue_full`, `registration_paused`, `storage_unavailable`, `overloaded` |
 
 ## Instances
@@ -135,7 +141,9 @@ HL-Relay-Signature: <86 base64url>
 Add `"invite":"<code>"` while registration is invite-only. Refusals: `401 stale_timestamp` with
 `relayTime`, `401 bad_signature`, `403 invite_required`, `403 instance_suspended` or `instance_revoked` for
 a known key, `503 registration_paused` (closed, or registration limits reached). In invite mode the code is
-spent only when the registration succeeds.
+spent only when the registration succeeds. During a recovery window the global registration caps are ten
+times higher; keys from the restored export get their old id and tier back, any other key starts in
+`probation`.
 
 ### POST /v1/instances/self/rotate
 
@@ -165,7 +173,8 @@ Refusals: `429 instance_rate` (already rotated today), `409 key_in_use`. `/v1/st
 
 ### DELETE /v1/instances/self
 
-Deletes the instance and every binding it holds. Signed like every instance request, empty body.
+Deletes the instance and every binding it holds. Signed like every instance request. The body must be empty
+(`Content-Length: 0`); any body is `422 invalid_item`.
 
 ```http
 DELETE /v1/instances/self HTTP/1.1
@@ -197,7 +206,8 @@ HL-Signature: <86 base64url>
 {"state":"ok","tier":"probation","limits":{"devices":20,"provisional":10,"newBindingsPerDay":20,"requestsPerMinute":20,"pushesPerDay":500,"pushesPerMinute":30,"invalidTokensPerDay":20,"challengesPerDay":20,"badSignatureBurst":30},"devices":{"active":2,"provisional":0,"limit":20},"notice":null,"relayTime":1795000000,"registration":"open"}
 ```
 
-`reason` appears for a suspended instance, `keyRotatedDay` after a rotation. A notice looks like
+`keyRotatedDay` appears for seven days after a rotation. A suspended instance gets
+`403 instance_suspended` with `reason` instead of a status. A notice looks like
 `{"id":"planned_maintenance","level":"planned","until":1795259200}`.
 
 ## Bindings
@@ -231,12 +241,18 @@ HTTP/1.1 201 Created
 - `201` for a binding new to this instance, `200` with the current state when the token is already bound to
   this instance (a repeated statement, or the same key with a higher `seq`). A binding becomes `active` with the first push Apple accepts.
 - Moving a token from another instance needs a statement by the same binding key with a higher `seq`.
-- A different binding key for a token whose binding was created or had an accepted push in the last seven
-  days gives
+- A different binding key for a bound token gives
   `409 {"error":"binding_conflict","reason":"challenge_sent"}`: the relay sends a challenge push to the
-  token (see the next endpoint). `reason` is `challenge_quota` when the token already had a challenge today
-  or the instance used its 20 for the day, and `challenge_unsent` (with `retryAfter`) when the challenge push
-  could not be queued; the quota is then given back.
+  token (see the next endpoint). Only the instance that holds the binding may replace it with a new key
+  directly, and only when the binding was created or had its last accepted push seven or more days ago;
+  every other instance always gets the challenge.
+- After a direct opt-out the binding key is pinned to the token for 365 days. While the token is unbound,
+  a binding with any other key (and, after a restore from the export, with any key) also gives
+  `409 binding_conflict` with a challenge push; only the device can resolve it. A binding with the pinned
+  key goes ahead.
+- `reason` is `challenge_quota` when this instance already challenged the token today or used its 20 for
+  the day (one challenge per token, instance and day), and `challenge_unsent` (with `retryAfter`) when the
+  challenge push could not be queued; the quota is then given back.
 - Refusals: `403 binding_refused` (bad device signature, statement for another instance, `seq` not higher,
   pair or token blocked), `422 env_unsupported`, `429 binding_quota` with limits,
   `503 storage_unavailable`.
@@ -282,17 +298,21 @@ HTTP/1.1 200 OK
 {"state":"provisional"}
 ```
 
-The new key replaces the old binding; the previous holder gets `404 binding_unknown` on its next push.
+The new key replaces the old binding (or takes the unbound token); the previous holder gets `404
+binding_unknown` on its next push. The binding passes the same quotas as a direct one and counts against
+`newBindingsPerDay`; an opt-out pin of the token now names the proven key.
 Refusals: `403 challenge_refused` for an unknown or expired challenge, a different key or token, a bad
 signature, or an instance that is gone, suspended or revoked or a blocked pair; `429 binding_quota` when the
 instance's binding quotas (see `POST /v1/bindings`) do not allow the new binding.
 
 ### DELETE /v1/bindings/self (app)
 
-The direct opt-out. Deletes the binding without the instance and blocks the pair of token and instance for
-365 days. Only the device lifts the block again: a later `POST /v1/bindings` through that instance whose
-statement is signed by the same binding key, with a `seq` higher than that of the binding that left (see
-`spec/protocol.md`, "Returning"). A block restored from the registry export cannot be lifted.
+The direct opt-out. Deletes the binding without the instance, blocks the pair of token and instance for
+365 days and pins the binding key to the token for 365 days (no other key binds the unbound token without
+the challenge). Only the device lifts the block again: a later `POST /v1/bindings` through that instance
+whose statement is signed by the same binding key, with a `seq` higher than that of the binding that left
+and an `iat` after the opt-out and after the relay start (see `spec/protocol.md`, "Returning"). A block
+restored from the registry export cannot be lifted.
 
 Signed text: `hl-unbind-v1\n<host>\n<instance id>\n<hex token tag>\n<iat>`.
 
@@ -334,7 +354,8 @@ HL-Signature: <86 base64url>
 
 `lastUsedWeekOf` is the Monday of the week of last use. Refusal: `404 binding_unknown`.
 
-The three app endpoints parse and verify first. Only failed attempts are charged to one relay-wide bucket
+The three app endpoints parse the request and check its signature first, for every request and before any
+binding is looked up, so the response time does not reveal whether a binding exists. Only failed attempts are charged to one relay-wide bucket
 (100, refilling 20 per second); once it is empty, further failures answer `429 global`, scope `global`. A
 correctly signed call is never charged there; it is limited per device token instead (bucket of 10,
 refilling 10 per hour, `429 device_quota`, scope `device`).
@@ -345,8 +366,8 @@ refilling 10 per hour, `429 device_quota`, scope `device`).
 
 Up to 50 items. The answer is `200` with one result per item, in request order, unless the whole batch is
 refused (`503 maintenance`, `503 relay_misconfigured`, `503 apns_unavailable`, `413 too_many_items`,
-`422 invalid_item` for an unparseable body). The relay waits at most 8 seconds for Apple; items still
-open then return `503 apns_unavailable` with a retry hint.
+`422 invalid_item` for an unparseable body). The relay waits at most 8 seconds for Apple; a result that
+is there by then is reported as it is, items still open return `503 apns_unavailable` with a retry hint.
 
 | Field | Rules |
 |---|---|
@@ -457,7 +478,9 @@ Signed.
 {"commit":"<git commit>","imageDigest":"sha256:<64 hex>","version":"v1.0.0"}
 ```
 
-### GET /privacy, GET /terms, GET /
+### GET /privacy, GET /terms, GET /.well-known/security.txt, GET /
 
-Plain text (`text/plain; charset=utf-8`): the privacy notice, the terms, and a short index with contact
-addresses. Not signed. Any other path answers a signed `404 not_found`.
+Plain text (`text/plain; charset=utf-8`): the privacy notice, the terms, the RFC 9116 security contact
+(`relay@healthlog.dev` and the repository's GitHub security advisories), and a short index with contact
+addresses. Not signed. Any other path, a known path with another method and any non-canonical path answer a
+signed `404 not_found`.

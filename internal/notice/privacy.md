@@ -46,8 +46,8 @@ plaintext of a notification.
 - The instance id of your HealthLog server, its public signing key and the server software name and version
   it reported at registration.
 - The IP address of your HealthLog server when it connects. It is held in memory only: hashed with a salt
-  that changes every day for the registration limit, and as the address (IPv4) or /64 prefix (IPv6) of an
-  open connection for the connection limit. It is not stored and not logged.
+  that changes every day for the registration limit, and as the address (IPv4) or the /64 and /48 prefixes
+  (IPv6) of an open connection for the connection limit. It is not stored and not logged.
 - The IP address of your device when your app talks to the relay directly: when you switch the relay off or
   leave a server (opt-out), when you read what the relay holds about you, and when your app answers a
   binding conflict challenge. It is not stored and not logged.
@@ -75,19 +75,23 @@ All times in the relay's database are day or week numbers (UTC), never a time of
   Apple reports the token as no longer valid, when the binding has had no notification for about 90 days
   (13 weeks), or when it is still provisional more than two days after it was created.
 - Opt-out block: after you opt out directly, a keyed hash of the pair of your device token and that
-  server's instance id, with the day, a hash of your app's binding key and the counter and time of your
-  opt-out. Kept for 365 days, so that this server cannot bind your device again unless you turn the relay
-  on for it again in the app, and abuse blocks stay in force.
-  Neither your token nor its HMAC can be read back from the hash.
+  server's instance id, with the day, a hash of your app's binding key and the sequence number of the
+  binding you left. Kept for 365 days, so that this server cannot bind your device again unless you turn the
+  relay on for it again in the app. Neither your token nor its HMAC can be read back from the hash. The exact
+  time of your opt-out is kept in memory for 10 minutes only, never stored.
+- Opt-out key pin: with the same opt-out, a keyed hash of your device token alone, with the day and the
+  hash of your app's binding key. Kept for 365 days, so that no other server, for example a second one
+  registered by the operator you left, can bind your device with a key your app does not hold: such a
+  binding needs a confirmation that only your app can give.
 - Token block: a keyed hash of a token the operator blocked against abuse, with the day. Kept for 365 days.
-- HealthLog server (instance): instance id, public key, tier, a suspension reason from a fixed list, the day
-  of registration, the week of last contact, its device limit, the day of its first and of its last accepted
-  notification, the day of its last key rotation, and the software name and version it reported.
+- HealthLog server (instance): instance id, public key, tier, for a suspended or revoked server the reason
+  from a fixed list and its day, the day of registration, the week of last contact, its device limit, the
+  day of its first and of its last accepted notification, the day of its last key rotation, and the last day
+  it was flagged for an anomaly (a conflict challenge or too many invalid tokens).
   Deleted together with all its bindings when the server unregisters, after about 90 days (13 weeks) without
   contact, or more than two days after registration if it never delivered a notification. The record of a
-  suspended or revoked server is kept as long as its denylist entry (365 days), so that the same key cannot
-  simply register again in that time.
-- Denylist entry for a suspended or revoked server: instance id, reason, day. Kept for 365 days.
+  suspended or revoked server is kept for 365 days after the suspension or revocation, so that the same key
+  cannot simply register again in that time.
 - Per-server day counters: notifications sent, invalid tokens and device moves, without class. Kept for
   7 days, used for limits and abuse detection.
 - Relay-wide day counters: per day, notification class and result, the number of notifications; per day,
@@ -98,15 +102,17 @@ All times in the relay's database are day or week numbers (UTC), never a time of
 
 Kept in memory only, gone at the latest on restart: the device token during a request, the nonces of recent
 requests, recent push results for retries (10 minutes), per-device rate counters, the hashed address
-counters of the registration limit (reset daily) and pending conflict challenges (30 minutes).
+counters of the registration limit (reset daily), pending conflict challenges (30 minutes) and the time of a
+direct opt-out (10 minutes).
 
-The daily backup contains only the list of registered servers, the denylist and the blocks: instance id,
-public key, tier, reason, day of registration, device limit and day of first delivery; for each denylist
-entry the instance id, the reason code and the expiry day; for each opt-out block and each operator token
-block only a keyed hash, the reason code (`device_opt_out` or `operator_block`) and the expiry day.
-Entries older than 365 days are not exported. The backup contains no device bindings, no tokens or token HMACs and no
-counters. Opt-outs are in the backup so that a restore can never silently let a server you left reach your
-device again, and abuse blocks stay in force.
+The daily backup contains only the list of registered servers and the blocks: instance id, public key,
+tier, reason and its day, day of registration, device limit and day of first delivery; for each opt-out
+block, each opt-out key pin and each operator token block only a keyed hash, the reason code
+(`device_opt_out`, `device_opt_out_pin` or `operator_block`) and the expiry day. It carries no binding key
+hash. Entries older than 365 days are not exported. The backup contains no device bindings, no tokens or
+token HMACs and no counters. It is signed with the relay's key, and the relay refuses a backup that was
+changed. Opt-outs and pins are in the backup so that a restore can never silently let a server you left
+reach your device again, and abuse blocks stay in force.
 
 
 ## 6. Usage figures
@@ -167,7 +173,7 @@ There is no advertising, no profiling and no automated decision about you.
 
 - Delivering notifications to your device: your consent (Art. 6(1)(a) and Art. 9(2)(a) GDPR), given in the
   app, recorded with the version of the consent text and the day. You can withdraw it at any time.
-- Limits, abuse prevention and the denylist: the legitimate interest in keeping the service usable and safe
+- Limits, abuse prevention, suspensions and blocks: the legitimate interest in keeping the service usable and safe
   for everyone (Art. 6(1)(f) GDPR).
 - Data about a HealthLog server (instance id, key, address in memory): the terms the server's operator
   accepted when switching the relay on (Art. 6(1)(b) GDPR), otherwise Art. 6(1)(f) GDPR.
@@ -186,7 +192,8 @@ You have the right of access, rectification, erasure, restriction, data portabil
 - Erasure and withdrawal of consent: switch the relay off in the app, or leave the server. The app sends a
   signed request directly to the relay (DELETE /v1/bindings/self). The relay deletes the binding at once,
   without the cooperation of your HealthLog server, and blocks that server from binding your device again
-  for 365 days, unless you turn the relay on for that server again in the app.
+  for 365 days, unless you turn the relay on for that server again in the app. For the same time no server
+  can bind your device with a key your app does not hold without your app confirming it.
 
 You can also write to privacy@healthlog.dev. Because the relay cannot identify you, include the instance id
 your app shows; do not send a device token by e-mail.
