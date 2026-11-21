@@ -194,19 +194,28 @@ func (r *Registrations) key(p netip.Prefix) string {
 	return string(m.Sum(nil)[:16])
 }
 
-// ConnLimiter wraps a listener and limits concurrent connections in total and per IPv4 address or IPv6 /64.
+// ConnLimiter wraps a listener and limits concurrent connections in total, per IPv4 address or IPv6 /64,
+// and per IPv6 /48. A HealthLog server needs one connection, so the per-address cap is small: holding all
+// slots then takes many addresses, not a handful.
 type ConnLimiter struct {
 	net.Listener
-	Total, PerPrefix int
-	mu               sync.Mutex
-	open             int
-	per              map[netip.Prefix]int
-	Rejected         func()
+	Total, PerPrefix, PerWide int
+	mu                        sync.Mutex
+	open                      int
+	per                       map[netip.Prefix]int
+	Rejected                  func()
 }
 
+// Default connection limits of the hosted relay.
+const (
+	DefaultConnTotal   = 2000
+	DefaultConnPerAddr = 8  // per IPv4 address or IPv6 /64
+	DefaultConnPerWide = 64 // per IPv6 /48
+)
+
 // NewConnLimiter wraps l.
-func NewConnLimiter(l net.Listener, total, perPrefix int) *ConnLimiter {
-	return &ConnLimiter{Listener: l, Total: total, PerPrefix: perPrefix, per: map[netip.Prefix]int{}}
+func NewConnLimiter(l net.Listener, total, perPrefix, perWide int) *ConnLimiter {
+	return &ConnLimiter{Listener: l, Total: total, PerPrefix: perPrefix, PerWide: perWide, per: map[netip.Prefix]int{}}
 }
 
 // Accept returns the next connection within the limits; connections over a limit are closed at once.
@@ -216,9 +225,9 @@ func (c *ConnLimiter) Accept() (net.Conn, error) {
 		if err != nil {
 			return nil, err
 		}
-		p := prefixOf(conn.RemoteAddr())
+		n, w := prefixesOf(conn.RemoteAddr())
 		c.mu.Lock()
-		if c.open >= c.Total || c.per[p] >= c.PerPrefix {
+		if c.open >= c.Total || c.per[n] >= c.PerPrefix || (w != n && c.per[w] >= c.PerWide) {
 			c.mu.Unlock()
 			_ = conn.Close()
 			if c.Rejected != nil {
@@ -227,25 +236,34 @@ func (c *ConnLimiter) Accept() (net.Conn, error) {
 			continue
 		}
 		c.open++
-		c.per[p]++
+		c.per[n]++
+		if w != n {
+			c.per[w]++
+		}
 		c.mu.Unlock()
-		return &limitedConn{Conn: conn, l: c, p: p}, nil
+		return &limitedConn{Conn: conn, l: c, n: n, w: w}, nil
 	}
 }
 
-func prefixOf(a net.Addr) netip.Prefix {
+func (c *ConnLimiter) release(p netip.Prefix) {
+	c.per[p]--
+	if c.per[p] <= 0 {
+		delete(c.per, p)
+	}
+}
+
+func prefixesOf(a net.Addr) (narrow, wide netip.Prefix) {
 	ap, err := netip.ParseAddrPort(a.String())
 	if err != nil {
-		return netip.Prefix{}
+		return netip.Prefix{}, netip.Prefix{}
 	}
-	n, _ := Prefixes(ap.Addr())
-	return n
+	return Prefixes(ap.Addr())
 }
 
 type limitedConn struct {
 	net.Conn
 	l    *ConnLimiter
-	p    netip.Prefix
+	n, w netip.Prefix
 	once sync.Once
 }
 
@@ -253,9 +271,9 @@ func (c *limitedConn) Close() error {
 	c.once.Do(func() {
 		c.l.mu.Lock()
 		c.l.open--
-		c.l.per[c.p]--
-		if c.l.per[c.p] <= 0 {
-			delete(c.l.per, c.p)
+		c.l.release(c.n)
+		if c.w != c.n {
+			c.l.release(c.w)
 		}
 		c.l.mu.Unlock()
 	})

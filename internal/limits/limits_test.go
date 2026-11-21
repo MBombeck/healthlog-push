@@ -100,7 +100,7 @@ func TestConnLimiter(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cl := NewConnLimiter(ln, 10, 2)
+	cl := NewConnLimiter(ln, 10, 2, 4)
 	rejected := make(chan struct{}, 10)
 	cl.Rejected = func() { rejected <- struct{}{} }
 	go func() {
@@ -129,4 +129,54 @@ func TestConnLimiter(t *testing.T) {
 		_ = c.Close()
 	}
 	_ = ln.Close()
+}
+
+type fakeConn struct {
+	net.Conn
+	addr net.Addr
+}
+
+func (f fakeConn) RemoteAddr() net.Addr { return f.addr }
+func (f fakeConn) Close() error         { return nil }
+
+type fakeListener struct {
+	net.Listener
+	addrs []string
+}
+
+func (f *fakeListener) Accept() (net.Conn, error) {
+	if len(f.addrs) == 0 {
+		return nil, net.ErrClosed
+	}
+	a := f.addrs[0]
+	f.addrs = f.addrs[1:]
+	return fakeConn{addr: net.TCPAddrFromAddrPort(netip.MustParseAddrPort(a))}, nil
+}
+
+// TestConnLimitsPerAddressAndPer48: eight connections per IPv4 address or IPv6 /64, 64 per IPv6 /48.
+func TestConnLimitsPerAddressAndPer48(t *testing.T) {
+	count := func(addrs []string, total, per, wide int) int {
+		cl := NewConnLimiter(&fakeListener{addrs: addrs}, total, per, wide)
+		n := 0
+		for {
+			if _, err := cl.Accept(); err != nil {
+				return n
+			}
+			n++
+		}
+	}
+	var same []string
+	for range 20 {
+		same = append(same, "[2001:db8:1:1::1]:443")
+	}
+	if n := count(same, 2000, DefaultConnPerAddr, DefaultConnPerWide); n != DefaultConnPerAddr {
+		t.Fatalf("one /64: %d accepted", n)
+	}
+	var wide []string
+	for k := range 100 {
+		wide = append(wide, netip.AddrPortFrom(netip.AddrFrom16([16]byte{0x20, 0x01, 0x0d, 0xb8, 0, 1, 0, byte(k), 15: 1}), 443).String())
+	}
+	if n := count(wide, 2000, DefaultConnPerAddr, DefaultConnPerWide); n != DefaultConnPerWide {
+		t.Fatalf("one /48: %d accepted", n)
+	}
 }

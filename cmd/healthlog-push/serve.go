@@ -116,7 +116,7 @@ func serve(ctx context.Context, r *relay.Relay, tlsCfg *tls.Config) error {
 	if err != nil {
 		return err
 	}
-	cl := limits.NewConnLimiter(ln, 2000, 50)
+	cl := limits.NewConnLimiter(ln, limits.DefaultConnTotal, limits.DefaultConnPerAddr, limits.DefaultConnPerWide)
 	cl.Rejected = func() { r.Metrics.Inc("hlp_connections_rejected_total") }
 	srv := &http.Server{
 		Handler:           r.Handler(),
