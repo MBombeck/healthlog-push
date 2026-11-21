@@ -3,6 +3,7 @@ package relay
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"github.com/MBombeck/healthlog-push/internal/wire"
 	"net/http"
 	"sync"
 	"testing"
@@ -42,6 +43,29 @@ func TestRotateRacingDeleteLeavesNoZombie(t *testing.T) {
 		}
 		if rp := (&instance{h: h, key: nk}).registerRaw(""); rp.Status != http.StatusCreated {
 			t.Fatalf("registering with the rotated key: %d %s", rp.Status, rp.Raw)
+		}
+	}
+}
+
+// TestAppAnswersCostTheSameWork: an opt-out or self-read for a token without a binding runs the same
+// signature check as one for a bound token, so a former instance cannot time whether the device is still
+// bound with a key it knows.
+func TestAppAnswersCostTheSameWork(t *testing.T) {
+	h := newHarness(t)
+	i := h.register()
+	bound, stranger := newDevice(0x51), newDevice(0x52)
+	i.activate(bound)
+	for name, call := range map[string]func() response{
+		"self-read unknown": func() response { return h.selfRead(stranger) },
+		"opt-out unknown":   func() response { return h.unbindSelf(stranger, stranger.key, i.id) },
+		"opt-out wrong key": func() response { return h.unbindSelf(bound, stranger.key, i.id) },
+	} {
+		before := wire.Verifications()
+		if rp := call(); rp.Status != http.StatusNotFound {
+			t.Fatalf("%s: %d", name, rp.Status)
+		}
+		if wire.Verifications()-before != 1 {
+			t.Errorf("%s: %d signature checks, want exactly 1", name, wire.Verifications()-before)
 		}
 	}
 }

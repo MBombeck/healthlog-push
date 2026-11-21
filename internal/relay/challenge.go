@@ -69,12 +69,13 @@ func (r *Relay) handleChallenge(w http.ResponseWriter, req *http.Request) {
 		r.appFail(w, req, http.StatusUnprocessableEntity, errBody{Error: "invalid_item"})
 		return
 	}
+	valid := ans.Verify(r.cfg.Host) // first and outside the lock, as for the opt-out
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	now := r.cfg.Now()
 	pc := r.conflicts[ans.Challenge]
-	if pc == nil || now.After(pc.expires) || !bytes.Equal(pc.tokenTag, ans.TokenTag) ||
-		!bytes.Equal(pc.keyHash, keyHash(ans.BindingKey)) || !ans.Verify(r.cfg.Host) {
+	if !valid || pc == nil || now.After(pc.expires) || !bytes.Equal(pc.tokenTag, ans.TokenTag) ||
+		!bytes.Equal(pc.keyHash, keyHash(ans.BindingKey)) {
 		r.appFailLocked(w, req, http.StatusForbidden, errBody{Error: "challenge_refused"})
 		return
 	}

@@ -229,11 +229,14 @@ func (r *Relay) handleUnbindSelf(w http.ResponseWriter, req *http.Request) {
 		r.appFail(w, req, http.StatusUnprocessableEntity, errBody{Error: "invalid_item"})
 		return
 	}
+	// The signature is checked first and outside the lock, for every request: whether a binding exists
+	// must not show in the response time.
+	valid := u.Verify(r.cfg.Host)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	m := r.tokenMAC(u.Token)
 	b := r.bindings[m]
-	if b == nil || b.InstanceID != u.InstanceID || !bytes.Equal(b.KeyHash, keyHash(u.BindingKey)) || !u.Verify(r.cfg.Host) {
+	if !valid || b == nil || b.InstanceID != u.InstanceID || !bytes.Equal(b.KeyHash, keyHash(u.BindingKey)) {
 		r.appFailLocked(w, req, http.StatusNotFound, errBody{Error: "binding_unknown"})
 		return
 	}
@@ -281,11 +284,12 @@ func (r *Relay) handleSelfRead(w http.ResponseWriter, req *http.Request) {
 		r.appFail(w, req, http.StatusUnprocessableEntity, errBody{Error: "invalid_item"})
 		return
 	}
+	valid := sr.Verify(r.cfg.Host) // first and outside the lock, as for the opt-out
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	m := r.tokenMAC(sr.Token)
 	b := r.bindings[m]
-	if b == nil || !bytes.Equal(b.KeyHash, keyHash(sr.BindingKey)) || !sr.Verify(r.cfg.Host) {
+	if !valid || b == nil || !bytes.Equal(b.KeyHash, keyHash(sr.BindingKey)) {
 		r.appFailLocked(w, req, http.StatusNotFound, errBody{Error: "binding_unknown"})
 		return
 	}

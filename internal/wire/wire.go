@@ -4,6 +4,7 @@
 package wire
 
 import (
+	"sync/atomic"
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/base64"
@@ -57,8 +58,16 @@ func ParsePublicKey(s string) (ed25519.PublicKey, error) {
 // ParseSignature decodes an Ed25519 signature in base64url.
 func ParseSignature(s string) ([]byte, error) { return DecodeB64(s, ed25519.SignatureSize) }
 
+// verifications counts signature checks. The app-direct endpoints promise that every request costs one
+// check whether or not a binding exists; a test holds them to it through Verifications.
+var verifications atomic.Int64
+
+// Verifications returns the number of signature checks since start.
+func Verifications() int64 { return verifications.Load() }
+
 // Verify checks an Ed25519 signature over a statement text.
 func Verify(pk ed25519.PublicKey, text string, sig []byte) bool {
+	verifications.Add(1)
 	if len(pk) != ed25519.PublicKeySize || len(sig) != ed25519.SignatureSize {
 		return false
 	}

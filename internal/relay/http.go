@@ -223,7 +223,7 @@ func (r *Relay) auth(w http.ResponseWriter, req *http.Request, limit int64) (*in
 	}
 	nonce, nerr := wire.ParseNonce(req.Header.Get("HL-Nonce"))
 	sig, serr := wire.ParseSignature(req.Header.Get("HL-Signature"))
-	// Verified outside the lock: a flood of bad signatures must not serialise the relay.
+	// Verified outside the lock: a flood of bad signatures must not serialize the relay.
 	valid := nerr == nil && serr == nil && wire.Verify(key, wire.RequestText(r.cfg.Host, id, req.Method, req.RequestURI, ts, nonce, body), sig)
 	r.mu.Lock()
 	defer r.mu.Unlock()

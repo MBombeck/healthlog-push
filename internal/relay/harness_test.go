@@ -227,7 +227,7 @@ func (h *harness) send(req *http.Request, nonce string) response {
 		nonce = "-"
 	}
 	sig, err := wire.ParseSignature(resp.Header.Get("HL-Relay-Signature"))
-	if err != nil || !wire.Verify(h.relayP, wire.ResponseText(host, req.Method, req.URL.RequestURI(), nonce, resp.StatusCode, raw), sig) {
+	if err != nil || !ed25519.Verify(h.relayP, []byte(wire.ResponseText(host, req.Method, req.URL.RequestURI(), nonce, resp.StatusCode, raw)), sig) {
 		h.t.Fatalf("%s %s: response signature invalid (status %d)", req.Method, req.URL.Path, resp.StatusCode)
 	}
 	out := response{Status: resp.StatusCode, Raw: raw, Header: resp.Header}
