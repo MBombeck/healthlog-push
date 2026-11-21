@@ -45,10 +45,13 @@ healthlog_push_min_client_version: ""
 # request; a mode stored later with `admin registration` wins. Opening registration is a deliberate step.
 healthlog_push_registration_mode: invite
 # AppArmor profile per container. docker-default is what Docker applies anyway. To confine the containers
-# further, load the profiles from deploy/apparmor/ on the host and set healthlog-push-relay and
-# healthlog-push-signer; the role refuses to start with a profile the kernel has not loaded.
+# further, set healthlog-push-relay and healthlog-push-signer and either let the role install the profiles
+# of this release from deploy/apparmor/ (healthlog_push_apparmor_install) or load them yourself. The role
+# refuses to start with a profile the kernel has not loaded in enforce mode.
 healthlog_push_apparmor_relay: docker-default
 healthlog_push_apparmor_signer: docker-default
+healthlog_push_apparmor_install: false
+healthlog_push_apparmor_src: "{{ playbook_dir }}/../apparmor"
 
 healthlog_push_relay_uid: 65532
 healthlog_push_signer_uid: 65533

@@ -170,8 +170,10 @@ grep healthlog-push /sys/kernel/security/apparmor/profiles   # both "(enforce)"
 
 then set `HLP_APPARMOR_RELAY=healthlog-push-relay` and `HLP_APPARMOR_SIGNER=healthlog-push-signer` in `.env`
 and recreate the containers. `docker inspect -f '{{.AppArmorProfile}}' <container>` shows the profile in use.
-A profile name the kernel has not loaded makes `docker compose up` fail; the Ansible role checks this before
-it touches the running containers. To try a change first, load it with `apparmor_parser -C -r` (complain) and
+With the Ansible role, `healthlog_push_apparmor_install: true` and the two profile names do the same: the role
+installs the profiles of the release it deploys, loads them and checks after the start that each container
+runs under its profile. A profile name the kernel has not loaded makes `docker compose up` fail; the role
+checks this before it touches the running containers. To try a change first, load it with `apparmor_parser -C -r` (complain) and
 look for `apparmor="ALLOWED"` lines in the audit log while you use the relay.
 
 ## Firewall

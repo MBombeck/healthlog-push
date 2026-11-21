@@ -18,7 +18,8 @@ All notable changes to this project are documented in this file. The format foll
   `/data`, `/acme`, `/export` and the refresh marker and has no capability; the signer has no network and
   writes only the provider token. They are opt-in through `HLP_APPARMOR_RELAY` and `HLP_APPARMOR_SIGNER`
   (Docker's `docker-default` otherwise); the Ansible role takes `healthlog_push_apparmor_relay` and
-  `healthlog_push_apparmor_signer`, refuses a profile the kernel has not loaded in enforce mode, and checks
+  `healthlog_push_apparmor_signer`, installs the profiles of the release with
+  `healthlog_push_apparmor_install`, refuses a profile the kernel has not loaded in enforce mode, and checks
   after the start that each container runs under its profile.
 
 ### Changed

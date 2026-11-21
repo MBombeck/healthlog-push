@@ -8,6 +8,9 @@
 - name: Backup include and exclude lists
   ansible.builtin.include_tasks: backup.yml
 
+- name: AppArmor profiles
+  ansible.builtin.include_tasks: apparmor.yml
+
 - name: Install cosign and verify the release
   ansible.builtin.include_tasks: verify.yml
 

@@ -166,7 +166,7 @@ ansible-playbook -i inventory.yml site.yml --tags healthlog_push \
 Order inside the role:
 
 1. Assert that the image is `ghcr.io/...@sha256:<64 hex>` and the tag is `vX.Y.Z`.
-2. Write directories, secret files, the compose file and the backup lists.
+2. Write directories, secret files, the compose file and the backup lists; with `healthlog_push_apparmor_install`, install and load the AppArmor profiles of the release, and check that named profiles are loaded in enforce mode.
 3. Install cosign at the pinned version; the download must match the pinned SHA-256.
 4. `cosign verify <image> --certificate-identity https://github.com/MBombeck/healthlog-push/.github/workflows/release.yml@refs/tags/<tag> --certificate-oidc-issuer https://token.actions.githubusercontent.com`
 5. `cosign verify-attestation <image> --type slsaprovenance1 --certificate-identity https://github.com/MBombeck/healthlog-push/.github/workflows/provenance.yml@refs/tags/<tag> --certificate-oidc-issuer https://token.actions.githubusercontent.com --certificate-github-workflow-repository MBombeck/healthlog-push` (cosign 3, pinned in `defaults/main.yml` with the SHA-256 of both architectures; releases before v1.0.1 carry the older provenance format and do not pass this step)
