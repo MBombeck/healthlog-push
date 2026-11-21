@@ -35,7 +35,6 @@ type instState struct {
 	invalid       int64
 	challenges    int64
 	blockNewUntil time.Time
-	flaggedToday  bool
 	lastReceipt   time.Time
 	pending       store.DayCounters // not yet flushed
 }
@@ -336,4 +335,13 @@ func (r *Relay) Close() {
 	r.mu.Lock()
 	r.flushLocked()
 	r.mu.Unlock()
+}
+
+// flagLocked marks an instance as anomalous for today (challenge started, invalid-token budget exceeded):
+// it is not promoted and its quiet streak restarts.
+func (r *Relay) flagLocked(s *instState, now time.Time) {
+	if d := store.Day(now); s.rec.FlaggedDay != d {
+		s.rec.FlaggedDay = d
+		r.dirtyInst[s.rec.ID] = true
+	}
 }

@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/MBombeck/healthlog-push/internal/store"
 	"github.com/MBombeck/healthlog-push/internal/wire"
 )
 
@@ -198,5 +199,29 @@ func TestDeviceLimitRaisedAfterQuietMonth(t *testing.T) {
 	h.r.Daily()
 	if info, _ := h.r.Instance(i.id); info.DeviceLimit != 8 {
 		t.Fatalf("not raised after 30 quiet days: %d", info.DeviceLimit)
+	}
+}
+
+// TestFlagSurvivesMidnightAndRestart: an instance flagged late on day 7 is not promoted by the daily run
+// shortly after midnight, even after a restart in between.
+func TestFlagSurvivesMidnightAndRestart(t *testing.T) {
+	h := newHarness(t)
+	a, b := h.register(), h.register()
+	d := newDevice(0x91)
+	a.activate(d)
+	b.activate(newDevice(0x92))
+	h.clk.Add(7*24*time.Hour - 10*time.Hour - time.Minute) // day 7, 23:59
+	if rp := b.bind(newDevice(0x91)); rp.Status != 409 {   // conflict: flags b
+		t.Fatalf("conflict: %d", rp.Status)
+	}
+	h.r.Tick()
+	h.clk.Add(2 * time.Minute)
+	b.do(http.MethodGet, "/v1/status", nil) // first request of the new day
+	h.r.Daily()
+	if info, _ := h.r.Instance(b.id); info.Tier != store.TierProbation {
+		t.Fatal("flagged instance promoted after midnight")
+	}
+	if info, _ := h.r.Instance(a.id); info.Tier != store.TierStandard {
+		t.Fatal("unflagged instance not promoted")
 	}
 }

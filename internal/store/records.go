@@ -21,6 +21,7 @@ type Instance struct {
 	QuietSinceDay    int    `json:"quietSinceDay,omitempty"`
 	LastPushDay      int    `json:"lastPushDay,omitempty"` // day of the last accepted push, for usage counts
 	ReasonDay        int    `json:"reasonDay,omitempty"`   // day of the suspension or revocation
+	FlaggedDay       int    `json:"flaggedDay,omitempty"`  // last day with a challenge or an exceeded invalid-token budget
 	Client           string `json:"client,omitempty"`
 }
 

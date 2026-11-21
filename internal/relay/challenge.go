@@ -39,7 +39,7 @@ func (r *Relay) startChallenge(s *instState, m string, b *wire.Bind, kh []byte, 
 	}
 	r.challengeDay[ck] = today
 	s.challenges++
-	s.flaggedToday = true
+	r.flagLocked(s, now)
 	ch := newChallenge()
 	r.conflicts[ch] = &pendingConflict{
 		mac: m, token: b.Token, tokenTag: wire.TokenTag(b.Token), instanceID: s.rec.ID, keyHash: kh, seq: b.Seq, env: b.Env,

@@ -179,7 +179,7 @@ func (r *Relay) countInvalidLocked(s *instState, now time.Time) {
 	s.pending.Invalid++
 	if s.invalid > r.tierLimits(s.rec).InvalidTokensDay && !now.Before(s.blockNewUntil) {
 		s.blockNewUntil = now.Add(fullDay)
-		s.flaggedToday = true
+		r.flagLocked(s, now)
 		r.Metrics.Inc("hlp_invalid_budget_exceeded_total")
 	}
 }

@@ -272,6 +272,6 @@ func (r *Relay) pruneNonces(s *instState, now time.Time) {
 
 func (r *Relay) rollInstanceDay(s *instState, now time.Time) {
 	if d := store.Day(now); d != s.day {
-		s.day, s.newBindings, s.invalid, s.challenges, s.flaggedToday = d, 0, 0, 0, false
+		s.day, s.newBindings, s.invalid, s.challenges = d, 0, 0, 0
 	}
 }

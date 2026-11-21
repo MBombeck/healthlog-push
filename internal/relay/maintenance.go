@@ -251,12 +251,15 @@ func (r *Relay) pruneMemoryLocked(today int) {
 // and no anomaly, and raises a standard instance's device limit to 80 after 30 quiet days above 80 % use.
 func (r *Relay) promoteLocked(s *instState, today int) {
 	in := s.rec
-	if s.flaggedToday || r.suspiciousLocked(in.ID, today) {
+	// A flag counts for the day it was raised and the next one: the daily run can come up to a minute after
+	// midnight, and the flag is stored, so neither the day change nor a restart drops it.
+	flagged := in.FlaggedDay != 0 && today-in.FlaggedDay <= 1
+	if flagged || r.suspiciousLocked(in.ID, today) {
 		in.QuietSinceDay = today
 	}
 	switch in.Tier {
 	case store.TierProbation:
-		if today-in.CreatedDay >= 7 && in.FirstDeliveryDay != 0 && !r.suspiciousLocked(in.ID, today) && !s.flaggedToday {
+		if today-in.CreatedDay >= 7 && in.FirstDeliveryDay != 0 && !r.suspiciousLocked(in.ID, today) && !flagged {
 			in.Tier, in.QuietSinceDay = store.TierStandard, today
 			logx.Event("instance.promoted", logx.Str(logx.KState, store.TierStandard))
 		}
