@@ -256,8 +256,8 @@ The pipeline can be rehearsed locally, with a throwaway registry and key, with `
 
 ### Hosted relay identity keys
 
-The public identity keys of the hosted relay `push.healthlog.dev`, `current` and `next`, are published with
-the first release: in its release notes and as `keys/push.healthlog.dev.json` in the tagged tree, in the
+The public identity keys of the hosted relay `push.healthlog.dev`, `current` and `next`, were published with
+the first release (v1.0.0): in its release notes and as `keys/push.healthlog.dev.json` in the tagged tree, in the
 form `{"host": "push.healthlog.dev", "current": "<base64url 32>", "next": "<base64url 32>"}` (unpadded
 base64url Ed25519 public keys). Clients pin them at build time. The HealthLog server ships them as its hosted
 relay pins, the iOS app as its `HLPushRelayKeys` build setting. Neither fetches them from the relay at
@@ -271,12 +271,9 @@ for how the keys are made and kept).
 | `current` | `IU8JGZzcE-O4gp4q2BL2o6YYNJeHyDg8MNmAGL5_Ypo` |
 | `next` | `kPhnCqIwrF_cyQIFTAgCHrWnPavdWkcwMB35oi_wCH0` |
 
-The same values are in [`keys/push.healthlog.dev.json`](keys/push.healthlog.dev.json).
-
-| Key | Public key (unpadded base64url Ed25519) | Since |
-|---|---|---|
-| `current` | to be published with the first release | |
-| `next` | to be published with the first release | |
+The same values are in [`keys/push.healthlog.dev.json`](keys/push.healthlog.dev.json). Key rotations are
+announced in [docs/transparency.md](docs/transparency.md) at least 7 days before the relay signs with the
+new key.
 
 ## Project layout
 
@@ -326,6 +323,7 @@ locally. Dependencies and the policy for adding one: [docs/dependencies.md](docs
 - [docs/threat-model.md](docs/threat-model.md): assets, actors, limitations
 - [SECURITY-INVARIANTS.md](SECURITY-INVARIANTS.md): every security invariant and the tests that fail when it breaks
 - [docs/key-ceremony.md](docs/key-ceremony.md): how the relay identity, MAC and APNs keys are made, kept and rotated
+- [docs/transparency.md](docs/transparency.md): authority requests (none so far), how they are handled, and the feed of deprecations and key rotations
 - [docs/release-verification.md](docs/release-verification.md): verifying a release and rehearsing one locally
 - [docs/hardening.md](docs/hardening.md): how the hosted relay's host is hardened
 - [docs/privacy.md](docs/privacy.md) and [docs/terms.md](docs/terms.md): the texts of the hosted relay
