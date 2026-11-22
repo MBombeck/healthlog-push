@@ -106,6 +106,29 @@ func TestOperationalPushMetrics(t *testing.T) {
 	}
 }
 
+// TestEveryItemRefusalIsCounted: an item refused before it is queued counts in hlp_push_total like every
+// other outcome. A push to a binding the relay does not hold for the instance, or for the other APNs
+// environment, used to leave no trace in the metrics at all, so a send that never reached Apple looked
+// like no send.
+func TestEveryItemRefusalIsCounted(t *testing.T) {
+	h := newHarness(t)
+	i := h.register()
+	d := newDevice(0xc6)
+	m0 := live(t, h)
+	if res := i.push1(alertItem("u", newDevice(0xc7))); res.Error != "binding_unknown" {
+		t.Fatalf("unknown binding: %+v", res)
+	}
+	i.activate(d)
+	m1 := live(t, h)
+	grew(t, m0, m1, `hlp_push_total{class="alert",result="binding_unknown"}`, 1)
+	wrongEnv := silentItem("e", d)
+	wrongEnv.Env = "sandbox"
+	if res := i.push1(wrongEnv); res.Error != "invalid_item" {
+		t.Fatalf("other environment: %+v", res)
+	}
+	grew(t, m1, live(t, h), `hlp_push_total{class="silent",result="invalid_item"}`, 1)
+}
+
 // TestLiveActivityKindsAndPriority: start, update and end are told apart, and so are priorities 10 and 5.
 func TestLiveActivityKindsAndPriority(t *testing.T) {
 	h := newHarness(t)

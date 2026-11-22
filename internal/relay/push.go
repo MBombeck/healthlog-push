@@ -166,10 +166,10 @@ func (r *Relay) admitLocked(s *instState, p *wire.PushItem, now time.Time) (Item
 	m := r.tokenMAC(it.Token)
 	b := r.bindings[m]
 	if b == nil || b.InstanceID != s.rec.ID {
-		return itemErr(it.Ref, http.StatusNotFound, "binding_unknown"), nil
+		return r.refused(it, http.StatusNotFound, "binding_unknown"), nil
 	}
 	if b.Env != it.Env {
-		return itemErr(it.Ref, http.StatusUnprocessableEntity, "invalid_item"), nil
+		return r.refused(it, http.StatusUnprocessableEntity, "invalid_item"), nil
 	}
 	ch, res := r.limitsLocked(s, b, m, it, now)
 	if ch == nil {
@@ -205,6 +205,12 @@ func (r *Relay) admitLocked(s *instState, p *wire.PushItem, now time.Time) (Item
 	}
 	r.idemPutLocked(ik, ent)
 	return ItemResult{}, ent
+}
+
+// refused counts an item refused before it is queued and answers it, so no refusal leaves the metrics out.
+func (r *Relay) refused(it *wire.Item, status int, e string) ItemResult {
+	r.Metrics.Inc("hlp_push_total", "class", string(it.Class), "result", e)
+	return itemErr(it.Ref, status, e)
 }
 
 func classLabel(c wire.Class) string {

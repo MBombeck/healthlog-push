@@ -424,7 +424,8 @@ The ACME account key decides which account obtains the certificate. If your CAA 
 
 ## Alerts worth acting on
 
-While fewer than 20 instances are active, the metrics snapshot refreshes once an hour. Alert on the live
+While fewer than 20 instances are active, the metrics snapshot refreshes once an hour, so a push sent a
+minute ago is not in it yet; `admin stats` answers from the live state. Alert on the live
 `/healthz` from outside the host for anything that needs a quick reaction; `status` covers only the relay's
 own facts, so also alert on the `breaker` field of the body when it is not `closed`. Use metrics for trends.
 Metrics are served on `127.0.0.1:9464/metrics` and carry no instance, device or address labels.
