@@ -1,6 +1,6 @@
 # Terms of the HealthLog push relay
 
-Version 1.0, 2026-11-21 (terms version `2026-11-21`). Served at https://push.healthlog.dev/terms.
+Version 1.1, 2026-11-22 (terms version `2026-11-21`). Served at https://push.healthlog.dev/terms.
 
 These terms apply to the hosted relay at push.healthlog.dev. The operator of a HealthLog server accepts them
 when switching the relay on for that server.
@@ -36,7 +36,11 @@ when switching the relay on for that server.
 9. Shutdown. If the hosted relay is shut down, this is announced at least 90 days in advance through the
    relay's notice to all servers. Afterwards all data is deleted.
 
-10. Privacy. What the relay sees and stores is described at https://push.healthlog.dev/privacy.
+10. Nothing from the operator. The relay only carries what a registered server sends to its own bound
+    devices. The operator never sends anything through it: no announcements, no update notices, no messages
+    of any kind. Notices about the relay reach servers in its answers to them, not their users' devices.
+
+11. Privacy. What the relay sees and stores is described at https://push.healthlog.dev/privacy.
 
 Contact: relay@healthlog.dev (operation), abuse@healthlog.dev (abuse and appeals), privacy@healthlog.dev
 (data protection).

@@ -27,6 +27,12 @@ themselves. It is not offered to organisations.
 The relay is not a medical service. It does not remind you of anything by itself, and a notification can be
 late or lost. Reminders that the app schedules on your device stay the authoritative reminder path.
 
+The relay only carries what a registered server sends to its own bound devices. The operator never sends
+anything through it: no announcements, no update notices, no messages of any kind. The only push the relay
+creates itself is the silent check it sends when two keys claim the same device, which carries a random
+value and nothing you can read; news about the relay reaches HealthLog servers in its answers to them,
+never your device.
+
 Using the relay is voluntary. The operator of a HealthLog server first switches it on for the server, then
 every person decides in their own app. The app creates its keys and asks for a binding only after you
 agree. Without it the app works as before; only the relay notifications are missing.
