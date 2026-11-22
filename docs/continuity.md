@@ -9,4 +9,4 @@ no longer look after the project.
 - The arrangement is reviewed at least once a year.
 
 Nothing else about the arrangement is published. The roles of the project are described in
-[GOVERNANCE.md](GOVERNANCE.md).
+[GOVERNANCE.md](../GOVERNANCE.md).

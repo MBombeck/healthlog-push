@@ -1,7 +1,7 @@
 # Threat model
 
 This document describes what the relay protects, against whom and what it cannot protect. The tests that
-hold each property in place are listed in [SECURITY-INVARIANTS.md](../SECURITY-INVARIANTS.md). It describes the code in this repository. Rules that the HealthLog app and server
+hold each property in place are listed in [security-invariants.md](security-invariants.md). It describes the code in this repository. Rules that the HealthLog app and server
 must follow are named where the relay depends on them; they are enforced in those projects, not here.
 
 ## Assets
@@ -323,7 +323,7 @@ app does not depend on the relay for anything else. Protections against a self-i
 - **One global lock.** All mutable relay state is guarded by one mutex; signatures are verified and bodies
   read outside it. This keeps the invariants simple to check but bounds throughput to one handler in the
   critical section at a time. The concurrency model is in
-  [SECURITY-INVARIANTS.md](../SECURITY-INVARIANTS.md).
+  [security-invariants.md](security-invariants.md).
 - **Failed app calls share one global bucket** of 100, refilling 20 per second. Only failed attempts are
   charged to it, so flooding it with junk refuses other failing calls (`429 global`) but never a correctly
   signed opt-out, self-read, Live Activity withdrawal or challenge answer. Verified calls are limited per device token (10, refilling
@@ -339,7 +339,7 @@ app does not depend on the relay for anything else. Protections against a self-i
 
 ## Properties and the tests that hold them
 
-[SECURITY-INVARIANTS.md](../SECURITY-INVARIANTS.md) is the authoritative map from each invariant to the
+[security-invariants.md](security-invariants.md) is the authoritative map from each invariant to the
 tests that fail when it breaks, and a test keeps that map honest: it fails when a test named there no longer
 exists. In short, it covers:
 

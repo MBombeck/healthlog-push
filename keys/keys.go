@@ -1,4 +1,4 @@
-// Package keys holds the published identity keys of the hosted relay, the same file the README and the
+// Package keys holds the published identity keys of the hosted relay, the same file docs/hosted-relay.md and the
 // release notes publish, so the relay can tell which pinned slot its own key occupies.
 package keys
 

@@ -9,8 +9,8 @@ import (
 )
 
 // TestHostedKeysPublished: keys/push.healthlog.dev.json names the host and exactly the three pinned identity
-// keys, each a distinct 32-byte Ed25519 public key in unpadded base64url, and the README table lists the
-// same values, so the two publications cannot drift apart.
+// keys, each a distinct 32-byte Ed25519 public key in unpadded base64url, and the table in
+// docs/hosted-relay.md lists the same values, so the two publications cannot drift apart.
 func TestHostedKeysPublished(t *testing.T) {
 	raw, err := os.ReadFile("keys/push.healthlog.dev.json")
 	if err != nil {
@@ -23,7 +23,7 @@ func TestHostedKeysPublished(t *testing.T) {
 	if keys["host"] != "push.healthlog.dev" || len(keys) != 4 {
 		t.Fatalf("keys file: %v", keys)
 	}
-	readme, err := os.ReadFile("README.md")
+	doc, err := os.ReadFile("docs/hosted-relay.md")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,8 +38,8 @@ func TestHostedKeysPublished(t *testing.T) {
 			t.Errorf("%s repeats another key", name)
 		}
 		seen[v] = true
-		if !strings.Contains(string(readme), "| `"+name+"` | `"+v+"` |") {
-			t.Errorf("README table lacks %s", name)
+		if !strings.Contains(string(doc), "| `"+name+"` | `"+v+"` |") {
+			t.Errorf("docs/hosted-relay.md table lacks %s", name)
 		}
 	}
 }

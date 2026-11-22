@@ -13,7 +13,7 @@ There are no other maintainers, committers or triagers.
 
 A continuity arrangement exists: a trusted contact designated by the maintainer holds sealed emergency
 access, and a successor is set for the maintainer's GitHub account. The contact takes no part in day-to-day
-work and is not named here ([CONTINUITY.md](CONTINUITY.md)).
+work and is not named here ([docs/continuity.md](docs/continuity.md)).
 
 ## Access to sensitive resources
 

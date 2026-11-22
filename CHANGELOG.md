@@ -8,18 +8,23 @@ All notable changes to this project are documented in this file. The format foll
 
 ### Added
 
-- `GOVERNANCE.md`, `MAINTAINERS.md`, `ROADMAP.md`, `CONTINUITY.md` and `docs/assurance-case.md`: how
+- `GOVERNANCE.md`, `MAINTAINERS.md`, `docs/roadmap.md`, `docs/continuity.md` and `docs/assurance-case.md`: how
   decisions are made, who has access to what, the direction, what is in place if the maintainer is gone,
   and the argument for why the design meets its security requirements.
 - CI measures statement coverage across all packages and fails below 80 %.
 
 ### Changed
 
+- The README is cut to what a first reader needs. The limits and the identity keys of the hosted relay are
+  now in `docs/hosted-relay.md`, the privacy properties in full and the code layout in
+  `docs/architecture.md`.
+- `SECURITY-INVARIANTS.md` moved to `docs/security-invariants.md`, next to the threat model it belongs to.
+- golangci-lint runs in a workflow of its own, `lint.yml`, so the README badge shows its state on `main`.
 - The `emergency` identity key is described as it is held: separately from the relay host and from the
   operational keys, and never deployed to the relay. Earlier texts said "kept offline", which was not
   accurate; the changelog entry for 1.0.2 and the transparency feed are corrected, and the feed notes the
   correction.
-- `CONTINUITY.md` states only what is in place: a continuity arrangement with a designated trusted contact,
+- `docs/continuity.md` states only what is in place: a continuity arrangement with a designated trusted contact,
   a successor for the maintainer's GitHub account, and a yearly review.
 - Release tags are signed from the next release on (`git tag -s`). Tags up to v1.0.3 are unsigned
   lightweight tags.

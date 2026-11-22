@@ -4,7 +4,8 @@ Thanks for taking the time to contribute. This relay handles push traffic for he
 
 ## Building and testing
 
-You need the Go version named in `go.mod` and Node 22 for the vector check.
+You need the Go version named in `go.mod` and Node 22 for the vector check. Where the code lives is listed in
+[docs/architecture.md](docs/architecture.md#code-layout).
 
 ```sh
 go build ./...
@@ -66,7 +67,7 @@ Policy: every pull request that adds major new functionality adds tests for it t
 
 A change to a rule (a limit, a validation, a protocol check) comes with a test that fails when the rule is broken. Write the test, break the rule on purpose, watch the test fail, then restore it. A test that cannot fail does not count. A bug fix comes with a regression test that fails without the fix.
 
-A change to a security property also updates [SECURITY-INVARIANTS.md](SECURITY-INVARIANTS.md), which maps every invariant to the tests that hold it; `TestInvariantsNameRealTests` fails when a test named there does not exist.
+A change to a security property also updates [docs/security-invariants.md](docs/security-invariants.md), which maps every invariant to the tests that hold it; `TestInvariantsNameRealTests` fails when a test named there does not exist.
 
 When tests run: locally with the commands under [Building and testing](#building-and-testing), and in CI on every pull request and on every push to `main` (`.github/workflows/ci.yml`: build, vet, tests with the race detector, govulncheck, every fuzz target for 20 seconds, the spec vectors, the image build; `.github/workflows/lint.yml`: golangci-lint). A pull request is merged only when all of them and CodeQL are green. The result of every run is public on the pull request and under the repository's Actions tab.
 
