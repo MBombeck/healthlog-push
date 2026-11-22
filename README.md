@@ -225,6 +225,10 @@ cosign verify-blob SHA256SUMS --bundle SHA256SUMS.sigstore.json \
 sha256sum -c SHA256SUMS --ignore-missing
 ```
 
+From v1.0.3 on the release also carries SLSA provenance for the binaries and `SHA256SUMS`
+(`healthlog-push_$TAG.intoto.jsonl`), checked with `slsa-verifier verify-artifact`; the commands are in
+[docs/release-verification.md](docs/release-verification.md).
+
 The hosted relay reports its version, commit and image digest at `https://push.healthlog.dev/version`.
 That answer comes from the server being checked, so it is a statement, not proof.
 
