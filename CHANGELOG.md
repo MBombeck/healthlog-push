@@ -39,6 +39,12 @@ All notable changes to this project are documented in this file. The format foll
   thresholds for findings from automated analysis, and how secrets are handled. `CONTRIBUTING.md` gains the
   coding style, the test policy and the review rule.
 
+### Fixed
+
+- `hlp_push_total` counts the two item refusals that happen before an item is queued: `binding_unknown` (no
+  binding of the instance for that token) and `invalid_item` for an item addressed to the other APNs
+  environment. Both were answered correctly but left no trace in the metrics.
+
 ## [1.0.3] - 2026-11-22
 
 ### Added
