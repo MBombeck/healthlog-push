@@ -17,6 +17,19 @@ All notable changes to this project are documented in this file. The format foll
   `bindings` blocks of `admin stats`. Every label of the closed sets is present on every scrape, zero
   included, and the values pass through the same coarse snapshot as the other metrics. An operator can now
   chart registrations and binding states without polling the admin socket.
+- Operational counters about the relay's own work, every label from a closed set fixed in the code:
+  `hlp_apns_sends_total{kind}` (alert, silent_sync, silent_wake for the relay's challenge push, la_start,
+  la_update, la_end), `hlp_delivery_latency_seconds` (a histogram without labels from acceptance to Apple's
+  answer, six buckets from 0.1 s to 5 s), `hlp_apns_rejections_total{reason}` (Apple's reason codes, anything
+  unknown as `other`), `hlp_liveactivity_priority_total{priority}`, `hlp_push_retries_total{answer}`,
+  `hlp_queue_depth`, `hlp_silent_budget_refused_total{kind}` (sync, wake),
+  `hlp_deliveries_by_key_slot_total{slot}` (current, next, emergency, unpinned),
+  `hlp_registrations_rejected_total{reason}` (no_invite, bad_signature, rate_limited) and
+  `hlp_rate_limited_total{surface}`. Nothing describes an instance beyond the existing counts, and the values
+  pass through the same coarse snapshot.
+- `docs/transparency.md` lists every metric the relay exposes, with its labels and the reason it exists, and
+  states how long the hosted relay's monitoring keeps them. A test fails when the code registers a metric the
+  table does not list, and another when a series carries a label or a value outside the fixed allowlist.
 
 ## [1.0.2] - 2026-11-22
 

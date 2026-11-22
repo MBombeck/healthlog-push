@@ -18,6 +18,7 @@ type Registry struct {
 	mu       sync.Mutex
 	counters map[string]float64
 	gauges   map[string]float64
+	hists    map[string]*histogram
 	help     map[string]string
 	snap     string
 	snapAt   time.Time
@@ -25,7 +26,7 @@ type Registry struct {
 
 // New returns an empty registry.
 func New() *Registry {
-	return &Registry{counters: map[string]float64{}, gauges: map[string]float64{}, help: map[string]string{}}
+	return &Registry{counters: map[string]float64{}, gauges: map[string]float64{}, hists: map[string]*histogram{}, help: map[string]string{}}
 }
 
 func key(name string, labels ...string) string {
@@ -60,6 +61,56 @@ func (r *Registry) Set(name string, v float64, labels ...string) {
 	r.mu.Unlock()
 }
 
+// histogram is a cumulative histogram without labels, with fixed upper bounds.
+type histogram struct {
+	bounds []float64
+	counts []float64 // one per bound; the +Inf bucket is count
+	sum    float64
+	count  float64
+}
+
+// Histogram declares a histogram without labels and its upper bounds. Observing an undeclared histogram
+// does nothing, so the bucket layout is set in one place.
+func (r *Registry) Histogram(name string, bounds ...float64) {
+	r.mu.Lock()
+	r.hists[name] = &histogram{bounds: slices.Clone(bounds), counts: make([]float64, len(bounds))}
+	r.mu.Unlock()
+}
+
+// Observe records one value in a declared histogram.
+func (r *Registry) Observe(name string, v float64) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	h := r.hists[name]
+	if h == nil {
+		return
+	}
+	for i, b := range h.bounds {
+		if v <= b {
+			h.counts[i]++
+		}
+	}
+	h.sum += v
+	h.count++
+}
+
+// Names returns the names of every metric in the registry, histograms included, sorted.
+func (r *Registry) Names() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	set := map[string]bool{}
+	for _, m := range []map[string]float64{r.counters, r.gauges} {
+		for k := range m {
+			name, _, _ := strings.Cut(k, "{")
+			set[name] = true
+		}
+	}
+	for name := range r.hists {
+		set[name] = true
+	}
+	return slices.Sorted(maps.Keys(set))
+}
+
 func (r *Registry) render() string {
 	var b strings.Builder
 	emit := func(m map[string]float64, typ string) {
@@ -78,6 +129,17 @@ func (r *Registry) render() string {
 	}
 	emit(r.counters, "counter")
 	emit(r.gauges, "gauge")
+	for _, name := range slices.Sorted(maps.Keys(r.hists)) {
+		h := r.hists[name]
+		if t := r.help[name]; t != "" {
+			fmt.Fprintf(&b, "# HELP %s %s\n", name, t)
+		}
+		fmt.Fprintf(&b, "# TYPE %s histogram\n", name)
+		for i, bound := range h.bounds {
+			fmt.Fprintf(&b, "%s_bucket{le=\"%g\"} %g\n", name, bound, h.counts[i])
+		}
+		fmt.Fprintf(&b, "%s_bucket{le=\"+Inf\"} %g\n%s_sum %g\n%s_count %g\n", name, h.count, name, h.sum, name, h.count)
+	}
 	return b.String()
 }
 

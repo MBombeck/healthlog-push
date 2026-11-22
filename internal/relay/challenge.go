@@ -35,6 +35,7 @@ func (r *Relay) startChallenge(s *instState, m string, b *wire.Bind, kh []byte, 
 	// an instance can wake a device at most once a day.
 	ck := m + "\x00" + s.rec.ID
 	if r.challengeDay[ck] == today || s.challenges >= tl.ChallengesDay {
+		r.Metrics.Inc("hlp_silent_budget_refused_total", "kind", "wake")
 		return &errBody{Error: "binding_conflict", Reason: "challenge_quota"}
 	}
 	r.challengeDay[ck] = today
@@ -48,6 +49,7 @@ func (r *Relay) startChallenge(s *instState, m string, b *wire.Bind, kh []byte, 
 	p := &apns.Push{Token: b.Token, Challenge: true, Payload: apns.ChallengePayload(ch), Expiration: now.Add(challengeTTL), Sandbox: b.Env == "sandbox"}
 	err := r.q.Push(&queue.Job{Instance: s.rec.ID, Run: func() {
 		res := r.sender.Send(context.Background(), p)
+		r.observeSend(kindSilentWake, now, res)
 		r.Metrics.Inc("hlp_challenges_total", "result", string(res.Outcome))
 	}, Drop: func() {}})
 	if err != nil {

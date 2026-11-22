@@ -446,14 +446,21 @@ Metrics are served on `127.0.0.1:9464/metrics` and carry no instance, device or 
 | rising `hlp_queue_dropped_total` or `hlp_push_total{result="queue_full"}` | the send queue refuses work | capacity or a slow Apple connection |
 | rising `hlp_connections_rejected_total` | connection caps reached | connection flood; the cloud firewall is the next lever |
 | jump in `hlp_http_errors_total` | the HTTP server discarded error lines (often TLS scans) | informational |
+| high share of `hlp_apns_rejections_total` against `hlp_apns_sends_total` | Apple refuses requests; `reason` says why (`BadTopic`, `BadDeviceToken`, `other`, ...) | check the topic, environment and recent deploys; token reasons alone are usually stale devices |
+| rising `hlp_delivery_latency_seconds` above the 1 s bucket, or `hlp_queue_depth` staying above zero | sends to Apple are slow and the queue builds up | Apple's status, the host's egress, `hlp_queue_dropped_total` |
+| rising `hlp_silent_budget_refused_total{kind="sync"}` | instances send more background pushes than the device budgets allow | an instance flooding silent pushes; the budgets work as intended |
+| rising `hlp_rate_limited_total{surface}` or `hlp_registrations_rejected_total{reason}` | a limit refuses requests; the surface or reason says which | abuse runbook; `bad_signature` and `no_invite` are usually misconfigured servers |
 | log `export.failed` | the daily export was not written | check `/export` permissions and space; the export is your only backup |
 | certificate valid for less than 14 days (external check) | renewal over TLS-ALPN-01 failed | check DNS, port 443 reachability and the CAA record |
 
 Other metrics: `hlp_requests_total{status="2xx"|"4xx"|"5xx"}`, `hlp_bindings_total{result}` (`bound`,
 `conflict`, `challenge_resolved`, `opt_out_lifted`, `unbound_instance`, `unbound_self`,
 `liveactivity_consent` for a stored Live Activity consent, `liveactivity_consent_withdrawn` for one removed by
-the device or the instance), `hlp_challenges_total{result}` and
-the usage gauges below. Log lines are JSON with the keys `ts` (to the second), `action` and a closed set of
+the device or the instance), `hlp_challenges_total{result}`, the operational counters
+`hlp_apns_sends_total{kind}`, `hlp_liveactivity_priority_total{priority}`, `hlp_push_retries_total{answer}`
+and `hlp_deliveries_by_key_slot_total{slot}` (after a key switch the accepted deliveries move to the new slot),
+and the usage gauges below. [transparency.md](transparency.md#metrics-the-operator-sees) lists every metric
+with its labels. Log lines are JSON with the keys `ts` (to the second), `action` and a closed set of
 value keys; the summary line `relay.summary` carries `pushes`, `errors` by reason, `events` (counts of
 `registered`, `rotated`, `deleted` and `challenge_resolved` in the period) and `p95_ms`. Registrations, key
 rotations, instance deletions and resolved challenges have no log line of their own. The summary is written

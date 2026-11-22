@@ -65,6 +65,7 @@ var DefaultLimits = Limits{
 type Config struct {
 	Host         string             // public host name, part of every signed text
 	Identity     ed25519.PrivateKey // relay identity key, signs every /v1 response
+	IdentitySlot string             // pinned slot of the identity key (current, next, emergency); empty means unpinned
 	MACKeys      [][]byte           // token MAC keys, current first, then previous
 	Environments map[string]bool    // APNs environments served, e.g. {"production": true}
 	Limits       Limits             // zero means DefaultLimits
