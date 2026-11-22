@@ -38,6 +38,7 @@ All notable changes to this project are documented in this file. The format foll
 - The threat model states as an accepted limit that the silent intake sync goes out at once after a dose
   is recorded, so Apple and the relay can see that time: preventing a double dose is chosen over hiding it.
 - The README lists the hosted identity keys once; the second, stale table is gone.
+- The README no longer repeats what the relay sees; it points to `docs/privacy.md`, the single source.
 
 The test vectors (`spec/vectors/v1.json`) are unchanged.
 
