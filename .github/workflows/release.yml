@@ -19,8 +19,7 @@ jobs:
     name: Image, signature, SBOM
     runs-on: ubuntu-24.04
     timeout-minutes: 45
-    # The release environment accepts only v* tags and waits for the maintainer's approval. Only this job
-    # names it: every other job needs this one, so one approval gates the whole release.
+    # The release environment accepts only v* tags. Only this job names it; every other job needs this one.
     environment: release
     permissions:
       contents: read
