@@ -13,10 +13,14 @@ The workflow `.github/workflows/release.yml` runs for a tag `vX.Y.Z` that points
 | SPDX SBOM | attestation on the image digest, type `spdxjson` | same identity |
 | SLSA v1 build provenance | attestation on the image digest, type `slsaprovenance1` | the reusable workflow `.github/workflows/provenance.yml` at the same tag (GitHub's `attest-build-provenance`) |
 | Linux binaries and `SHA256SUMS` | GitHub release | `SHA256SUMS.sigstore.json` bundle, same identity as the image |
+| SPDX SBOM of each binary, `healthlog-push_vX.Y.Z_linux_<arch>.spdx.json` (from the release after v1.0.3 on) | GitHub release, listed in `SHA256SUMS` | covered by the `SHA256SUMS` bundle and by the binary provenance |
 | SLSA v1.0 provenance of the binaries and `SHA256SUMS` (from v1.0.3 on) | GitHub release, `healthlog-push_vX.Y.Z.intoto.jsonl` | the SLSA generic generator `generator_generic_slsa3.yml@refs/tags/v2.1.0` |
 
 BuildKit runs pinned by digest, there is no emulation step, and the SBOM is generated in a job that has no
-signing rights; only a separate job with `id-token: write` attests it. The provenance is signed in a reusable
+signing rights; only a separate job with `id-token: write` attests it. The binaries and their SBOMs are
+built the same way, in a job that can neither sign nor write to the release. syft reads each of those SBOMs
+from the finished binary, so it lists the modules and the Go version that were compiled in, and it carries
+the SHA-256 of the binary it describes. The provenance is signed in a reusable
 workflow whose own path is the certificate identity, so nothing in the build job can produce a provenance that
 verifies. Signature, SBOM and provenance are Sigstore bundles in the registry's referrers (on GHCR the
 `sha256-<digest>` tag), the format cosign 3 reads by default.
@@ -40,7 +44,7 @@ cosign verify-attestation "$IMAGE@$DIGEST" --type slsaprovenance1 \
   --certificate-identity "$PROV" --certificate-oidc-issuer "$ISSUER" \
   --certificate-github-workflow-repository MBombeck/healthlog-push > /dev/null
 
-# binaries
+# binaries and, from the release after v1.0.3 on, their SBOMs
 cosign verify-blob SHA256SUMS --bundle SHA256SUMS.sigstore.json \
   --certificate-identity "$ID" --certificate-oidc-issuer "$ISSUER"
 shasum -a 256 -c SHA256SUMS
@@ -91,7 +95,8 @@ other command is the one the workflow uses. It checks:
 3. the SPDX SBOM attestation verifies;
 4. the provenance attestation verifies;
 5. a reference that was not signed (a single platform manifest) is refused;
-6. the release binaries match `SHA256SUMS`, whose signature bundle verifies;
+6. each release binary has an SPDX SBOM that carries its hash and the compiled-in modules, and binaries and
+   SBOMs match `SHA256SUMS`, whose signature bundle verifies;
 7. rebuilding the binary gives a byte-identical file.
 
 Last run, on 2026-11-21 against commit `cd66d8b`:
@@ -122,7 +127,7 @@ provenance workflow's own signature. Those are checked with the commands above a
   commit SHA. The comment above the job in `release.yml` records the commit the tag pointed to when it was
   adopted.
 - **Least privilege.** Every workflow starts with no token permissions and each job asks for what it needs.
-  The job that generates the SBOM cannot sign, and the image provenance is signed in a separate reusable
+  The jobs that generate the SBOMs and build the binaries cannot sign, and the image provenance is signed in a separate reusable
   workflow, so the build job cannot produce a provenance that verifies.
 - **Tags.** A release starts when a `vX.Y.Z` tag is pushed, which needs write access to the repository. A
   ruleset protects `v*` tags from update and deletion, so a published tag cannot be moved to other code, and

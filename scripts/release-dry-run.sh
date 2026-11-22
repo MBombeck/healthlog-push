@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Rehearses the release pipeline locally against a throwaway registry: multi-arch image build with BuildKit
-# provenance, signature, SBOM attestation, provenance attestation, release binaries with signed checksums,
-# and verification of each. Keyless signing needs GitHub's OIDC token, so this run signs with a throwaway
+# provenance, signature, SBOM attestation, provenance attestation, release binaries with their SBOMs and
+# signed checksums, and verification of each. Keyless signing needs GitHub's OIDC token, so this run signs with a throwaway
 # key pair; everything else is the same command the release workflow runs.
 #
 # Needs: docker with buildx, cosign, syft, crane, go. Usage: scripts/release-dry-run.sh [version]
@@ -87,12 +87,23 @@ if cosign verify --insecure-ignore-tlog=true --key "$work/cosign.pub" "${image}@
 fi
 echo "unsigned platform manifest: refused"
 
-step "release binaries with signed checksums"
+step "release binaries and their SBOMs with signed checksums"
 mkdir -p "$work/dist"
 for arch in amd64 arm64; do
   CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build -mod=readonly -trimpath \
     -ldflags "-s -w -buildid= -X github.com/MBombeck/healthlog-push/internal/buildinfo.Version=${version} -X github.com/MBombeck/healthlog-push/internal/buildinfo.Commit=${commit}" \
     -o "$work/dist/healthlog-push-linux-${arch}" ./cmd/healthlog-push
+  (cd "$work/dist" && syft -q "file:healthlog-push-linux-${arch}" -o "spdx-json=healthlog-push-linux-${arch}.spdx.json")
+  python3 - "$work/dist/healthlog-push-linux-${arch}.spdx.json" \
+    "$(shasum -a 256 < "$work/dist/healthlog-push-linux-${arch}" | cut -d' ' -f1)" <<'PY'
+import json, sys
+doc = json.load(open(sys.argv[1]))
+names = {p["name"] for p in doc["packages"]}
+sums = {c["checksumValue"] for f in doc.get("files", []) for c in f.get("checksums", [])}
+assert "stdlib" in names and "go.etcd.io/bbolt" in names, "the SBOM lacks the compiled-in modules"
+assert sys.argv[2] in sums, "the SBOM does not carry the hash of its binary"
+print("binary SBOM:", len(doc["packages"]), "packages, hash of the binary present")
+PY
 done
 (cd "$work/dist" && shasum -a 256 healthlog-push-linux-* > SHA256SUMS)
 quiet cosign sign-blob --yes --use-signing-config=false --tlog-upload=false --key "$work/cosign.key" --bundle "$work/dist/SHA256SUMS.bundle" "$work/dist/SHA256SUMS"

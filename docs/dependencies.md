@@ -44,7 +44,7 @@ when it signs.
 | Tool | Where | Purpose |
 |---|---|---|
 | `actions/checkout`, `actions/setup-go`, `actions/setup-node` | all workflows | check out, install Go from `go.mod`, install Node 22 |
-| `golangci-lint` v2.15.0 (`golangci/golangci-lint-action`) | `ci.yml` | linters, configured in `.golangci.yml` |
+| `golangci-lint` v2.15.0 (`golangci/golangci-lint-action`) | `lint.yml` | linters, configured in `.golangci.yml` |
 | `golang.org/x/vuln/cmd/govulncheck` v1.10.0 | `ci.yml` | known vulnerabilities in reachable code |
 | Go fuzzing (`go test -fuzz`) | `ci.yml` | every `Fuzz` target for 20 seconds, starting from the corpus committed under `testdata/fuzz`; the job fails if none is found |
 | Node 22, no npm packages | `ci.yml` | `spec/tools/check-vectors.mjs` regenerates and checks the test vectors with `node:crypto` only |
@@ -52,12 +52,12 @@ when it signs.
 | `ansible-lint`, `yamllint`, `ansible-core` | `ci.yml` (`deploy-lint` job) | lint and syntax-check the deploy code; installed with `pip install --require-hashes --no-deps` from `.github/deploy-lint-requirements.txt`, which pins every package and its dependencies by version and SHA-256 (generated with `pip-compile --generate-hashes` from `.github/deploy-lint-requirements.in`) |
 | `docker/setup-qemu-action`, `docker/setup-buildx-action`, `docker/build-push-action`, `docker/login-action` | `ci.yml`, `release.yml` | multi-arch image builds (amd64, arm64) and the push to GHCR |
 | `sigstore/cosign-installer` | `release.yml` | keyless signing of the image, the SBOM attestation and the binaries' checksum file |
-| `anchore/sbom-action` | `release.yml` | SPDX SBOM of the released image |
+| `anchore/sbom-action` (runs the syft version fixed by the pinned action) | `release.yml` | SPDX SBOM of the released image and of each release binary |
 | `slsa-framework/slsa-github-generator` v2.1.0 (`generator_generic_slsa3.yml`) | `release.yml` | SLSA v1.0 provenance for the release binaries and `SHA256SUMS`, uploaded to the release as `.intoto.jsonl` |
 | `actions/attest-build-provenance` v4.2.2 | `provenance.yml` (called by `release.yml`) | SLSA v1 provenance for the image, Sigstore bundle in the registry |
 | `github/codeql-action` | `codeql.yml` | CodeQL analysis of the Go code |
 | `ossf/scorecard-action`, `actions/upload-artifact` | `scorecard.yml` | OpenSSF Scorecard |
-| Dependabot | `.github/dependabot.yml` | weekly updates for Go modules, GitHub Actions and Docker base images |
+| Dependabot | `.github/dependabot.yml` | weekly updates for Go modules, GitHub Actions, Docker base images and the pinned deploy linters |
 
 On the relay host, the Ansible role installs cosign at a pinned version and checks the download against a
 pinned SHA-256 before it verifies an image ([deploy/ansible/README.md](../deploy/ansible/README.md)).

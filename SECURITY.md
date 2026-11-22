@@ -57,7 +57,7 @@ Every fixed vulnerability is listed under "Security" in [CHANGELOG.md](CHANGELOG
 
 ## Findings from automated analysis
 
-**Dependencies.** `govulncheck` runs on every pull request and every push to `main`, and Dependabot watches the Go modules, the base images and the GitHub Actions. The threshold is zero: a known vulnerability in code the relay can reach blocks the merge, whatever its severity, and no release is tagged while one is open. A vulnerable dependency that the relay does not reach is updated with the next regular update. A new dependency is accepted only under the rules in [docs/dependencies.md](docs/dependencies.md), which exist to keep malicious or abandoned code out; a pull request that adds a module without its entry is not merged.
+**Dependencies.** `govulncheck` runs on every pull request and every push to `main`, and Dependabot watches the Go modules, the base images, the GitHub Actions and the pinned deploy linters. The threshold is zero: a known vulnerability in code the relay can reach blocks the merge, whatever its severity, and no release is tagged while one is open. A vulnerable dependency that the relay does not reach is updated with the next regular update. A new dependency is accepted only under the rules in [docs/dependencies.md](docs/dependencies.md), which exist to keep malicious or abandoned code out; a pull request that adds a module without its entry is not merged.
 
 **Licenses.** Dependencies must be under a permissive license compatible with Apache-2.0 (Apache-2.0, MIT, BSD, ISC). Anything else is refused at review.
 
@@ -77,7 +77,7 @@ The argument for why the design meets its security requirements, with the eviden
 
 ## Verifying a release
 
-Every release is built by the release workflow from a `vX.Y.Z` tag on `main`. The image is signed keyless with cosign and carries an SBOM attestation and SLSA provenance; the release binaries come with a signed `SHA256SUMS` and, from v1.0.3 on, SLSA provenance of their own. The commands to check all of it are in [docs/release-verification.md](docs/release-verification.md). Verify before you run a release, and report anything that does not verify as a vulnerability.
+Every release is built by the release workflow from a `vX.Y.Z` tag on `main`. The image is signed keyless with cosign and carries an SBOM attestation and SLSA provenance; the release binaries come with a signed `SHA256SUMS`, from v1.0.3 on SLSA provenance of their own, and from the release after v1.0.3 on an SPDX SBOM each. The commands to check all of it are in [docs/release-verification.md](docs/release-verification.md). Verify before you run a release, and report anything that does not verify as a vulnerability.
 
 ## Build pipeline
 
