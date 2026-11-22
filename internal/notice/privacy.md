@@ -1,6 +1,6 @@
 # Privacy notice of the HealthLog push relay
 
-Version 1.2, 2026-11-22 (consent text version `2026-11-21`). Served by the relay itself at https://push.healthlog.dev/privacy; this text is the
+Version 1.3, 2026-11-22 (consent text version `2026-11-21`). Served by the relay itself at https://push.healthlog.dev/privacy; this text is the
 authoritative one. Earlier versions are kept in the source repository
 (https://github.com/MBombeck/healthlog-push, file internal/notice/privacy.md).
 
@@ -160,8 +160,16 @@ To handle abuse, the operator can also list, on the relay host only, the servers
 tokens, moved bindings or conflict challenges in the last 7 days, with their counts. This list is shown on
 request, never logged or exported.
 
-The same counts are available as metrics on the relay host. While fewer than 20 servers are active, the
-metrics are refreshed only once an hour, so that the traffic of a single server cannot be read off them.
+The relay host also exposes metrics to the operator's monitoring. They are counts without any server,
+device or person in them. A few of them are current: the requests the relay answered, the notifications it
+passed to Apple (all kinds together), Apple's refusals and how long Apple took to answer. So the operator's
+monitoring shows at what time a notification passed through the relay and how long Apple took to accept it.
+It does not show which server sent it, which device it went to, what kind of notification it was or what it
+said. While only very few servers use the relay, these current counts still reflect their traffic in
+aggregate: with a single active server, they are that server's. Every other figure, among them every count
+by kind of notification and the figures about registered servers and bound devices, is refreshed only every
+five minutes, and a tier with fewer than three servers is counted together with the others. The monitoring
+keeps these values for 6 months.
 
 
 ## 7. Logs

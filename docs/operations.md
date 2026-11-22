@@ -424,10 +424,15 @@ The ACME account key decides which account obtains the certificate. If your CAA 
 
 ## Alerts worth acting on
 
-While fewer than 20 instances are active, the metrics snapshot refreshes once an hour, so a push sent a
-minute ago is not in it yet; `admin stats` answers from the live state. Alert on the live
-`/healthz` from outside the host for anything that needs a quick reaction; `status` covers only the relay's
-own facts, so also alert on the `breaker` field of the body when it is not `closed`. Use metrics for trends.
+Seven metrics are current at every scrape: `hlp_requests_total`, `hlp_apns_requests_total`,
+`hlp_apns_rejections_total`, the latency histogram `hlp_delivery_latency_seconds`, and the gauges
+`hlp_breaker_open`, `hlp_apns_misconfigured` and `hlp_db_writable`. A push sent a moment ago shows in them
+at once. Every other metric, every split by class or kind (`hlp_push_total`, `hlp_apns_sends_total`,
+`hlp_liveactivity_priority_total`, ...) and the figures about who is registered (`hlp_instances`,
+`hlp_bindings`, `hlp_usage_*`) among them, comes from a copy taken every five minutes; `admin stats` answers
+from the live state. Alert on the live `/healthz` from outside the host as well: it does not depend on the
+metrics pipeline, and its `status` covers only the relay's own facts, so also alert on the `breaker` field of
+the body when it is not `closed`.
 Metrics are served on `127.0.0.1:9464/metrics` and carry no instance, device or address labels.
 
 | Signal | Means | Act |
@@ -447,8 +452,8 @@ Metrics are served on `127.0.0.1:9464/metrics` and carry no instance, device or 
 | rising `hlp_queue_dropped_total` or `hlp_push_total{result="queue_full"}` | the send queue refuses work | capacity or a slow Apple connection |
 | rising `hlp_connections_rejected_total` | connection caps reached | connection flood; the cloud firewall is the next lever |
 | jump in `hlp_http_errors_total` | the HTTP server discarded error lines (often TLS scans) | informational |
-| high share of `hlp_apns_rejections_total` against `hlp_apns_sends_total` | Apple refuses requests; `reason` says why (`BadTopic`, `BadDeviceToken`, `other`, ...) | check the topic, environment and recent deploys; token reasons alone are usually stale devices |
-| rising `hlp_delivery_latency_seconds` above the 1 s bucket, or `hlp_queue_depth` staying above zero | sends to Apple are slow and the queue builds up | Apple's status, the host's egress, `hlp_queue_dropped_total` |
+| high share of `hlp_apns_rejections_total` against `hlp_apns_requests_total` | Apple refuses requests; `reason` says why (`BadTopic`, `BadDeviceToken`, `other`, ...) | check the topic, environment and recent deploys; token reasons alone are usually stale devices |
+| rising `hlp_delivery_latency_seconds` above the 1 s bucket, a 95th percentile above 5 s over 15 minutes with at least 20 sends, or `hlp_queue_depth` staying above zero | sends to Apple are slow and the queue builds up | Apple's status, the host's egress, `hlp_queue_dropped_total` |
 | rising `hlp_silent_budget_refused_total{kind="sync"}` | instances send more background pushes than the device budgets allow | an instance flooding silent pushes; the budgets work as intended |
 | rising `hlp_rate_limited_total{surface}` or `hlp_registrations_rejected_total{reason}` | a limit refuses requests; the surface or reason says which | abuse runbook; `bad_signature` and `no_invite` are usually misconfigured servers |
 | log `export.failed` | the daily export was not written | check `/export` permissions and space; the export is your only backup |
@@ -500,8 +505,8 @@ is [suspects](#suspects) on the admin socket, for abuse handling.
 - `registrationsPerWeek` and `optOutsPerWeek` list completed weeks only (Monday to Sunday, UTC), keyed by
   the Monday. Opt-outs are direct opt-outs by devices (`DELETE /v1/bindings/self`).
 
-The same figures as metrics, recomputed at every scrape and exposed through the snapshot, which refreshes
-every minute with at least 20 active instances and every hour below that:
+The same figures as metrics. Like every metric outside the live set, the scrape shows them from a copy taken
+every five minutes, at every number of instances, and computes them only then:
 
 | Metric | Labels | Value |
 |---|---|---|
@@ -512,7 +517,7 @@ every minute with at least 20 active instances and every hour below that:
 | `hlp_usage_outcomes_yesterday` | `outcome="accepted"`, `"soft_failed"`, `"unregistered"` | outcomes of the last completed day |
 | `hlp_usage_registrations_last_week` | | registrations in the last completed week |
 | `hlp_usage_opt_outs_last_week` | | direct opt-outs in the last completed week |
-| `hlp_instances` | `tier="probation"`, `"standard"`, `"suspended"`, `"revoked"` | instances per tier, the `instances` block of `admin stats` |
+| `hlp_instances` | `tier="probation"`, `"standard"`, `"suspended"`, `"revoked"`, `"other"` | instances per tier; a tier with fewer than three instances reads zero and counts under `other`, so the exact sums are only in the `instances` block of `admin stats` |
 | `hlp_bindings` | `state="provisional"`, `"active"`, `"soft_invalid"` | bindings per state, the `bindings` block of `admin stats` |
 
 The underlying day counters (`counters_global`) are kept for 400 days.

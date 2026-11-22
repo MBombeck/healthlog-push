@@ -10,8 +10,8 @@ import (
 	"github.com/MBombeck/healthlog-push/internal/wire"
 )
 
-// fewInstances is the threshold below which logs and metrics are only refreshed hourly, so that the
-// traffic of a single instance cannot be read off them.
+// fewInstances is the threshold below which the summary log line is written hourly instead of every minute,
+// so that the traffic of a single instance cannot be read off the log.
 const fewInstances = 20
 
 func (r *Relay) countGlobalLocked(today int, class, result string) {

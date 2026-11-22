@@ -19,11 +19,11 @@ import (
 	"github.com/MBombeck/healthlog-push/internal/wire"
 )
 
-// live renders the registry as it is now, without the coarse snapshot, so a test sees each increment.
+// live renders the registry as it is now, the population gauges included, so a test sees each change.
 func live(t *testing.T, h *harness) map[string]float64 {
 	t.Helper()
 	var b bytes.Buffer
-	if err := h.r.Metrics.WriteSnapshot(&b, h.clk.Now().Add(1000*time.Hour), 0); err != nil {
+	if err := h.r.Metrics.Write(&b, h.clk.Now().Add(1000*time.Hour), 0); err != nil {
 		t.Fatal(err)
 	}
 	out := map[string]float64{}
@@ -253,7 +253,7 @@ func labelValues() map[string][]string {
 		"result":   results,
 		"status":   statusClasses,
 		"reason":   append(append([]string{"bad_signature"}, apns.ReasonLabels()...), registrationRejections...),
-		"tier":     stateTiers,
+		"tier":     append(slices.Clone(stateTiers), tierOther),
 		"state":    stateBindings,
 		"window":   {"7d", "30d"},
 		"outcome":  {"accepted", "soft_failed", "unregistered"},
@@ -262,7 +262,7 @@ func labelValues() map[string][]string {
 		"priority": {"5", "10"},
 		"slot":     identitySlots,
 		"surface":  rateSurfaces,
-		"le":       {"0.1", "0.25", "0.5", "1", "2.5", "5", "+Inf"},
+		"le":       {"0.05", "0.1", "0.15", "0.25", "0.5", "1", "2.5", "5", "10", "+Inf"},
 	}
 }
 
@@ -312,9 +312,10 @@ func TestMetricLabelsAreAllowlisted(t *testing.T) {
 	}
 }
 
-// TestOperationalMetricsKeepTheCoarseSnapshot: below 20 instances a push moves none of the new series
-// within the hour either.
-func TestOperationalMetricsKeepTheCoarseSnapshot(t *testing.T) {
+// TestOnlyTheNarrowSetIsLive: a push shows in the very next scrape only as the request, one request to
+// Apple without its kind, and its latency. Its class, its kind, its outcome and the key slot, like the
+// binding it made active, wait for the next refresh of the held copy, at any number of instances.
+func TestOnlyTheNarrowSetIsLive(t *testing.T) {
 	h := newHarness(t)
 	i := h.register()
 	d := newDevice(0xc5)
@@ -323,17 +324,60 @@ func TestOperationalMetricsKeepTheCoarseSnapshot(t *testing.T) {
 		h.r.MetricsHandler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", http.NoBody))
 		return rec.Body.String()
 	}
+	has := func(body, line, when string) {
+		t.Helper()
+		if !strings.Contains(body, line+"\n") {
+			t.Errorf("%s: missing %q in\n%s", when, line, body)
+		}
+	}
 	first := scrape()
-	if !strings.Contains(first, "hlp_delivery_latency_seconds_count 0") {
-		t.Fatalf("histogram missing from the snapshot:\n%s", first)
+	for _, line := range []string{"hlp_delivery_latency_seconds_count 0", "hlp_apns_requests_total 0",
+		`hlp_apns_sends_total{kind="silent_sync"} 0`, `hlp_bindings{state="active"} 0`, `hlp_deliveries_by_key_slot_total{slot="unpinned"} 0`} {
+		has(first, line, "first scrape")
 	}
 	i.activate(d)
 	i.push1(silentItem("s", d))
-	if scrape() != first {
-		t.Fatal("operational metrics changed within the hour with fewer than 20 instances")
+	next := scrape()
+	// The alert that activates the binding and the silent push: two requests to Apple.
+	for _, line := range []string{"hlp_apns_requests_total 2", "hlp_delivery_latency_seconds_count 2"} {
+		has(next, line, "right after the push")
 	}
-	h.clk.Add(time.Hour)
-	if after := scrape(); after == first || !strings.Contains(after, `hlp_apns_sends_total{kind="silent_sync"} 1`) {
-		t.Fatal("the snapshot never shows the push")
+	for _, line := range []string{`hlp_apns_sends_total{kind="silent_sync"} 0`, `hlp_apns_sends_total{kind="alert"} 0`,
+		`hlp_deliveries_by_key_slot_total{slot="unpinned"} 0`, `hlp_bindings{state="active"} 0`} {
+		has(next, line, "held until the refresh")
+	}
+	if strings.Contains(next, `hlp_push_total{class="silent"`) {
+		t.Errorf("the class of the push shows before the refresh:\n%s", next)
+	}
+	h.clk.Add(heldRefresh)
+	after := scrape()
+	for _, line := range []string{`hlp_apns_sends_total{kind="silent_sync"} 1`, `hlp_apns_sends_total{kind="alert"} 1`,
+		`hlp_push_total{class="silent",result="accepted"} 1`, `hlp_deliveries_by_key_slot_total{slot="unpinned"} 2`,
+		`hlp_bindings{state="active"} 1`} {
+		has(after, line, "after the refresh")
+	}
+}
+
+// TestLatencyBucketsResolveTheUsefulRange: answers in 60, 120 and 200 ms fall into three buckets, and one
+// that took seven seconds is told from one beyond ten, so a slow 95th percentile is a number and not the last
+// bound.
+func TestLatencyBucketsResolveTheUsefulRange(t *testing.T) {
+	h := newHarness(t)
+	for _, v := range []float64{0.04, 0.06, 0.12, 0.2, 7, 12} {
+		h.r.Metrics.Observe("hlp_delivery_latency_seconds", v)
+	}
+	m := live(t, h)
+	for series, want := range map[string]float64{
+		`hlp_delivery_latency_seconds_bucket{le="0.05"}`: 1,
+		`hlp_delivery_latency_seconds_bucket{le="0.1"}`:  2,
+		`hlp_delivery_latency_seconds_bucket{le="0.15"}`: 3,
+		`hlp_delivery_latency_seconds_bucket{le="0.25"}`: 4,
+		`hlp_delivery_latency_seconds_bucket{le="5"}`:    4,
+		`hlp_delivery_latency_seconds_bucket{le="10"}`:   5,
+		`hlp_delivery_latency_seconds_bucket{le="+Inf"}`: 6,
+	} {
+		if m[series] != want {
+			t.Errorf("%s = %v, want %v", series, m[series], want)
+		}
 	}
 }

@@ -152,7 +152,7 @@ func (r *Relay) Suspects(limit int) []Suspect {
 
 // Usage is the aggregate usage report: counts only, no instance ids, no per-instance values.
 type Usage struct {
-	Granularity          string      `json:"granularity"` // "day" below 20 active instances, else "day" plus live gauges
+	Granularity          string      `json:"granularity"` // always "day": completed days only
 	ActiveInstances      int         `json:"activeInstances"`
 	PushedLast7Days      int         `json:"instancesPushedLast7Days"`
 	PushedLast30Days     int         `json:"instancesPushedLast30Days"`
@@ -230,8 +230,8 @@ func (r *Relay) UsageReport(days int) Usage {
 	return u
 }
 
-// usageGauges publishes the usage counts as metrics. Gauges for completed days only; the snapshot itself
-// refreshes hourly below 20 active instances.
+// usageGauges publishes the usage counts as metrics. Gauges for completed days only; the scrape shows them
+// from the copy taken every heldRefresh.
 func (r *Relay) usageGauges() {
 	r.stateGauges()
 	u := r.UsageReport(7)
@@ -254,15 +254,25 @@ func (r *Relay) usageGauges() {
 	}
 }
 
-// stateTiers and stateBindings are the closed label sets of the state gauges. Every value is set on every
-// scrape, zero included, so a series never disappears when its last member changes state.
+// tierOther is the label of the tiers that hold too few instances to be shown on their own, and
+// minTierBucket the smallest number of instances a tier is shown with. A tier with one or two instances
+// would say which tier a single instance is in (the one suspended instance, the first one promoted), so it
+// is counted under tierOther instead. `admin stats` on the relay host keeps the exact sums.
+const (
+	tierOther     = "other"
+	minTierBucket = 3
+)
+
+// stateTiers and stateBindings are the closed label sets of the state gauges. Every value is set at every
+// refresh, zero included, so a series never disappears when its last member changes state.
 var (
 	stateTiers    = []string{store.TierProbation, store.TierStandard, store.TierSuspended, store.TierRevoked}
 	stateBindings = []string{store.StateProvisional, store.StateActive, store.StateSoftInvalid}
 )
 
-// stateGauges publishes how many instances are in each tier and how many bindings in each state: the same
-// sums as `admin stats`, without any instance label.
+// stateGauges publishes how many instances are in each tier and how many bindings in each state, without
+// any instance label: the sums of `admin stats`, except that a tier below minTierBucket is merged into
+// tierOther.
 func (r *Relay) stateGauges() {
 	r.mu.Lock()
 	tiers, states := map[string]int{}, map[string]int{}
@@ -273,9 +283,16 @@ func (r *Relay) stateGauges() {
 		states[b.State]++
 	}
 	r.mu.Unlock()
+	other := 0
 	for _, t := range stateTiers {
-		r.Metrics.Set("hlp_instances", float64(tiers[t]), "tier", t)
+		n := tiers[t]
+		if n < minTierBucket {
+			other += n
+			n = 0
+		}
+		r.Metrics.Set("hlp_instances", float64(n), "tier", t)
 	}
+	r.Metrics.Set("hlp_instances", float64(other), "tier", tierOther)
 	for _, s := range stateBindings {
 		r.Metrics.Set("hlp_bindings", float64(states[s]), "state", s)
 	}

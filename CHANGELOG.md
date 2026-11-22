@@ -38,6 +38,28 @@ All notable changes to this project are documented in this file. The format foll
 - `SECURITY.md` states the support policy, how fixed vulnerabilities are published and credited, the
   thresholds for findings from automated analysis, and how secrets are handled. `CONTRIBUTING.md` gains the
   coding style, the test policy and the review rule.
+- Seven metrics are current at every scrape: HTTP responses by status class (`hlp_requests_total`), requests
+  to Apple without a split by kind (`hlp_apns_requests_total`, new), Apple's refusals by reason, the delivery
+  latency, and the breaker, provider-token and store gauges. Until now the whole `/metrics` output was a
+  snapshot refreshed once an hour while fewer than 20 instances were active, which hid a failed or slow
+  delivery for up to an hour. Every other metric, every split by push class or kind, the key slot, the silent
+  budget refusals by type, the queue and the figures about who is registered among them, is served from a copy
+  taken every five minutes, at every number of instances. A metric added later is held unless the code
+  declares it live. `hlp_instances` counts a tier with fewer than three instances under `tier="other"`, so
+  that no value names the tier of a single instance; `admin stats` keeps the exact sums. With very few active
+  instances the live counts still reflect their traffic in aggregate, without its kind, and with a single one
+  they are that instance's: the privacy notice (now version 1.3; the consent text version stays
+  `2026-11-21`), the threat model, the specification and invariant P2 say so. The summary log line keeps its
+  hourly period below 20 active instances.
+- `docs/transparency.md` states for every metric how current it is (`live` or `every 5 min`), and a test
+  fails when the table and the code disagree. A second test fails when the live set changes without the test
+  changing with it.
+- `hlp_apns_misconfigured` exists from the start and reads 0 on a healthy relay. It used to appear only once
+  Apple had rejected the provider token, so a rule on it looked at no data until the incident it is for.
+- `hlp_delivery_latency_seconds` has nine buckets (0.05, 0.1, 0.15, 0.25, 0.5, 1, 2.5, 5 and 10 s) instead
+  of six from 0.1 s to 5 s. Apple usually answers in 100 to 250 ms, which all fell into one bucket; and with
+  5 s as the last bound a 95th percentile above five seconds read as exactly five. Dashboards and rules that
+  name the old bounds need the three new ones.
 
 ### Fixed
 

@@ -1,6 +1,7 @@
 package relay
 
 import (
+	"slices"
 	"time"
 
 	"github.com/MBombeck/healthlog-push/internal/apns"
@@ -37,8 +38,31 @@ var rateSurfaces = []string{surfaceInstanceRequests, surfaceRegistration, surfac
 // Reasons a new registration is refused.
 var registrationRejections = []string{"no_invite", "bad_signature", "rate_limited"}
 
-// latencyBounds are the coarse upper bounds, in seconds, of the delivery latency histogram.
-var latencyBounds = []float64{0.1, 0.25, 0.5, 1, 2.5, 5}
+// latencyBounds are the coarse upper bounds, in seconds, of the delivery latency histogram. Apple usually
+// answers in 100 to 250 ms, so three bounds lie in and just below that range and tell a quick answer from an
+// ordinary and a slowish one; the highest lies beyond the longest an item can take (two seconds of queueing
+// and Apple's three-second deadline), so a 95th percentile above five seconds is still a number.
+var latencyBounds = []float64{0.05, 0.1, 0.15, 0.25, 0.5, 1, 2.5, 5, 10}
+
+// liveMetrics are the only metrics current at every scrape: HTTP responses by status class, requests to
+// Apple without any split by kind, Apple's refusals by reason, the delivery latency, and the three gauges
+// that say whether the relay itself is healthy. With very few instances these still trace their traffic in
+// time, in aggregate and without its kind. Every other metric, every split by push class or kind among them,
+// is served from the copy the scrape takes every heldRefresh, and a metric added later is held unless it is
+// named here. docs/transparency.md states the cadence of each metric, and a test holds the two together.
+var liveMetrics = []string{
+	"hlp_requests_total",
+	"hlp_apns_requests_total",
+	"hlp_apns_rejections_total",
+	"hlp_delivery_latency_seconds",
+	"hlp_breaker_open",
+	"hlp_apns_misconfigured",
+	"hlp_db_writable",
+}
+
+// LiveMetrics returns the names of the live metrics, for the test that holds docs/transparency.md to the
+// code.
+func LiveMetrics() []string { return slices.Clone(liveMetrics) }
 
 // identitySlots are the labels of hlp_deliveries_by_key_slot_total; keys.Slots in the main package.
 var identitySlots = []string{"current", "next", "emergency", "unpinned"}
@@ -68,9 +92,10 @@ func (r *Relay) identitySlot() string {
 	return "unpinned"
 }
 
-// observeSend records one request to Apple: its kind, and, when Apple answered, the time from the relay's
-// acceptance of the item to Apple's answer and the reason of a refusal.
+// observeSend records one request to Apple: in total and by kind, and, when Apple answered, the time from
+// the relay's acceptance of the item to Apple's answer and the reason of a refusal.
 func (r *Relay) observeSend(kind string, accepted time.Time, res apns.Result) {
+	r.Metrics.Inc("hlp_apns_requests_total")
 	r.Metrics.Inc("hlp_apns_sends_total", "kind", kind)
 	if res.Outcome == apns.NoProviderToken || (res.Outcome == apns.Unavailable && res.Reason == "transport") {
 		return
@@ -98,6 +123,7 @@ func (r *Relay) rateLimited(surface string) {
 
 func (r *Relay) describeOperational() {
 	m := r.Metrics
+	m.Help("hlp_apns_requests_total", "Requests to Apple, every kind together.")
 	m.Help("hlp_apns_sends_total", "Requests to Apple by push kind.")
 	m.Help("hlp_delivery_latency_seconds", "Time from the relay accepting an item to Apple's answer.")
 	m.Help("hlp_apns_rejections_total", "Apple refusals by Apple's reason code; unknown reasons are other.")
@@ -111,6 +137,7 @@ func (r *Relay) describeOperational() {
 	m.Histogram("hlp_delivery_latency_seconds", latencyBounds...)
 	// Every series of the closed sets exists from the start, so a series does not appear only once
 	// something happens.
+	m.Add("hlp_apns_requests_total", 0)
 	for _, k := range pushKinds {
 		m.Add("hlp_apns_sends_total", 0, "kind", k)
 	}
