@@ -234,7 +234,7 @@ The pipeline can be rehearsed locally, with a throwaway registry and key, with `
 The public identity keys of the hosted relay `push.healthlog.dev`, `current` and `next`, were published with
 the first release (v1.0.0): in its release notes and as `keys/push.healthlog.dev.json` in the tagged tree, in the
 form `{"host": "push.healthlog.dev", "current": "<base64url 32>", "next": "<base64url 32>"}` (unpadded
-base64url Ed25519 public keys). Clients pin them at build time. The HealthLog server ships them as its hosted
+base64url Ed25519 public keys); v1.0.2 added `"emergency"` beside them. Clients pin them at build time. The HealthLog server ships them as its hosted
 relay pins, the iOS app as its `HLPushRelayKeys` build setting. Neither fetches them from the relay at
 run time, because an answer from the relay cannot vouch for the key that signs it. A new `next` key is
 published in the release notes of the release that ships it, before the relay switches to it (see
@@ -245,6 +245,11 @@ for how the keys are made and kept).
 |---|---|
 | `current` | `IU8JGZzcE-O4gp4q2BL2o6YYNJeHyDg8MNmAGL5_Ypo` |
 | `next` | `kPhnCqIwrF_cyQIFTAgCHrWnPavdWkcwMB35oi_wCH0` |
+| `emergency` | `dcrihMfqGY7srT95DZrVP7sKA-IS3oJPPhOVbbqTvBU` |
+
+`emergency` is a third key, generated and kept offline, apart from `current` and `next`, and never deployed
+to the relay host. It is pinned like the others and is used only if both `current` and `next` are lost
+([docs/key-ceremony.md](docs/key-ceremony.md#lost-current-and-next)).
 
 The same values are in [`keys/push.healthlog.dev.json`](keys/push.healthlog.dev.json). Key rotations are
 announced in [docs/transparency.md](docs/transparency.md) at least 7 days before the relay signs with the

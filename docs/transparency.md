@@ -51,7 +51,10 @@ is announced at least 90 days ahead (privacy.md section 12).
 
 Newest first:
 
-- **2026-11-22** Relay v1.0.2. No key change, no deprecation. Live Activity pushes now go with Apple priority
+- **2026-11-22** Relay v1.0.2. A third identity key is published: `emergency`
+  `dcrihMfqGY7srT95DZrVP7sKA-IS3oJPPhOVbbqTvBU`, generated offline and kept apart from `current` and
+  `next`, for the case that both are lost. It is pinned beside them; the relay keeps signing with
+  `current`. No deprecation. Live Activity pushes now go with Apple priority
   5 unless the dose is due or overdue or the activity ends; a stale `410` from Apple is answered as
   `soft_invalid` with reason `Unregistered` instead of deleting a binding made after it.
 - **2026-11-21** Relay v1.0.1. The SLSA provenance moved to the SLSA v1 Sigstore bundle; the provenance of

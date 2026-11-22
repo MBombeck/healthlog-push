@@ -27,6 +27,9 @@ All notable changes to this project are documented in this file. The format foll
   Traces are never stored, exported, logged or counted; production pushes have none. The retention is in
   `docs/privacy.md` (now version 1.1; the consent text version stays `2026-11-21`) and
   `docs/operations.md`.
+- A third identity key for the hosted relay, `emergency` (`dcrihMfqGY7srT95DZrVP7sKA-IS3oJPPhOVbbqTvBU`), in `keys/push.healthlog.dev.json` and the
+  README. It is kept offline, apart from `current` and `next`, never deployed, and promoted only if both are
+  lost; `docs/key-ceremony.md` has the procedure. The relay keeps signing with `current`.
 - `docs/transparency.md`: authority requests (none so far), how a request is handled, and a dated feed of
   deprecations and key rotations. Identity key rotations are announced there at least 7 days ahead. Linked
   from the README, the privacy notice and the threat model.

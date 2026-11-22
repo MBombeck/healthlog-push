@@ -365,8 +365,10 @@ stop.
 
 ### Relay identity key
 
-The relay loads one identity key. HealthLog servers and the app pin two public keys, `current` and `next`,
-so the relay can switch to `next` without a client release.
+The relay loads one identity key. HealthLog servers and the app pin three public keys, `current`, `next` and
+`emergency`, so the relay can switch to `next`, or to `emergency` if both others are lost, without a client
+release. The relay does not care which pinned key it runs with; promoting one is a change of the
+`relay_id_key` file only.
 
 1. Make sure the `next` public key is already pinned in the released server and app builds you serve.
 2. Write the private seed of `next` to `secrets/relay/relay_id_key` (only the `relay_id_key` value of the
@@ -378,6 +380,11 @@ so the relay can switch to `next` without a client release.
    supported client needs it.
 
 After a suspected compromise of the relay process, do this at once.
+
+If both `current` and `next` are lost, promote `emergency` the same way (its seed comes from offline storage,
+not from the secret store), run `admin export` right after the restart so the export is signed by the new
+key, and generate a new `next` and a new `emergency`: [key-ceremony.md](key-ceremony.md#lost-current-and-next).
+The same `admin export` after any promotion keeps a restore possible on the same day.
 
 ### Token MAC key
 
