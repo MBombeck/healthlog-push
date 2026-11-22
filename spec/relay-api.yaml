@@ -891,9 +891,6 @@ components:
       required: [state]
       properties:
         state: { $ref: "#/components/schemas/BindingState" }
-        challenge:
-          description: Declared in the response struct but not set by this relay version; conflicts are reported through the error envelope.
-          type: string
     TokenBody:
       type: object
       additionalProperties: false
@@ -1053,7 +1050,7 @@ components:
         optional, no `activity`. liveactivity: `activity` required, no `envelope`, no `collapse`.
       properties:
         ref:
-          description: Idempotency reference, unique within the batch.
+          description: Idempotency reference, unique within the batch; a retry under the same ref within the item's lifetime (at least 10 minutes) gets the stored definite answer.
           type: string
           pattern: '^[A-Za-z0-9._:-]{1,40}$'
         token: { $ref: "#/components/schemas/Token" }
@@ -1158,9 +1155,6 @@ components:
           type: string
           enum: [ok, degraded, maintenance, misconfigured]
         tier: { $ref: "#/components/schemas/Tier" }
-        reason:
-          description: Declared in the response struct; not set by this relay version (a suspended instance is refused before it reaches this endpoint).
-          type: string
         limits: { $ref: "#/components/schemas/TierLimits" }
         devices:
           type: object

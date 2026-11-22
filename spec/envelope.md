@@ -149,12 +149,14 @@ follow exactly; vectors with the given names show each one.
 
 | `t` | Class | Lifetime (`exp - iat`) | `d` | `n` | `ui` | Vector |
 |---|---|---|---|---|---|---|
-| `DATA_CHANGED` | silent | 3600 s | `domains`: a sorted, non-empty subset of `"measurements"`, `"sleep"`, `"workouts"`, `"nutrition"`; `changedAt`: ISO 8601 time | absent | absent | `silentDataChanged` |
+| `DATA_CHANGED` | silent | 3600 s | `domains`: a sorted, non-empty subset of `"intakes"`, `"measurements"`, `"medications"`, `"nutrition"`, `"sleep"`, `"workouts"`; `changedAt`: ISO 8601 time | absent | absent | `silentDataChanged` |
 | `HEALTHKIT_CATCH_UP` | silent | 3600 s | `requestedAt`: ISO 8601 time | absent | absent | `silentHealthKitCatchUp` |
-| `SECURITY_ALERT` | alert | 21600 s (6 h) | `securityKind`: one of `"new_device"`, `"passkey_added"`, `"passkey_removed"`, `"token_revoked"`, `"refresh_reuse"` | localized `title` and `body` | `category: "SECURITY_ALERT"`, `thread: "SECURITY_ALERT"`, `level: "time-sensitive"`, `sound: "default"` | `alertSecurity` |
+| `SECURITY_ALERT` | alert | 21600 s (6 h) | `securityKind`: one of `"new_device"`, `"passkey_added"`, `"passkey_removed"`, `"token_revoked"`, `"refresh_reuse"`, `"device_reassigned"` | localized `title` and `body` | `category: "SECURITY_ALERT"`, `thread: "SECURITY_ALERT"`, `level: "time-sensitive"`, `sound: "default"` | `alertSecurity` |
 
-In discreet mode a server sends every alert, `SECURITY_ALERT` included, with `t` = `REMINDER` and neutral
-text; the class and the lifetime stay the same.
+Discreet mode hides what an alert is about: the server sends it with `t` = `REMINDER` and neutral text, and
+the class and the lifetime stay the same. It is a property of the single alert, not of the device. A
+HealthLog server uses it only for the cycle reminders of a person who turned on discreet notifications;
+every other type, `SECURITY_ALERT` included, goes with its own `t`.
 
 Class maxima for `exp - iat` (the same values bound `ttlSeconds` at the relay):
 

@@ -47,6 +47,8 @@ func (r *Relay) handleRegister(w http.ResponseWriter, req *http.Request) {
 		case store.TierSuspended:
 			r.fail(w, req, http.StatusForbidden, errBody{Error: "instance_suspended", Reason: s.rec.Reason})
 		default:
+			// A registration with a known key proves the key, so it counts as contact like a signed request.
+			r.seenLocked(s, now)
 			r.reply(w, req, http.StatusOK, registerResp{InstanceID: id, Tier: s.rec.Tier, Limits: r.tierLimits(s.rec)})
 		}
 		return

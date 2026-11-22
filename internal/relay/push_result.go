@@ -20,7 +20,7 @@ type sent struct {
 }
 
 // complete applies Apple's answer to the binding and the counters (spec/protocol.md, "Failure handling").
-func (r *Relay) complete(instID, m string, it *wire.Item, ik string, ent *idemEntry, res apns.Result) {
+func (r *Relay) complete(instID, m string, it *wire.Item, ik string, ent *idemEntry, ch *charge, res apns.Result) {
 	r.mu.Lock()
 	now := r.cfg.Now()
 	p := &sent{instID: instID, s: r.instances[instID], b: r.bindings[m], m: m, it: it}
@@ -28,6 +28,12 @@ func (r *Relay) complete(instID, m string, it *wire.Item, ik string, ent *idemEn
 		p.b = nil
 	}
 	out, keep := r.applyLocked(p, res, now)
+	if refundable(res.Outcome) {
+		ch.undo()
+		if ch.alerts != nil {
+			r.dirty[m] = true
+		}
+	}
 	out.Ref = it.Ref
 	if res.UniqueID != "" && p.s != nil {
 		result := out.Result
@@ -39,6 +45,18 @@ func (r *Relay) complete(instID, m string, it *wire.Item, ik string, ent *idemEn
 	r.recordSummaryLocked(out, res.Latency)
 	r.mu.Unlock()
 	r.finish(ik, ent, out, keep)
+}
+
+// refundable reports whether Apple did not take an item for a reason of Apple's or of the relay's: it never
+// reached the device, so it does not stay on the device's or the instance's quotas, and the instance's
+// retry is counted afresh. Apple's throttling of the device and every answer about the token are not
+// refunded.
+func refundable(o apns.Outcome) bool {
+	switch o {
+	case apns.Unavailable, apns.NoProviderToken, apns.ProviderExpired, apns.ProviderTooMany, apns.ProviderInvalid:
+		return true
+	}
+	return false
 }
 
 // labelLocked counts one outcome in the metrics and the global day counters.

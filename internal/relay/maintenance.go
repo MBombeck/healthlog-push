@@ -213,7 +213,7 @@ func (r *Relay) pruneBindingsLocked(today int) int {
 }
 
 // pruneInstancesLocked removes suspended and revoked records after the block retention, idle instances and
-// instances that never delivered, and runs the promotion rules for the rest.
+// silent instances that never delivered, and runs the promotion rules for the rest.
 func (r *Relay) pruneInstancesLocked(today int) {
 	thisWeek := store.Week(today)
 	for id, s := range r.instances {
@@ -226,7 +226,11 @@ func (r *Relay) pruneInstancesLocked(today int) {
 			continue
 		}
 		idle := in.LastSeenWeek < thisWeek-store.InstanceIdleWeeks
-		never := in.FirstDeliveryDay == 0 && today-in.CreatedDay > store.UndeliveredInstDays
+		// An instance that never delivered goes once it has also been silent for UndeliveredInstDays, counted
+		// in whole weeks: one that keeps checking in (a status call, a registration, a push of any outcome) is
+		// waiting for its first device, not abandoned.
+		never := in.FirstDeliveryDay == 0 && today-in.CreatedDay > store.UndeliveredInstDays &&
+			in.LastSeenWeek < store.Week(today-store.UndeliveredInstDays)
 		if idle || never {
 			if r.persist(r.st.DeleteInstance(id)) {
 				r.dropInstanceLocked(id)

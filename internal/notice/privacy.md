@@ -114,7 +114,8 @@ All times in the relay's database are day or week numbers (UTC), never a time of
   day of its first and of its last accepted notification, the day of its last key rotation, and the last day
   it was flagged for an anomaly (a conflict challenge or too many invalid tokens).
   Deleted together with all its bindings when the server unregisters, after about 90 days (13 weeks) without
-  contact, or more than two days after registration if it never delivered a notification. The record of a
+  contact, or, if it never delivered a notification, once it has been out of contact for more than 30 days
+  (an operator still setting up, whose server keeps checking in, is not deleted). The record of a
   suspended or revoked server is kept for 365 days after the suspension or revocation, so that the same key
   cannot simply register again in that time.
 - Per-server day counters: notifications sent, invalid tokens and device moves, without class. Kept for
@@ -126,7 +127,8 @@ All times in the relay's database are day or week numbers (UTC), never a time of
   registration codes (as hashes). No personal data.
 
 Kept in memory only, gone at the latest on restart: the device token during a request, the nonces of recent
-requests, recent push results for retries (10 minutes), per-device rate counters, the update counters of
+requests, recent push results for retries (for the lifetime of the notification, at least 10 minutes and at
+most 6 hours), per-device rate counters, the update counters of
 each running Live Activity (keyed by an HMAC of its token, cleared at the end of each UTC day), the hashed address
 counters of the registration limit (reset daily), pending conflict challenges (30 minutes), the time of a
 direct opt-out (10 minutes), and delivery traces (72 hours). A delivery trace is the identifier Apple

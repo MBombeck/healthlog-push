@@ -469,3 +469,75 @@ func TestOldProviderRejectionForgotten(t *testing.T) {
 		t.Fatalf("an old rejection plus a new one stopped the relay: %+v", hz)
 	}
 }
+
+// TestIdempotencyLastsTheItemsLifetime: the definite answer to an item is replayed as long as the item could
+// still be delivered, not only for ten minutes, so an instance that lost the response and retries late in
+// its backoff gets the stored answer instead of putting a second copy at Apple. Once the lifetime has
+// passed, the ref is free again.
+func TestIdempotencyLastsTheItemsLifetime(t *testing.T) {
+	h := newHarness(t)
+	i := h.register()
+	d := newDevice(0x71)
+	i.activate(d)
+	it := alertItem("late-retry", d)
+	it.TTLSeconds = 2 * 3600
+	if res := i.push1(it); res.Result != "accepted" {
+		t.Fatalf("first send: %+v", res)
+	}
+	sends := len(h.apns.requests())
+	h.clk.Add(90 * time.Minute)
+	if res := i.push1(it); !res.Duplicate || res.Result != "accepted" || len(h.apns.requests()) != sends {
+		t.Fatalf("a retry within the item's lifetime was sent again: %+v, %d sends", res, len(h.apns.requests())-sends)
+	}
+	h.clk.Add(31 * time.Minute)
+	if res := i.push1(it); res.Duplicate || len(h.apns.requests()) != sends+1 {
+		t.Fatalf("the ref stays taken after the item's lifetime: %+v", res)
+	}
+	// A short-lived item keeps the ten-minute floor.
+	short := silentItem("short", d)
+	short.TTLSeconds = 60
+	if res := i.push1(short); res.Result != "accepted" {
+		t.Fatalf("short item: %+v", res)
+	}
+	h.clk.Add(9 * time.Minute)
+	if res := i.push1(short); !res.Duplicate {
+		t.Fatalf("a short-lived item lost its ten-minute window: %+v", res)
+	}
+}
+
+// TestTransientAppleFailureIsRefunded: an item Apple did not take for a reason of Apple's (here a 503) is
+// taken off the device's silent budget and the instance's quotas, so the instance's retries are not refused
+// by a budget they never used. Apple throttling the device is not refunded.
+func TestTransientAppleFailureIsRefunded(t *testing.T) {
+	h := newHarness(t)
+	i := h.register()
+	d := newDevice(0x72)
+	i.activate(d)
+	h.apns.setAnswer(func(string, apnsReq) (int, string) { return 503, "ServiceUnavailable" })
+	for n := range 10 {
+		if res := i.push1(silentItem("s"+strconv.Itoa(n), d)); res.Error != "apns_unavailable" {
+			t.Fatalf("attempt %d during Apple's outage: %+v", n, res)
+		}
+	}
+	h.apns.setAnswer(func(string, apnsReq) (int, string) { return 200, "" })
+	if res := i.push1(silentItem("after", d)); res.Result != "accepted" {
+		t.Fatalf("the first push after the outage was refused by a budget the outage used up: %+v", res)
+	}
+	// A device Apple throttles keeps its booking: the next push waits for the throttling to pass.
+	e := newDevice(0x73)
+	i.activate(e)
+	h.apns.setAnswer(func(string, apnsReq) (int, string) { return 429, "TooManyRequests" })
+	if res := i.push1(silentItem("throttled", e)); res.Error != "device_quota" {
+		t.Fatalf("throttled: %+v", res)
+	}
+	tok, err := hex.DecodeString(e.hex())
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.r.mu.Lock()
+	got := h.r.dev(h.r.tokenMAC(tok)).silentHour.Count(h.clk.Now())
+	h.r.mu.Unlock()
+	if got != 1 {
+		t.Fatalf("a push Apple throttled was refunded: silent count %d", got)
+	}
+}

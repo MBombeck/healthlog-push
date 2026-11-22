@@ -12,7 +12,7 @@ const (
 	BindingIdleWeeks    = 13 // about 90 days without a push
 	InstanceIdleWeeks   = 13 // about 90 days without contact
 	ProvisionalDays     = 2  // a provisional binding older than 48 h is removed
-	UndeliveredInstDays = 2  // an instance that never delivered is removed after 48 h
+	UndeliveredInstDays = 30 // an instance that never delivered is removed once it was also silent this long
 )
 
 // Prune applies the retention rules for blocks, opt-out pins and counters for the given day. Bindings and

@@ -88,9 +88,10 @@ func (w *Window) Add(now time.Time, n int64) { w.roll(now); w.n += n }
 // Count returns the count of the current window.
 func (w *Window) Count(now time.Time) int64 { w.roll(now); return w.n }
 
-// Undo removes one counted event.
-func (w *Window) Undo() {
-	if w.n > 0 {
+// Undo removes one event counted at t, if the window that counted it is still the current one: an event
+// of a window that has rolled over is gone with it.
+func (w *Window) Undo(t time.Time) {
+	if w.n > 0 && w.start.Equal(t.Truncate(w.Size)) {
 		w.n--
 	}
 }
