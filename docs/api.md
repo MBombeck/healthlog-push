@@ -456,7 +456,7 @@ is there by then is reported as it is, items still open return `503 apns_unavail
 
 | Field | Rules |
 |---|---|
-| `ref` | `[A-Za-z0-9._:-]{1,40}`, unique in the batch; the idempotency key for 10 minutes |
+| `ref` | `[A-Za-z0-9._:-]{1,40}`, unique in the batch; the idempotency key for the item's lifetime, at least 10 minutes |
 | `token` | the bound device token (hex) |
 | `env` | `production` or `sandbox`, equal to the binding's |
 | `class` | `alert`, `silent` or `liveactivity` |
@@ -585,8 +585,10 @@ Item results:
 | 502 | `apns_rejected` | Apple refused the request (reason in `reason`); nothing was deleted |
 | 503 | `apns_unavailable`, `relay_misconfigured`, `maintenance`, `queue_full` | transient; retry within the push's lifetime |
 
-A repeated `ref` within 10 minutes returns the first definite result with `"duplicate":true` and is not
-sent again. Transient results are not kept, so a retry really retries.
+A repeated `ref` within the item's lifetime (`ttlSeconds` after clamping, at least 10 minutes) returns the
+first definite result with `"duplicate":true` and is not sent again. Transient results are not kept, so a
+retry really retries, and an item that Apple did not take for a reason of Apple's or the relay's is taken
+off the limits it was counted against, so the retry is not refused by a budget the failure used up.
 
 ## Receipts
 

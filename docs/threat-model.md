@@ -212,7 +212,7 @@ the token and the old binding key can never take over a binding that went quiet.
   promotion needs seven days, one push accepted by Apple and no anomaly.
 - New bindings are provisional until Apple accepts a push; provisional bindings are capped, do not count as
   devices and expire when they are more than two days old. Instances that never deliver a push are removed
-  more than two days after registration.
+  once they have also been silent (no status call, registration or push) for more than 30 days.
 - An instance whose pushes hit more than its daily budget of invalid tokens gets no new bindings for 24 hours
   and can push only to active bindings (provisional and soft-invalid bindings answer `429 binding_quota`).
   A soft-invalid binding receives at most one probe push per day: on the day it failed it is refused.
@@ -321,7 +321,7 @@ app does not depend on the relay for anything else. Protections against a self-i
 - **Delivery traces are kept for 72 hours in memory.** For a push to a development build, Apple returns an
   `apns-unique-id`; the relay keeps it with the result, keyed by instance id and `ref`, so the operator can
   trace one lost push in Apple's delivery log (`admin delivery`). It is the only per-push record kept beyond
-  the 10-minute idempotency window, it is never stored, exported, logged or counted, and production pushes
+  the idempotency window (the push's own lifetime, at most 6 hours), it is never stored, exported, logged or counted, and production pushes
   have none because Apple does not send the identifier there. An intruder in the relay process could read
   the traces of the last 72 hours.
 - **A panic in a send worker ends the process.** It is not recovered; the container is restarted, with the

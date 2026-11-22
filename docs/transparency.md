@@ -125,6 +125,11 @@ is announced at least 90 days ahead (privacy.md section 12).
 
 Newest first:
 
+- **2026-11-22** Relay v1.0.4. No key rotation and no deprecation. Seven metrics are now current at every
+  scrape and every other metric is refreshed every five minutes, as the table above says; until now every
+  metric was refreshed hourly while fewer than 20 instances were active. Privacy notice version 1.3 says so,
+  and that an instance that never delivered a notification is now deleted once it has been out of contact
+  for more than 30 days, instead of two days after registration.
 - **2026-11-22** Correction. Earlier versions of this page, the README and the key ceremony said the
   `emergency` identity key is kept offline. The accurate statement is: it is held separately from the relay
   host and from the operational keys, and it is never deployed to the relay. The key and its use are

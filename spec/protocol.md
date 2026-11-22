@@ -723,6 +723,13 @@ counted against any limit only when every check passed.
 | | standard instance: the standard pool has room this minute for the class share | `429 global`, scope `global` |
 | 13 | the send queue admits the item | `503 queue_full`, retry about 2 s; scope `instance` when the instance's own queue share is full |
 
+An item that never reached the device for a reason of Apple's service or of the relay is taken off every
+limit of this table it was counted against, so the instance's retry is counted afresh: an answer
+`503 apns_unavailable`, a `503 relay_misconfigured` because Apple refused the relay's provider token, and a
+drop after waiting too long in the queue. A limit whose window (minute, hour, day) has rolled over since the
+item was counted is left alone. Apple throttling the device and Apple's answers about the token are not
+refunded.
+
 The item then waits for Apple. A batch waits at most 8 s in total. After that deadline, a result that is
 already there is reported as it is; an item still without an answer is reported as `503 apns_unavailable`
 with `retryAfter` about 30 s. Its send may still complete, and that result is then kept for replay.
@@ -975,8 +982,10 @@ retry must send the same item with the same `ref`.
 - Only definite answers are stored: `accepted`, `soft_invalid`, `activity_gone`, `unregistered` and
   `apns_rejected`. Transient results (`apns_unavailable`, `relay_misconfigured`, `device_quota` from Apple's
   throttling, `queue_full`) are forgotten, so a retry really retries.
-- Entries live 10 minutes. At most 200000 finished entries are kept; beyond that the oldest finished
-  entries are dropped first.
+- Entries live as long as the item's lifetime after clamping (`ttlSeconds`), at least 10 minutes: a retry
+  after a lost response, late in the instance's backoff, gets the stored answer instead of a second copy at
+  Apple. At most 200000 finished entries are kept; beyond that the oldest finished entries are dropped
+  first.
 
 ## Queue
 
@@ -1094,7 +1103,7 @@ afresh for the rest of the day.
 | response body | at most 65 536 bytes; clients refuse more than 262 144 |
 | items per push request | 50 |
 | nonces | 2000 per instance, 200000 in total, each kept 600 s |
-| idempotency entries | 200000, each kept 10 minutes |
+| idempotency entries | 200000, each kept for its item's lifetime, at least 10 minutes |
 | batch wait for Apple | 8 s |
 | request to Apple | 3 s |
 | failed app endpoint attempts | token bucket of 100, refilled at 20 per second, shared by all callers |
@@ -1325,7 +1334,7 @@ already exists are skipped.
 | binding without an accepted push | 13 weeks (about 90 days) after its last-used week |
 | provisional binding | more than 2 days after its binding day without an accepted push |
 | instance without authenticated contact | 13 weeks after its last contact week, with its bindings |
-| instance that never had an accepted push | more than 2 days after its creation day, with its bindings |
+| instance that never had an accepted push | once it is more than 30 days old and its last contact week lies before the week of the day 30 days back, with its bindings; an instance that keeps checking in (status, registration, pushes) is kept |
 | Live Activity consent | with its binding; earlier when the instance drops it, the device withdraws it, or the binding changes key or instance |
 | blocked pairs, blocked tokens, opt-out pins | 365 days |
 | suspended and revoked instance records | 365 days after the reason day, with their bindings |
@@ -1333,7 +1342,7 @@ already exists are skipped.
 | global day counters | 400 days |
 | pending challenges | 30 minutes |
 | nonces | 600 s |
-| idempotency entries | 10 minutes |
+| idempotency entries | the item's lifetime after clamping, at least 10 minutes |
 
 Suspended and revoked instances are not removed by the idle rules. Retention runs once a day.
 

@@ -6,6 +6,8 @@ All notable changes to this project are documented in this file. The format foll
 
 ## [Unreleased]
 
+## [1.0.4] - 2026-11-22
+
 ### Added
 
 - The GitHub release carries an SPDX SBOM for each Linux binary,
@@ -54,6 +56,18 @@ All notable changes to this project are documented in this file. The format foll
 - `docs/transparency.md` states for every metric how current it is (`live` or `every 5 min`), and a test
   fails when the table and the code disagree. A second test fails when the live set changes without the test
   changing with it.
+- An instance that never had an accepted push is removed only once it has also been out of contact for
+  more than 30 days, counted in whole weeks. Until now it was removed two days after registration whatever it
+  did, with every binding, so a server still waiting for its first device lost its registration and, in
+  invite mode, could not register again without a new invite. Status calls, a registration with its key and
+  pushes count as contact. The privacy notice (section 5), the threat model and the specification say so.
+- An idempotency entry lives as long as its item's lifetime after clamping, at least 10 minutes. It lived 10
+  minutes, while an instance can retry an alert for up to six hours: a retry after a lost response, late in
+  the backoff, put a second copy at Apple. Now it gets the stored answer.
+- `spec/envelope.md` lists the six `DATA_CHANGED` domains and the six `securityKind` values a HealthLog
+  server sends, and describes discreet mode as a property of a single alert, used for cycle reminders only.
+  `spec/relay-api.yaml` no longer declares `BindResponse.challenge` and `StatusResponse.reason`, which the
+  relay never sends.
 - `hlp_apns_misconfigured` exists from the start and reads 0 on a healthy relay. It used to appear only once
   Apple had rejected the provider token, so a rule on it looked at no data until the incident it is for.
 - `hlp_delivery_latency_seconds` has nine buckets (0.05, 0.1, 0.15, 0.25, 0.5, 1, 2.5, 5 and 10 s) instead
@@ -66,6 +80,11 @@ All notable changes to this project are documented in this file. The format foll
 - `hlp_push_total` counts the two item refusals that happen before an item is queued: `binding_unknown` (no
   binding of the instance for that token) and `invalid_item` for an item addressed to the other APNs
   environment. Both were answered correctly but left no trace in the metrics.
+- An item Apple did not take for a reason of Apple's service or of the relay (`apns_unavailable`,
+  `relay_misconfigured` after a refused provider token, or a drop after waiting too long in the queue) is taken
+  off every limit it was counted against, as long as the window that counted it is still the current one.
+  Until now every retry during an outage at Apple used up the device's silent budget (six an hour, three
+  after a restart) and the instance's quotas, and the first push after the outage could be refused.
 
 ## [1.0.3] - 2026-11-22
 
@@ -369,6 +388,7 @@ First release.
   `HLP_MIN_CLIENT_VERSION`; the admin socket default follows `HLP_DATA_DIR` for server and client; a failing
   listener makes the process exit with an error.
 
+[1.0.4]: https://github.com/MBombeck/healthlog-push/releases/tag/v1.0.4
 [1.0.3]: https://github.com/MBombeck/healthlog-push/releases/tag/v1.0.3
 [1.0.2]: https://github.com/MBombeck/healthlog-push/releases/tag/v1.0.2
 [1.0.1]: https://github.com/MBombeck/healthlog-push/releases/tag/v1.0.1

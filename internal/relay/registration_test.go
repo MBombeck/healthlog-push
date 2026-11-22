@@ -96,7 +96,6 @@ func TestStoredRegistrationModeWins(t *testing.T) {
 func TestProvisionalAndInstanceRetention(t *testing.T) {
 	h := newHarness(t)
 	i := h.register()
-	quiet := h.register() // never delivers
 	d := newDevice(18)
 	if rp := i.bind(d); rp.Status != 201 {
 		t.Fatal(rp.Status)
@@ -106,8 +105,42 @@ func TestProvisionalAndInstanceRetention(t *testing.T) {
 	if h.state(d) != "" {
 		t.Fatal("provisional binding older than 48 h kept")
 	}
-	if _, err := h.r.Instance(quiet.id); err == nil {
-		t.Fatal("instance without a delivery kept after 48 h")
+}
+
+// TestUndeliveredInstanceStaysWhileItChecksIn: an instance that never had an accepted push is kept while it
+// stays in contact, by status calls or by registering its key again, however long it waits for its first
+// device. One that never delivered and then went silent is removed once it has been silent for more than
+// 30 days.
+func TestUndeliveredInstanceStaysWhileItChecksIn(t *testing.T) {
+	h := newHarness(t)
+	silent := h.register()
+	polling := h.register()
+	reregistering := h.register()
+	gone := func(i *instance) bool { _, err := h.r.Instance(i.id); return err != nil }
+	day := 24 * time.Hour
+	for n := 1; n <= 70; n++ {
+		h.clk.Add(day)
+		if n%7 == 0 {
+			if rp := polling.do(http.MethodGet, "/v1/status", nil); rp.Status != http.StatusOK {
+				t.Fatalf("status on day %d: %d %s", n, rp.Status, rp.Raw)
+			}
+			if rp := reregistering.registerRaw(""); rp.Status != http.StatusOK || rp.str("instanceId") != reregistering.id {
+				t.Fatalf("registration on day %d: %d %s", n, rp.Status, rp.Raw)
+			}
+		}
+		h.r.Daily()
+		if n == 30 && gone(silent) {
+			t.Fatal("an undelivered instance was removed within 30 days")
+		}
+	}
+	if !gone(silent) {
+		t.Fatal("an undelivered instance silent for 70 days was kept")
+	}
+	if gone(polling) {
+		t.Fatal("an undelivered instance that calls status every week was removed")
+	}
+	if gone(reregistering) {
+		t.Fatal("an undelivered instance that registers its key every week was removed")
 	}
 }
 

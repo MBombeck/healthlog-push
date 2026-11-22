@@ -12,15 +12,17 @@ import (
 )
 
 // charge is what one admitted item counts against. The windows are collected once, so that booking and the
-// undo after a refused enqueue always touch the same set; an alert also takes a token from the device alert
-// bucket and counts towards the binding's alerts of the day.
+// undo always touch the same set; an alert also takes a token from the device alert bucket and counts
+// towards the binding's alerts of the day.
 type charge struct {
 	windows []*limits.Window
 	alerts  *limits.Bucket // nil unless the item is an alert
 	binding *store.Binding
+	at      time.Time // when it was booked
 }
 
 func (c *charge) book(now time.Time) {
+	c.at = now
 	for _, w := range c.windows {
 		w.Add(now, 1)
 	}
@@ -30,13 +32,16 @@ func (c *charge) book(now time.Time) {
 	}
 }
 
+// undo takes the item off every quota it was booked against: right away when the queue refuses it, or
+// later when Apple did not take it for a reason of Apple's or the relay's (refundable). A window that has
+// rolled over since the booking is left alone. The caller holds r.mu.
 func (c *charge) undo() {
 	for _, w := range c.windows {
-		w.Undo()
+		w.Undo(c.at)
 	}
 	if c.alerts != nil {
 		c.alerts.Refund()
-		if c.binding.AlertsToday > 0 {
+		if c.binding.AlertsDay == store.Day(c.at) && c.binding.AlertsToday > 0 {
 			c.binding.AlertsToday--
 		}
 	}

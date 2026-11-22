@@ -214,12 +214,18 @@ func (r *Relay) auth(w http.ResponseWriter, req *http.Request, limit int64) (*in
 		r.fail(w, req, http.StatusUpgradeRequired, errBody{Error: "min_server_version"})
 		return nil, nil, false
 	}
+	r.seenLocked(s, now)
+	r.rollInstanceDay(s, now)
+	return s, body, true
+}
+
+// seenLocked records that the instance was in contact this week, for the idle and undelivered rules of the
+// daily retention run.
+func (r *Relay) seenLocked(s *instState, now time.Time) {
 	if wk := store.Week(store.Day(now)); s.rec.LastSeenWeek != wk {
 		s.rec.LastSeenWeek = wk
 		r.dirtyInst[s.rec.ID] = true
 	}
-	r.rollInstanceDay(s, now)
-	return s, body, true
 }
 
 // stillThere reports whether s is still the live record of its instance. Handlers that release the lock

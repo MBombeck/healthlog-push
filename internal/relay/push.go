@@ -179,22 +179,8 @@ func (r *Relay) admitLocked(s *instState, p *wire.PushItem, now time.Time) (Item
 		}
 		return res, nil
 	}
-	ent := &idemEntry{done: make(chan struct{}), exp: now.Add(idemTTL)}
-	push := r.buildPush(it, now)
-	job := &queue.Job{Instance: s.rec.ID, High: it.Class != wire.ClassSilent}
-	kind := kindOf(it)
-	if it.Class == wire.ClassLiveActivity {
-		r.observePriority(push.Urgent)
-	}
-	job.Run = func() {
-		res := r.sender.Send(context.Background(), push)
-		r.observeSend(kind, now, res)
-		r.complete(s.rec.ID, m, it, ik, ent, res)
-	}
-	job.Drop = func() {
-		r.finish(ik, ent, itemRetry(it.Ref, http.StatusServiceUnavailable, "queue_full", "", 2*time.Second), false)
-	}
-	if err := r.q.Push(job); err != nil {
+	ent := &idemEntry{done: make(chan struct{}), exp: now.Add(idemWindow(it))}
+	if err := r.q.Push(r.sendJob(s.rec.ID, m, it, ik, ent, ch, now)); err != nil {
 		ch.undo()
 		r.Metrics.Inc("hlp_push_total", "class", string(it.Class), "result", "queue_full")
 		scope := ""
@@ -205,6 +191,39 @@ func (r *Relay) admitLocked(s *instState, p *wire.PushItem, now time.Time) (Item
 	}
 	r.idemPutLocked(ik, ent)
 	return ItemResult{}, ent
+}
+
+// sendJob builds the queue job that sends an admitted item to Apple and applies the answer.
+func (r *Relay) sendJob(instID, m string, it *wire.Item, ik string, ent *idemEntry, ch *charge, now time.Time) *queue.Job {
+	push := r.buildPush(it, now)
+	kind := kindOf(it)
+	if it.Class == wire.ClassLiveActivity {
+		r.observePriority(push.Urgent)
+	}
+	return &queue.Job{
+		Instance: instID,
+		High:     it.Class != wire.ClassSilent,
+		Run: func() {
+			res := r.sender.Send(context.Background(), push)
+			r.observeSend(kind, now, res)
+			r.complete(instID, m, it, ik, ent, ch, res)
+		},
+		Drop: func() {
+			// It waited too long and never went to Apple: its retry is counted afresh.
+			r.mu.Lock()
+			ch.undo()
+			r.mu.Unlock()
+			r.finish(ik, ent, itemRetry(it.Ref, http.StatusServiceUnavailable, "queue_full", "", 2*time.Second), false)
+		},
+	}
+}
+
+// idemWindow is how long the definite answer to an item is replayed for a retry under the same ref: as long
+// as the item could still be delivered (its lifetime after clamping), and at least idemTTL. An instance
+// whose response was lost retries within its item's lifetime; within this window it gets the stored answer
+// instead of sending a second copy to Apple.
+func idemWindow(it *wire.Item) time.Duration {
+	return max(idemTTL, time.Duration(it.TTL)*time.Second)
 }
 
 // refused counts an item refused before it is queued and answers it, so no refusal leaves the metrics out.
