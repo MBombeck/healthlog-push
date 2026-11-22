@@ -112,8 +112,28 @@ binary rebuild: identical
 What the rehearsal cannot show: the keyless certificate identity, the transparency log entries, and the
 provenance workflow's own signature. Those are checked with the commands above after the first real tag.
 
-## Before the first tag
+## How the pipeline is protected
 
-- The `release` environment exists and requires the maintainer's approval.
-- A ruleset protects `v*` tags from update and deletion; releases are immutable.
-- Private vulnerability reporting is enabled (see `SECURITY.md`).
+- **Pinned actions.** Every action in every workflow is pinned to a full commit SHA, and Dependabot proposes
+  the updates. The one exception is the SLSA generator for the binary provenance,
+  `slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0`: it is a
+  reusable workflow that has to be referenced by its release tag, because `slsa-verifier` checks the builder
+  reference in the provenance against the generator's release tags and the generator refuses to run from a
+  commit SHA. The comment above the job in `release.yml` records the commit the tag pointed to when it was
+  adopted.
+- **Least privilege.** Every workflow starts with no token permissions and each job asks for what it needs.
+  The job that generates the SBOM cannot sign, and the image provenance is signed in a separate reusable
+  workflow, so the build job cannot produce a provenance that verifies.
+- **The `release` environment.** The first job of a release, the one that builds, pushes and signs the image,
+  runs in the `release` environment, which accepts only `v*` tags and waits for the maintainer's approval.
+  Every later job depends on that job, so nothing is published without the approval.
+- **Tags.** A ruleset protects `v*` tags from update and deletion, and the workflow refuses a tag that does
+  not point to a commit on `main`.
+- **Releases are not marked immutable.** GitHub's immutable releases lock a release when it is published.
+  The binary provenance is attached by the SLSA generator after that, because it has to cover the files
+  exactly as they were published, so the setting stays off. What protects a published release is the tag
+  ruleset and the signatures: a file that was replaced no longer matches `SHA256SUMS`, its signature bundle
+  or the provenance.
+- **`main`.** Changes reach `main` only through a pull request with green CI and CodeQL checks; force pushes
+  and deletion are blocked ([CONTRIBUTING.md](../CONTRIBUTING.md#commits-and-pull-requests)).
+- Private vulnerability reporting is enabled (see [SECURITY.md](../SECURITY.md)).
