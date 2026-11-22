@@ -62,6 +62,8 @@ type fakeAPNs struct {
 	mu     sync.Mutex
 	reqs   []apnsReq
 	answer func(token string, push apnsReq) (int, string)
+	// extra, when set, adds response headers and the 410 timestamp (milliseconds; 0 for none) of an answer.
+	extra func(token string, push apnsReq) (header map[string]string, timestamp int64)
 }
 
 type apnsReq struct {
@@ -87,8 +89,22 @@ func newFakeAPNs(t *testing.T, pub *ecdsa.PublicKey) *fakeAPNs {
 		ans := f.answer
 		f.mu.Unlock()
 		status, reason := ans(tok, ar)
+		var ts int64
+		f.mu.Lock()
+		extra := f.extra
+		f.mu.Unlock()
+		if extra != nil {
+			var hdr map[string]string
+			hdr, ts = extra(tok, ar)
+			for k, v := range hdr {
+				w.Header().Set(k, v)
+			}
+		}
 		w.WriteHeader(status)
-		if reason != "" {
+		switch {
+		case reason != "" && ts != 0:
+			_, _ = io.WriteString(w, `{"reason":"`+reason+`","timestamp":`+strconv.FormatInt(ts, 10)+`}`)
+		case reason != "":
 			_, _ = io.WriteString(w, `{"reason":"`+reason+`"}`)
 		}
 	}))
@@ -101,6 +117,12 @@ func newFakeAPNs(t *testing.T, pub *ecdsa.PublicKey) *fakeAPNs {
 func (f *fakeAPNs) setAnswer(a func(token string, push apnsReq) (int, string)) {
 	f.mu.Lock()
 	f.answer = a
+	f.mu.Unlock()
+}
+
+func (f *fakeAPNs) setExtra(e func(token string, push apnsReq) (map[string]string, int64)) {
+	f.mu.Lock()
+	f.extra = e
 	f.mu.Unlock()
 }
 

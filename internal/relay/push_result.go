@@ -29,6 +29,13 @@ func (r *Relay) complete(instID, m string, it *wire.Item, ik string, ent *idemEn
 	}
 	out, keep := r.applyLocked(p, res, now)
 	out.Ref = it.Ref
+	if res.UniqueID != "" && p.s != nil {
+		result := out.Result
+		if result == "" {
+			result = out.Error
+		}
+		r.traces.put(ik, res.UniqueID, result, now)
+	}
 	r.recordSummaryLocked(out, res.Latency)
 	r.mu.Unlock()
 	r.finish(ik, ent, out, keep)
@@ -131,12 +138,19 @@ func (r *Relay) applyTokenFailureLocked(p *sent, res apns.Result, established bo
 		r.labelLocked(c, today, "relay_misconfigured")
 		return ItemResult{Status: http.StatusServiceUnavailable, Error: "relay_misconfigured"}, false
 	}
-	if res.Outcome == apns.Unregistered {
+	// A 410 whose timestamp lies before the day the binding was made or last renewed is stale: Apple
+	// confirmed the old registration gone, and the device has registered the token again since. It is
+	// handled like a soft failure, so a binding that keeps answering 410 is still deleted on a later day.
+	stale := res.Outcome == apns.Unregistered && p.b != nil && reboundAfter(p.b.BoundDay, res.InvalidSince)
+	if res.Outcome == apns.Unregistered && !stale {
 		r.labelLocked(c, today, "unregistered")
 		if p.b != nil {
 			r.deleteBindingLocked(p.m)
 		}
 		return ItemResult{Status: http.StatusGone, Error: "unregistered"}, true
+	}
+	if stale {
+		res.Reason = "Unregistered"
 	}
 	r.labelLocked(c, today, "soft_invalid")
 	if b := p.b; b != nil {
@@ -148,6 +162,22 @@ func (r *Relay) applyTokenFailureLocked(p *sent, res apns.Result, established bo
 		}
 	}
 	return ItemResult{Status: http.StatusOK, Result: "soft_invalid", Reason: res.Reason}, true
+}
+
+// reboundTolerance absorbs clock differences between Apple and the relay when a 410 timestamp is compared
+// with a binding day.
+const reboundTolerance = 10 * time.Minute
+
+// reboundAfter reports whether a binding made or renewed on boundDay was registered after Apple declared
+// its token invalid at since (Apple's 410 timestamp). The relay keeps only the UTC day of a binding, so the
+// comparison is loose by design: the binding day must begin after since plus the tolerance. A binding
+// renewed later on the same day as the invalidation is not told apart from one made before it and is
+// deleted, as before; the device binds again through its server. Without a timestamp it reports false.
+func reboundAfter(boundDay int, since time.Time) bool {
+	if since.IsZero() {
+		return false
+	}
+	return int64(boundDay)*86400 > since.Add(reboundTolerance).Unix()
 }
 
 // providerInvalidLocked handles InvalidProviderToken. The first rejection only records the token's iat; a

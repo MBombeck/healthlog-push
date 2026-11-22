@@ -1102,7 +1102,7 @@ components:
           type: string
           enum: [activity_refused, liveactivity_consent_required, binding_unknown, unregistered, invalid_item, device_quota, binding_quota, instance_quota, instance_rate, global, apns_rejected, apns_unavailable, relay_misconfigured, maintenance, queue_full]
         reason:
-          description: Apple's reason for `soft_invalid` and `apns_rejected`, from a closed set, otherwise `other`.
+          description: Apple's reason for `soft_invalid` and `apns_rejected`, from a closed set, otherwise `other`. `Unregistered` on `soft_invalid` marks a stale 410 (Apple's timestamp before the binding day).
           type: string
         scope:
           description: "`activity` only on `device_quota` for the update limit of one Live Activity."

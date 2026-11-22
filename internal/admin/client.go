@@ -39,6 +39,7 @@ const Usage = `usage: healthlog-push admin <command> [args] [--flag value]
   export                                  write /export/registry.json now
   breaker open|close|reset-apns
   status-file                             print the signed status document
+  delivery <id> <ref>                     Apple's apns-unique-id of that push (development only, 72 h)
 `
 
 // Parse turns command-line words into a request. "--k v" and "k=v" both become params.

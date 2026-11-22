@@ -99,6 +99,8 @@ func (r *Relay) admin(ar *AdminRequest) (any, error) {
 		return nil, r.BreakerCommand(arg(a, 0))
 	case "status-file":
 		return r.StatusFile(), nil
+	case "delivery":
+		return r.DeliveryTrace(arg(a, 0), arg(a, 1))
 	}
 	return nil, adminError("unknown command")
 }

@@ -76,3 +76,19 @@ func LiveActivityStartPayload(now time.Time, c *wire.ContentState) []byte {
 func LiveActivityUpdatePayload(now time.Time, c *wire.ContentState) []byte {
 	return laPayload(laAPS{Timestamp: now.Unix(), Event: "update", ContentState: stateOf(c)})
 }
+
+// LiveActivityUrgent reports whether a Live Activity push goes with priority 10. iOS grants each device an
+// hourly budget of priority 10 Live Activity pushes and may throttle beyond it; priority 5 does not count
+// against it (Apple, "Starting and updating Live Activities with ActivityKit push notifications",
+// "Determine the update frequency"). Only what needs the person's attention now is urgent: a start or update
+// whose state turns `due` or `overdue`, and the end, so a dose recorded elsewhere leaves the lock screen at
+// once. Everything else (`pending`, `snoozed`, `taken`, `skipped`) goes with 5.
+func LiveActivityUrgent(event string, c *wire.ContentState) bool {
+	if event == wire.EventEnd {
+		return true
+	}
+	if c == nil || c.Status == nil {
+		return false
+	}
+	return *c.Status == "due" || *c.Status == "overdue"
+}

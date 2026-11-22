@@ -84,6 +84,7 @@ type Relay struct {
 	lastDay       int
 	summary       summary
 	global        map[store.GlobalKey]int64 // pending for counters_global
+	traces        traces                    // apns-unique-id per instance and ref, 72 hours, memory only
 
 	apnsState
 	pools

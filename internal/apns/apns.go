@@ -56,6 +56,12 @@ type Result struct {
 	Reason   string
 	Latency  time.Duration
 	TokenIat int64 // iat of the provider token used, to tell a rejected new token from a rejected old one
+	// InvalidSince is Apple's `timestamp` on a 410: when APNs confirmed the token was no longer valid for
+	// the topic. Zero when Apple sent none or an implausible one.
+	InvalidSince time.Time
+	// UniqueID is Apple's `apns-unique-id` response header, which Apple sends only in the development
+	// environment, for a lookup in the delivery log of the Push Notifications Console. Empty otherwise.
+	UniqueID string
 }
 
 // knownReasons is the closed set of Apple reasons the relay reports or logs; anything else becomes "other".
@@ -126,6 +132,9 @@ type Push struct {
 	Expiration time.Time
 	Collapse   string
 	Sandbox    bool
+	// Urgent selects priority 10 for a Live Activity push; without it the push goes with priority 5, which
+	// does not count against the device's Live Activity budget. See LiveActivityUrgent.
+	Urgent bool
 }
 
 // TokenSource returns the current provider JWT.
@@ -212,7 +221,8 @@ func (c *Client) Send(ctx context.Context, p *Push) Result {
 	}
 	defer func() { _ = resp.Body.Close() }()
 	var body struct {
-		Reason string `json:"reason"`
+		Reason    string `json:"reason"`
+		Timestamp int64  `json:"timestamp"`
 	}
 	b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 	_ = json.Unmarshal(b, &body)
@@ -224,11 +234,47 @@ func (c *Client) Send(ctx context.Context, p *Push) Result {
 	if out == ProviderExpired {
 		c.Tokens.RequestRefresh()
 	}
-	return Result{Outcome: out, Reason: reason, Latency: lat, TokenIat: iat}
+	res := Result{Outcome: out, Reason: reason, Latency: lat, TokenIat: iat, UniqueID: uniqueID(resp.Header.Get("apns-unique-id"))}
+	if out == Unregistered {
+		res.InvalidSince = invalidSince(body.Timestamp)
+	}
+	return res
+}
+
+// uniqueID returns Apple's apns-unique-id when it is a canonical UUID, otherwise nothing: the value is only
+// ever kept and shown, so anything outside that shape is dropped rather than stored.
+func uniqueID(v string) string {
+	if len(v) != 36 {
+		return ""
+	}
+	for i, ch := range v {
+		switch {
+		case i == 8 || i == 13 || i == 18 || i == 23:
+			if ch != '-' {
+				return ""
+			}
+		case ch >= '0' && ch <= '9', ch >= 'a' && ch <= 'f', ch >= 'A' && ch <= 'F':
+		default:
+			return ""
+		}
+	}
+	return strings.ToLower(v)
+}
+
+// invalidSince converts Apple's 410 timestamp (milliseconds since the epoch) to a time. A value that is
+// missing or before 2015 (when the HTTP/2 provider API started, so also a value sent in seconds) is treated
+// as absent. A broken value can therefore only make the relay fall back to deleting: a time in the future
+// never lies before a binding day.
+func invalidSince(ms int64) time.Time {
+	t := time.UnixMilli(ms)
+	if ms <= 0 || t.Year() < 2015 {
+		return time.Time{}
+	}
+	return t
 }
 
 // setHeaders sets the APNs request headers of p: provider token, expiration, push type, priority, topic
-// and collapse id.
+// and collapse id. No apns-id is sent.
 func (c *Client) setHeaders(h http.Header, p *Push, jwt string) {
 	h.Set("authorization", "bearer "+jwt)
 	h.Set("content-type", "application/json")
@@ -244,7 +290,11 @@ func (c *Client) setHeaders(h http.Header, p *Push, jwt string) {
 		h.Set("apns-topic", c.Topic)
 	case p.Class == wire.ClassLiveActivity:
 		h.Set("apns-push-type", "liveactivity")
-		h.Set("apns-priority", "10")
+		if p.Urgent {
+			h.Set("apns-priority", "10")
+		} else {
+			h.Set("apns-priority", "5")
+		}
 		h.Set("apns-topic", c.Topic+".push-type.liveactivity")
 	}
 	if p.Collapse != "" {

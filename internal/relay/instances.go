@@ -174,6 +174,7 @@ func (r *Relay) dropInstanceLocked(id string) {
 	}
 	delete(r.instances, id)
 	delete(r.dirtyInst, id)
+	r.traces.dropInstance(id)
 	for m := range r.byInst[id] {
 		r.dropBindingLocked(m)
 	}

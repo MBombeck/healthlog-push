@@ -47,12 +47,13 @@ comparison is needed; signatures are checked by the standard library.
 
 | Id | Invariant | Tests |
 |---|---|---|
-| D1 | Only Apple's 410 Unregistered deletes a binding at once; soft failures delete only on a second day; transient errors change nothing. | `TestUnregisteredIsTheOnlyFinalDeletion` (internal/relay/push_test.go), `TestDeletionOnlyThroughKnownPaths` (structure_test.go) |
+| D1 | Only Apple's 410 Unregistered deletes a binding at once, and not when its timestamp lies before the binding day (then it is a soft failure); soft failures delete only on a second day; transient errors change nothing. | `TestUnregisteredIsTheOnlyFinalDeletion` (internal/relay/push_test.go), `TestStale410KeepsAReboundBinding` (internal/relay/apns_answers_test.go), `TestReboundAfterIsLoose` (internal/relay/apns_answers_test.go), `TestSendReadsTimestampAndUniqueID` (internal/apns/apns_test.go), `TestDeletionOnlyThroughKnownPaths` (structure_test.go) |
 | D2 | A relay-side misconfiguration cannot wipe bindings: the breaker counts only established bindings, needs failures from three instances, and while not closed deletes and marks nothing. | `TestBreakerProtectsBindings` (internal/relay/breaker_e2e_test.go), `TestBreakerHalfOpenDoesNotDelete` (internal/relay/breaker_e2e_test.go), `TestBreakerThresholds` (internal/relay/breaker_test.go), `TestBreakerNeedsThreeInstances` (internal/relay/breaker_test.go), `TestBreakerStillOpensOnRealMisconfiguration` (internal/relay/breaker_e2e_test.go) |
 | D3 | Invented tokens cannot open the breaker for everybody and cost the instance its invalid-token budget. | `TestInventedTokensCannotOpenTheBreaker` (internal/relay/breaker_e2e_test.go), `TestInvalidTokenBudget` (internal/relay/push_test.go) |
 | D4 | A provider token Apple rejects twice in a row stops sending; an old rejection is forgotten once a newer token works. | `TestProviderTokenErrors` (internal/relay/push_test.go), `TestOldProviderRejectionForgotten` (internal/relay/push_test.go) |
 | D5 | A store write failure keeps the push path running; only proven damage moves the database aside, never over an earlier copy. | `TestStorageFailureKeepsSending` (internal/relay/push_test.go), `TestStoreNotMovedWithoutProof` (cmd/healthlog-push/main_test.go), `TestDamagedAsideNeverOverwritten` (cmd/healthlog-push/main_test.go), `TestDamagedStoreRecovers` (cmd/healthlog-push/main_test.go) |
 | D6 | The send queue recovers after a run of slow sends and the APNs warm-up ends after the first attempt. | `TestRecoversAfterSlowSends` (internal/queue/queue_test.go), `TestWarmUpEndsAfterFirstAttempt` (internal/apns/apns_test.go) |
+| D8 | The relay sends only with a provider token younger than 55 minutes, read from the signer's file, never replaced by a broken write, and asks for a refresh through the marker file only. | `TestFileTokensReadsTheSignersToken` (internal/apns/filetokens_test.go), `TestFileTokensRefusesMissingBrokenAndOldTokens` (internal/apns/filetokens_test.go), `TestFileTokensCachesAndKeepsTheLastGoodToken` (internal/apns/filetokens_test.go), `TestFileTokensRequestRefresh` (internal/apns/filetokens_test.go) |
 | D7 | Concurrent rotation and deletion leave no instance behind that answered 204 to its deletion. | `TestRotateRacingDeleteLeavesNoZombie` (internal/relay/concurrency_test.go), `TestBindAfterInstanceDeletion` (internal/relay/bindings_test.go) |
 
 ## Availability and fairness
@@ -65,6 +66,7 @@ comparison is needed; signatures are checked by the standard library.
 | F4 | Registrations are limited per IPv4 address, IPv6 /64 and /48 and globally; connections per address and per /48. | `TestRegistrationLimits` (internal/limits/limits_test.go), `TestConnLimitsPerAddressAndPer48` (internal/limits/limits_test.go), `TestConnLimiter` (internal/limits/limits_test.go) |
 | F5 | Health status and the deploy gate depend only on the relay's own facts; third-party receipts are capped and shown only. | `TestReceiptsDriveDeliveryHealth` (internal/relay/push_test.go), `TestPublicEndpoints` (internal/relay/http_test.go) |
 | F6 | Periodic maintenance writes in batches and a metrics scrape writes nothing. | `TestFlushIsOneTransaction` (internal/relay/push_test.go), `TestMaintenanceWritesInBatches` (internal/relay/concurrency_test.go) |
+| F7 | Live Activity pushes use Apple priority 10 only for the end and for a due or overdue state, decided by the relay from the checked state, so routine updates stay outside the device's budget. | `TestLiveActivityPriorityFollowsTheState` (internal/relay/apns_answers_test.go), `TestPriorities` (internal/apns/apns_test.go), `TestLiveActivityUrgent` (internal/apns/apns_test.go) |
 
 ## Data minimisation
 
@@ -74,6 +76,7 @@ comparison is needed; signatures are checked by the standard library.
 | P2 | Metrics are refreshed hourly below 20 active instances; usage reports cover completed days and weeks only. | `TestMetricsCoarseBelowThreshold` (internal/relay/privacy_test.go), `TestUsageAggregates` (internal/relay/privacy_test.go) |
 | P3 | The store holds a closed set of buckets with day or week granularity and applies the retention periods. | `TestStoreBucketsAreClosed` (internal/store/store_test.go), `TestRetention` (internal/store/store_test.go), `TestRevokedRecordsExpireAfterTwelveMonths` (internal/relay/restore_test.go), `TestProvisionalAndInstanceRetention` (internal/relay/registration_test.go) |
 | P4 | The registry export is signed, refused when edited, and holds no bindings or tokens. | `TestEditedExportRefused` (internal/relay/restore_test.go), `TestImportRefusesFieldsOutsideTheClosedSets` (internal/store/store_test.go), `TestExportRoundTrip` (internal/store/store_test.go), `TestExportBlocksRetention` (internal/store/store_test.go) |
+| P5 | Apple's apns-unique-id is kept only in memory, per instance and ref, for at most 72 hours and 50,000 entries, shown only on the admin socket, and never reaches the store or the logs. | `TestDeliveryTraceIsBrief` (internal/relay/apns_answers_test.go), `TestTracesAreBounded` (internal/relay/apns_answers_test.go) |
 
 ## Implementations and texts
 
