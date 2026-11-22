@@ -64,7 +64,7 @@ flowchart LR
   mandatory nonce, status and body, so an answer cannot be replayed onto another request.
 - **Pinned keys.** HealthLog servers and the app pin the relay's public identity keys at build time and
   never fetch them from the relay, because an answer cannot vouch for the key that signs it. Three keys are
-  pinned: `current`, `next` for a planned rotation, and an offline `emergency` key
+  pinned: `current`, `next` for a planned rotation, and a separately held `emergency` key
   ([Hosted relay identity keys](#hosted-relay-identity-keys)).
 - **Bindings need the device.** A device binding needs a statement signed by a key that only the app holds. A
   server that merely knows a device token cannot bind it.
@@ -188,8 +188,8 @@ them as its hosted relay pins, the iOS app as its `HLPushRelayKeys` build settin
 | `emergency` | `dcrihMfqGY7srT95DZrVP7sKA-IS3oJPPhOVbbqTvBU` |
 
 
-`emergency` is generated and kept offline, apart from `current` and `next`, and is never deployed to the
-relay host. It is used only if both other keys are lost
+`emergency` is held separately from the relay host and from the operational keys and is never deployed to
+the relay. It is used only if both other keys are lost
 ([docs/key-ceremony.md](docs/key-ceremony.md#lost-current-and-next)).
 
 A new `next` key is published in the release notes of the release that ships it, before the relay switches

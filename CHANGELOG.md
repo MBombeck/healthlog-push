@@ -15,6 +15,14 @@ All notable changes to this project are documented in this file. The format foll
 
 ### Changed
 
+- The `emergency` identity key is described as it is held: separately from the relay host and from the
+  operational keys, and never deployed to the relay. Earlier texts said "kept offline", which was not
+  accurate; the changelog entry for 1.0.2 and the transparency feed are corrected, and the feed notes the
+  correction.
+- `CONTINUITY.md` states only what is in place: a continuity arrangement with a designated trusted contact,
+  a successor for the maintainer's GitHub account, and a yearly review.
+- Release tags are signed from the next release on (`git tag -s`). Tags up to v1.0.3 are unsigned
+  lightweight tags.
 - Contributions need a `Signed-off-by` line on every commit (Developer Certificate of Origin 1.1); the check
   `DCO sign-off` enforces it on pull requests. Until now no sign-off was required.
 - `SECURITY.md` states the support policy, how fixed vulnerabilities are published and credited, the
@@ -100,8 +108,8 @@ All notable changes to this project are documented in this file. The format foll
   `docs/privacy.md` (now version 1.1; the consent text version stays `2026-11-21`) and
   `docs/operations.md`.
 - A third identity key for the hosted relay, `emergency` (`dcrihMfqGY7srT95DZrVP7sKA-IS3oJPPhOVbbqTvBU`), in `keys/push.healthlog.dev.json` and the
-  README. It is kept offline, apart from `current` and `next`, never deployed, and promoted only if both are
-  lost; `docs/key-ceremony.md` has the procedure. The relay keeps signing with `current`.
+  README. It is held separately from the relay host and from `current` and `next`, never deployed, and
+  promoted only if both are lost; `docs/key-ceremony.md` has the procedure. The relay keeps signing with `current`.
 - `docs/transparency.md`: authority requests (none so far), how a request is handled, and a dated feed of
   deprecations and key rotations. Identity key rotations are announced there at least 7 days ahead. Linked
   from the README, the privacy notice and the threat model.
