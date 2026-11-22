@@ -8,6 +8,7 @@ linters:
   default: none
   enable:
     - bodyclose
+    - contextcheck
     - copyloopvar
     - depguard
     - errcheck
@@ -23,6 +24,7 @@ linters:
     - revive
     - staticcheck
     - unconvert
+    - unparam
     - unused
     - usestdlibvars
 
@@ -108,12 +110,16 @@ linters:
       - path: ^cmd/
         linters:
           - forbidigo
+      # Tests print, use fixed inputs and talk to local test servers; test helpers keep parameters that
+      # happen to receive one value today.
       - path: _test\.go$
         linters:
           - forbidigo
           - gosec
           - noctx
           - bodyclose
+          - contextcheck
+          - unparam
 
 issues:
   max-issues-per-linter: 0

@@ -384,8 +384,8 @@ release. The relay does not care which pinned key it runs with; promoting one is
 
 After a suspected compromise of the relay process, do this at once.
 
-If both `current` and `next` are lost, promote `emergency` the same way (its seed comes from offline storage,
-not from the secret store), run `admin export` right after the restart so the export is signed by the new
+If both `current` and `next` are lost, promote `emergency` the same way (its seed comes from its offline
+storage), run `admin export` right after the restart so the export is signed by the new
 key, and generate a new `next` and a new `emergency`: [key-ceremony.md](key-ceremony.md#lost-current-and-next).
 The same `admin export` after any promotion keeps a restore possible on the same day.
 

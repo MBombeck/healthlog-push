@@ -28,7 +28,7 @@ So:
   `BadEnvironmentKeyInToken`.
 - The bundle id of your app build as the APNs topic. The relay sends Live Activity starts, updates and
   ends to `<topic>.push-type.liveactivity`.
-- A released image, pinned by digest and verified (README, "Verifying releases").
+- A released image, pinned by digest and verified (README, "Verifying a release").
 
 The Ansible roles in [deploy/ansible/](../deploy/ansible/README.md) turn a fresh Ubuntu 24.04 host into a
 relay host and deploy verified releases. The steps below are the same contract by hand.

@@ -6,6 +6,8 @@ All notable changes to this project are documented in this file. The format foll
 
 ## [Unreleased]
 
+## [1.0.3] - 2026-11-22
+
 ### Added
 
 - The GitHub release carries SLSA v1.0 provenance for the Linux binaries and `SHA256SUMS`,
@@ -30,6 +32,23 @@ All notable changes to this project are documented in this file. The format foll
 - `docs/transparency.md` lists every metric the relay exposes, with its labels and the reason it exists, and
   states how long the hosted relay's monitoring keeps them. A test fails when the code registers a metric the
   table does not list, and another when a series carries a label or a value outside the fixed allowlist.
+
+### Changed
+
+- The README is reorganised around what the relay is, how the privacy works, what the operator can see,
+  the hosted relay, self-hosting, verifying a release and security. The limits, the identity keys and the
+  verification commands are unchanged.
+- `docs/release-verification.md` describes how the build pipeline is protected as it is: every action pinned
+  to a commit, with the SLSA generator as the one tag-pinned exception and the reason for it, the tag
+  ruleset, and why GitHub's immutable releases stay off. `SECURITY.md` gains the same in short and a section
+  on verifying a release.
+- Only the first job of the release workflow names the `release` environment. Every other job depends on
+  it, so one approval gates a release.
+- The hardening statement, the key ceremony and the Ansible examples no longer name the server model, the
+  exact reboot time, an example host name or the layout of the secret store.
+- golangci-lint also runs `contextcheck` and `unparam`. The admin socket listener and the shutdown derive
+  their contexts from the process context; queued sends keep their own context on purpose, because they
+  outlive the request that queued them.
 
 ## [1.0.2] - 2026-11-22
 
@@ -286,6 +305,7 @@ First release.
   `HLP_MIN_CLIENT_VERSION`; the admin socket default follows `HLP_DATA_DIR` for server and client; a failing
   listener makes the process exit with an error.
 
+[1.0.3]: https://github.com/MBombeck/healthlog-push/releases/tag/v1.0.3
 [1.0.2]: https://github.com/MBombeck/healthlog-push/releases/tag/v1.0.2
 [1.0.1]: https://github.com/MBombeck/healthlog-push/releases/tag/v1.0.1
 [1.0.0]: https://github.com/MBombeck/healthlog-push/releases/tag/v1.0.0

@@ -194,7 +194,7 @@ func newSummary(now time.Time) summary {
 	return summary{errors: map[string]int64{}, events: map[string]int64{}, start: now}
 }
 
-func (r *Relay) addInstance(in *store.Instance) *instState {
+func (r *Relay) addInstance(in *store.Instance) {
 	now := r.cfg.Now()
 	s := &instState{
 		rec: in, reqMin: limits.Window{Size: time.Minute}, pushMin: limits.Window{Size: time.Minute},
@@ -207,7 +207,6 @@ func (r *Relay) addInstance(in *store.Instance) *instState {
 	s.invalid = c.Invalid
 	r.instances[in.ID] = s
 	r.byKey[string(in.PublicKey)] = in.ID
-	return s
 }
 
 func (r *Relay) tierLimits(in *store.Instance) TierLimits {

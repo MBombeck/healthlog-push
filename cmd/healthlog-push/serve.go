@@ -142,7 +142,7 @@ func serve(ctx context.Context, r *relay.Relay, tlsCfg *tls.Config) error {
 	}
 	metricsSrv := &http.Server{Addr: metricsListen(), Handler: r.MetricsHandler(),
 		ReadHeaderTimeout: 5 * time.Second, ErrorLog: log.New(io.Discard, "", 0)}
-	adminSrv, adminLn, err := adminSocket(adminSocketPath(), r)
+	adminSrv, adminLn, err := adminSocket(ctx, adminSocketPath(), r)
 	if err != nil {
 		return err
 	}
@@ -161,7 +161,8 @@ func serve(ctx context.Context, r *relay.Relay, tlsCfg *tls.Config) error {
 			exitErr = fmt.Errorf("%s listener stopped: %w", e.name, e.err)
 		}
 	}
-	sctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	// ctx is already done here; the shutdown gets ten seconds of its own.
+	sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()
 	_ = srv.Shutdown(sctx)
 	r.Close()
@@ -171,10 +172,10 @@ func serve(ctx context.Context, r *relay.Relay, tlsCfg *tls.Config) error {
 	return exitErr
 }
 
-func adminSocket(path string, r *relay.Relay) (*http.Server, net.Listener, error) {
+func adminSocket(ctx context.Context, path string, r *relay.Relay) (*http.Server, net.Listener, error) {
 	_ = os.Remove(path)
 	var lc net.ListenConfig
-	ln, err := lc.Listen(context.Background(), "unix", path)
+	ln, err := lc.Listen(ctx, "unix", path)
 	if err != nil {
 		return nil, nil, err
 	}

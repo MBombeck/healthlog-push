@@ -39,7 +39,9 @@ func (r *Relay) handleBind(w http.ResponseWriter, req *http.Request) {
 		r.fail(w, req, http.StatusUnauthorized, errBody{Error: "unknown_instance"})
 		return
 	}
-	status, resp, e := r.bindLocked(s, b, now)
+	// A challenge push is queued and sent after this request has been answered, so it must not inherit the
+	// request context.
+	status, resp, e := r.bindLocked(s, b, now) //nolint:contextcheck // queued send outlives the request
 	if e != nil {
 		r.fail(w, req, status, *e)
 		return
