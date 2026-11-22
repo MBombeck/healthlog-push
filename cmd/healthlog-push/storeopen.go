@@ -62,7 +62,7 @@ func openStore(dataDir, exportDir string, trust exportTrust) (*store.Store, bool
 }
 
 func importExport(st *store.Store, exportDir string, trust exportTrust) (*store.Store, bool, error) {
-	ex, err := store.ReadExport(filepath.Join(exportDir, "registry.json"))
+	ex, err := store.ReadExport(exportDir, "registry.json")
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return st, false, nil

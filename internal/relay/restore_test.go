@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -24,7 +25,7 @@ func TestMigrationExportRestore(t *testing.T) {
 	if err := old.r.ExportNow(); err != nil {
 		t.Fatal(err)
 	}
-	ex, err := store.ReadExport(filepath.Join(old.dir, "registry.json"))
+	ex, err := store.ReadExport(old.dir, "registry.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -203,7 +204,7 @@ func TestEditedExportRefused(t *testing.T) {
 	if err := old.r.ExportNow(); err != nil {
 		t.Fatal(err)
 	}
-	ex, err := store.ReadExport(filepath.Join(old.dir, "registry.json"))
+	ex, err := store.ReadExport(old.dir, "registry.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -220,5 +221,17 @@ func TestEditedExportRefused(t *testing.T) {
 	}
 	if _, err := same.r.SetRecovery(99999, ex); err != nil {
 		t.Fatalf("genuine export refused: %v", err)
+	}
+}
+
+// TestRecoveryFromRefusesPathsOutsideTheExportDir: `admin recovery --from` reads only inside the export
+// directory, so the admin socket cannot be pointed at another file of the container.
+func TestRecoveryFromRefusesPathsOutsideTheExportDir(t *testing.T) {
+	h := newHarness(t)
+	for _, from := range []string{"/etc/passwd", "../relay.db", h.dir + "/../x.json"} {
+		_, err := h.r.admin(&AdminRequest{Cmd: "recovery", Params: map[string]string{"until": "2026-12-10", "from": from}})
+		if !errors.Is(err, store.ErrExportOutsideDir) {
+			t.Errorf("%s: %v", from, err)
+		}
 	}
 }

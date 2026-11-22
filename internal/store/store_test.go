@@ -3,6 +3,8 @@ package store
 import (
 	"bytes"
 	"crypto/sha256"
+	"errors"
+	"os"
 	"path/filepath"
 	"slices"
 	"testing"
@@ -97,7 +99,7 @@ func TestExportRoundTrip(t *testing.T) {
 	if err := WriteExport(dir, ex); err != nil {
 		t.Fatal(err)
 	}
-	back, err := ReadExport(filepath.Join(dir, "registry.json"))
+	back, err := ReadExport(dir, "registry.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -196,5 +198,49 @@ func TestImportRefusesMalformedBlocks(t *testing.T) {
 	ex := &Export{Format: ExportFormat, BlockedPairs: []ExportedBlock{{Pair: "zz", Reason: ReasonDeviceOptOut, ExpiresDay: "2099-01-01"}}}
 	if _, err := open(t).Import(ex, 10, 150); err == nil {
 		t.Fatal("malformed block imported")
+	}
+}
+
+// TestReadExportStaysInTheExportDir: the export is read only from inside the export directory. A relative
+// or absolute path that climbs out, a symbolic link pointing out, and an empty name are refused before a
+// byte is read; a plain name and an absolute path inside the directory are read.
+func TestReadExportStaysInTheExportDir(t *testing.T) {
+	s := open(t)
+	_ = s.PutInstance(&Instance{ID: testID, PublicKey: make([]byte, 32), Tier: TierStandard, CreatedDay: 1, DeviceLimit: 50})
+	parent := t.TempDir()
+	dir := filepath.Join(parent, "export")
+	if err := os.Mkdir(dir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	ex, _ := s.BuildExport("push.example.org", 10)
+	ex.Signature = "sig"
+	if err := WriteExport(dir, ex); err != nil {
+		t.Fatal(err)
+	}
+	// A valid export next to the directory: reading it would succeed if the confinement failed.
+	if err := WriteExport(parent, ex); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(parent, "registry.json"), filepath.Join(dir, "link.json")); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"registry.json", filepath.Join(dir, "registry.json"), filepath.Join(dir, "sub", "..", "registry.json")} {
+		if _, err := ReadExport(dir, name); err != nil {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	for _, name := range []string{
+		"../registry.json", filepath.Join(dir, "..", "registry.json"), filepath.Join(parent, "registry.json"),
+		"/etc/passwd", "", ".", dir, "sub/../../registry.json",
+	} {
+		if _, err := ReadExport(dir, name); !errors.Is(err, ErrExportOutsideDir) {
+			t.Errorf("%q: %v, want ErrExportOutsideDir", name, err)
+		}
+	}
+	if _, err := ReadExport(dir, "link.json"); err == nil {
+		t.Error("a symbolic link out of the export directory was followed")
+	}
+	if _, err := ReadExport("", "registry.json"); !errors.Is(err, ErrExportOutsideDir) {
+		t.Errorf("no export directory: %v", err)
 	}
 }

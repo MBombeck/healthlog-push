@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"strings"
 
 	bolt "go.etcd.io/bbolt"
 )
@@ -145,9 +146,24 @@ func WriteExport(dir string, ex *Export) error {
 	return os.Rename(name, filepath.Join(dir, "registry.json"))
 }
 
-// ReadExport reads an export file and checks its format. The caller verifies the signature.
-func ReadExport(path string) (*Export, error) {
-	b, err := os.ReadFile(path) //nolint:gosec // operator-provided path
+// ErrExportOutsideDir refuses an export path that leaves the export directory.
+var ErrExportOutsideDir = errors.New("registry export must be a file inside the export directory")
+
+// ReadExport reads an export file inside dir and checks its format. The caller verifies the signature.
+// name is relative to dir or an absolute path under it (the operator's `recovery --from`); anything that
+// resolves outside dir, by `..` or through a symbolic link, is refused, so the admin socket cannot be used
+// to read other files of the container.
+func ReadExport(dir, name string) (*Export, error) {
+	rel, err := exportRel(dir, name)
+	if err != nil {
+		return nil, err
+	}
+	root, err := os.OpenRoot(filepath.Clean(dir))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = root.Close() }()
+	b, err := root.ReadFile(rel)
 	if err != nil {
 		return nil, err
 	}
@@ -159,6 +175,23 @@ func ReadExport(path string) (*Export, error) {
 		return nil, fmt.Errorf("unknown export format %q, expected %q", ex.Format, ExportFormat)
 	}
 	return &ex, nil
+}
+
+// exportRel returns name as a clean path relative to dir, or ErrExportOutsideDir.
+func exportRel(dir, name string) (string, error) {
+	if dir == "" || name == "" {
+		return "", ErrExportOutsideDir
+	}
+	base := filepath.Clean(dir)
+	p := name
+	if !filepath.IsAbs(p) {
+		p = filepath.Join(base, p)
+	}
+	rel, err := filepath.Rel(base, filepath.Clean(p))
+	if err != nil || rel == "." || filepath.IsAbs(rel) || strings.Contains(rel, "..") {
+		return "", ErrExportOutsideDir
+	}
+	return rel, nil
 }
 
 var uuidV4 = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
