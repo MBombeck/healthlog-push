@@ -150,7 +150,7 @@ func (r *Relay) adminRecovery(p map[string]string) (any, error) {
 	}
 	var ex *store.Export
 	if p["from"] != "" {
-		if ex, err = store.ReadExport(p["from"]); err != nil {
+		if ex, err = store.ReadExport(r.cfg.ExportDir, p["from"]); err != nil {
 			return nil, err
 		}
 	}

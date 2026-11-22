@@ -260,7 +260,10 @@ global registration caps are ten times higher (300 per hour, 2000 per day with t
 unlimited, and the per-address caps still apply. Instances whose key is in the imported export get their
 old id and tier back; any other key registers in `probation`, as outside the window. The export given with
 `--from` is verified like the one read at start: signed by this relay's identity key, for this host, every
-instance inside the closed sets. Otherwise nothing is imported and the command fails.
+instance inside the closed sets. Otherwise nothing is imported and the command fails. `--from` must name a
+file inside the export directory (`HLP_EXPORT_DIR`, `/export` in the container), as a name relative to it
+or an absolute path under it; a path that leaves it, also through a symbolic link, is refused. Copy an
+export from elsewhere into that directory first.
 
 ```sh
 docker compose exec relay /healthlog-push admin recovery --until 2026-12-05 --from /export/registry.json

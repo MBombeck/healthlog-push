@@ -6,6 +6,14 @@ All notable changes to this project are documented in this file. The format foll
 
 ## [1.0.2] - 2026-11-22
 
+### Security
+
+- `admin recovery --from` read the export from any path the relay process could open; through the admin
+  socket that is root on the host anyway, but the reader now accepts only a file inside the export directory
+  (`HLP_EXPORT_DIR`), as a relative name or an absolute path under it, through `os.Root`, so `..` and
+  symbolic links cannot leave it. Code scanning alert `go/path-injection` is closed by this change, not
+  suppressed. The import at start reads `registry.json` from the same directory as before.
+
 ### Changed
 
 - Live Activity pushes go to Apple with `apns-priority: 10` only for the end and for a start or update whose
