@@ -35,6 +35,9 @@ All notable changes to this project are documented in this file. The format foll
 
 ### Changed
 
+- The privacy notice (now version 1.2; the consent text version stays `2026-11-21`) states that Hetzner
+  Online GmbH hosts the relay as a processor under a data processing agreement (Art. 28 GDPR), concluded on
+  2026-11-22. Until now it said only that such an agreement was available.
 - The README is reorganised around what the relay is, how the privacy works, what the operator can see,
   the hosted relay, self-hosting, verifying a release and security. The limits, the identity keys and the
   verification commands are unchanged.
