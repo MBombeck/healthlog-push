@@ -68,7 +68,7 @@ A change to a rule (a limit, a validation, a protocol check) comes with a test t
 
 A change to a security property also updates [SECURITY-INVARIANTS.md](SECURITY-INVARIANTS.md), which maps every invariant to the tests that hold it; `TestInvariantsNameRealTests` fails when a test named there does not exist.
 
-When tests run: locally with the commands under [Building and testing](#building-and-testing), and in CI on every pull request and on every push to `main` (`.github/workflows/ci.yml`: build, vet, tests with the race detector, lint, govulncheck, every fuzz target for 20 seconds, the spec vectors, the image build). A pull request is merged only when all of them and CodeQL are green. The result of every run is public on the pull request and under the repository's Actions tab.
+When tests run: locally with the commands under [Building and testing](#building-and-testing), and in CI on every pull request and on every push to `main` (`.github/workflows/ci.yml`: build, vet, tests with the race detector, govulncheck, every fuzz target for 20 seconds, the spec vectors, the image build; `.github/workflows/lint.yml`: golangci-lint). A pull request is merged only when all of them and CodeQL are green. The result of every run is public on the pull request and under the repository's Actions tab.
 
 Coverage: CI measures statement coverage across all packages (`go test -coverpkg=./... -coverprofile=cover.out ./...`), prints the figure in the run summary and fails below 80 %. A change that lowers coverage below that floor needs tests, not a lower floor.
 
