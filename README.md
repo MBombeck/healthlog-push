@@ -23,7 +23,9 @@ any network access and hands the relay a short-lived provider token through a sh
 The relay forwards sealed envelopes it cannot open and keeps only the metadata needed to address devices and
 enforce limits, never medication names, doses, readings, notes, account data or any plaintext; the full list,
 with every retention period, is the privacy notice in [docs/privacy.md](docs/privacy.md), the single source
-(also served at `/privacy`).
+(also served at `/privacy`). The relay only carries what a registered server sends to its own bound
+devices. The operator never sends anything through it: no announcements, no update notices, no messages of
+any kind.
 
 ## Architecture
 

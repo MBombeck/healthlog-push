@@ -48,6 +48,9 @@ All notable changes to this project are documented in this file. The format foll
 
 - The threat model states as an accepted limit that the silent intake sync goes out at once after a dose
   is recorded, so Apple and the relay can see that time: preventing a double dose is chosen over hiding it.
+- The privacy notice (1.1), the terms (1.1, terms version unchanged) and the README state the operator's
+  commitment: the relay only carries what a registered server sends to its own bound devices, and the
+  operator never sends anything through it.
 - The README lists the hosted identity keys once; the second, stale table is gone.
 - The README no longer repeats what the relay sees; it points to `docs/privacy.md`, the single source.
 
