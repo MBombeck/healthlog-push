@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -121,5 +122,33 @@ func TestMetricsCoarseBelowThreshold(t *testing.T) {
 	h.clk.Add(time.Hour)
 	if scrape() == first {
 		t.Fatal("metrics never refresh")
+	}
+}
+
+// TestStateGaugesAreSums checks that the tier and binding-state gauges carry the same sums as `admin stats`,
+// with every label of the closed sets present, zero included.
+func TestStateGaugesAreSums(t *testing.T) {
+	h := newHarness(t)
+	a, b := h.register(), h.register()
+	a.activate(newDevice(0x61))
+	b.bind(newDevice(0x62))
+	rec := httptest.NewRecorder()
+	h.r.MetricsHandler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", http.NoBody))
+	body := rec.Body.String()
+	st := h.r.Stats()
+	want := map[string]int{}
+	for _, tier := range stateTiers {
+		want[`hlp_instances{tier="`+tier+`"}`] = st.Instances[tier]
+	}
+	for _, s := range stateBindings {
+		want[`hlp_bindings{state="`+s+`"}`] = st.Bindings[s]
+	}
+	if st.Instances["probation"] != 2 || st.Bindings["active"] != 1 || st.Bindings["provisional"] != 1 {
+		t.Fatalf("fixture: %+v %+v", st.Instances, st.Bindings)
+	}
+	for series, n := range want {
+		if line := series + " " + strconv.Itoa(n) + "\n"; !strings.Contains(body, line) {
+			t.Errorf("missing %q in\n%s", line, body)
+		}
 	}
 }

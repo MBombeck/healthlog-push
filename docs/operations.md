@@ -504,6 +504,8 @@ every minute with at least 20 active instances and every hour below that:
 | `hlp_usage_outcomes_yesterday` | `outcome="accepted"`, `"soft_failed"`, `"unregistered"` | outcomes of the last completed day |
 | `hlp_usage_registrations_last_week` | | registrations in the last completed week |
 | `hlp_usage_opt_outs_last_week` | | direct opt-outs in the last completed week |
+| `hlp_instances` | `tier="probation"`, `"standard"`, `"suspended"`, `"revoked"` | instances per tier, the `instances` block of `admin stats` |
+| `hlp_bindings` | `state="provisional"`, `"active"`, `"soft_invalid"` | bindings per state, the `bindings` block of `admin stats` |
 
 The underlying day counters (`counters_global`) are kept for 400 days.
 
