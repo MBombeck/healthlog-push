@@ -124,11 +124,15 @@ provenance workflow's own signature. Those are checked with the commands above a
 - **Least privilege.** Every workflow starts with no token permissions and each job asks for what it needs.
   The job that generates the SBOM cannot sign, and the image provenance is signed in a separate reusable
   workflow, so the build job cannot produce a provenance that verifies.
-- **The `release` environment.** The first job of a release, the one that builds, pushes and signs the image,
-  runs in the `release` environment, which accepts only `v*` tags and waits for the maintainer's approval.
-  Every later job depends on that job, so nothing is published without the approval.
-- **Tags.** A ruleset protects `v*` tags from update and deletion, and the workflow refuses a tag that does
-  not point to a commit on `main`.
+- **Tags.** A release starts when a `vX.Y.Z` tag is pushed, which needs write access to the repository. A
+  ruleset protects `v*` tags from update and deletion, so a published tag cannot be moved to other code, and
+  the workflow refuses a tag that does not point to a commit on `main`.
+- **The `release` environment.** The job that builds, pushes and signs the image runs in the `release`
+  environment, which accepts only `v*` tags, and every later job depends on that job. The environment has no
+  required reviewer; no manual approval is part of a release.
+- **Signatures bound to the workflow.** The image and `SHA256SUMS` are signed keyless with cosign. The
+  certificate names `release.yml` at the release tag, and the provenance names `provenance.yml` or the SLSA
+  generator at their tags, so nothing built elsewhere, or from another ref, verifies with the commands above.
 - **Releases are not marked immutable.** GitHub's immutable releases lock a release when it is published.
   The binary provenance is attached by the SLSA generator after that, because it has to cover the files
   exactly as they were published, so the setting stays off. What protects a published release is the tag

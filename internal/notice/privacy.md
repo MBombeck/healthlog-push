@@ -1,6 +1,6 @@
 # Privacy notice of the HealthLog push relay
 
-Version 1.1, 2026-11-22 (consent text version `2026-11-21`). Served by the relay itself at https://push.healthlog.dev/privacy; this text is the
+Version 1.2, 2026-11-22 (consent text version `2026-11-21`). Served by the relay itself at https://push.healthlog.dev/privacy; this text is the
 authoritative one. Earlier versions are kept in the source repository
 (https://github.com/MBombeck/healthlog-push, file internal/notice/privacy.md).
 
@@ -182,8 +182,9 @@ discarded. On the relay host, logs are limited to three files of 10 MB each.
   the app's topic, and can link the token to an Apple account. With the Live Activity consent, Apple also
   receives the content state of each Live Activity start and update in the clear (section 4). Apple acts as an independent controller; see
   Apple's own privacy policy.
-- Hetzner Online GmbH hosts the relay on a dedicated cloud server in a data centre in Falkenstein, Germany.
-  Hetzner sees network connections to the server, not their content.
+- Hosting: Hetzner Online GmbH, Germany, as processor under a data processing agreement (Art. 28 GDPR). The
+  relay runs on a dedicated cloud server in a data centre in Falkenstein, Germany. Hetzner sees network
+  connections to the server, not their content.
 - The DNS provider of healthlog.dev answers name lookups for push.healthlog.dev. It does not see the traffic
   itself. If the name were redirected, whoever controls the new target would see the device tokens and
   request metadata of requests sent there in that time; they could not read content, and HealthLog servers
@@ -281,9 +282,10 @@ that its data centre parks in Nuremberg, Falkenstein and Helsinki are certified 
 SOCOTEC Certification. Hetzner also states that it holds a BSI C5 Type 2 attestation (an attestation, not a
 certificate) covering 1 February to 31 August 2025; it was issued by WP Koehler GmbH and covers Hetzner's
 European sites, including its cloud servers and volumes. Hetzner states that the BSI classifies it as an
-operator of critical services under German KRITIS rules. A data processing agreement under Art. 28 GDPR is
-available under Hetzner's standard terms; Hetzner publishes its technical and organisational measures and its
-sub-processors. The relay server and its backups are hosted in Germany.
+operator of critical services under German KRITIS rules. Hetzner hosts the relay as a processor: a data
+processing agreement under Art. 28 GDPR between the operator and Hetzner Online GmbH was concluded on
+2026-11-22. Hetzner publishes its technical and organisational measures and its sub-processors. The relay
+server and its backups are hosted in Germany.
 
 These are Hetzner's own statements, checked on 2026-11-21 against Hetzner's published pages:
 

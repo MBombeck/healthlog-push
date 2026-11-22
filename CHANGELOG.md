@@ -35,6 +35,9 @@ All notable changes to this project are documented in this file. The format foll
 
 ### Changed
 
+- The privacy notice (now version 1.2; the consent text version stays `2026-11-21`) states that Hetzner
+  Online GmbH hosts the relay as a processor under a data processing agreement (Art. 28 GDPR), concluded on
+  2026-11-22. Until now it said only that such an agreement was available.
 - The README is reorganised around what the relay is, how the privacy works, what the operator can see,
   the hosted relay, self-hosting, verifying a release and security. The limits, the identity keys and the
   verification commands are unchanged.
@@ -42,8 +45,8 @@ All notable changes to this project are documented in this file. The format foll
   to a commit, with the SLSA generator as the one tag-pinned exception and the reason for it, the tag
   ruleset, and why GitHub's immutable releases stay off. `SECURITY.md` gains the same in short and a section
   on verifying a release.
-- Only the first job of the release workflow names the `release` environment. Every other job depends on
-  it, so one approval gates a release.
+- Only the first job of the release workflow names the `release` environment, which accepts only `v*`
+  tags; every other job depends on that job. The environment has no required reviewer.
 - The hardening statement, the key ceremony and the Ansible examples no longer name the server model, the
   exact reboot time, an example host name or the layout of the secret store.
 - golangci-lint also runs `contextcheck` and `unparam`. The admin socket listener and the shutdown derive

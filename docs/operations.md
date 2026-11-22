@@ -621,7 +621,6 @@ the imported instances.
 The hosted relay runs on a dedicated Hetzner Cloud server operated by Hetzner Online GmbH in
 Falkenstein, Germany. The certification wording for users is section 13 of
 [privacy.md](privacy.md#13-hosting-and-certifications); keep both in step and re-check the sources there at
-least once a year (ISO/IEC 27001 certificate, BSI C5 Type 2 attestation period, sub-processor list). Before
-the notice may say that processing is governed by a concluded data processing agreement, confirm in the
-Hetzner customer account that the agreement under Art. 28 GDPR has been concluded; until then the notice
-only says it is available under Hetzner's standard terms. Host hardening: [hardening.md](hardening.md).
+least once a year (ISO/IEC 27001 certificate, BSI C5 Type 2 attestation period, sub-processor list). The
+data processing agreement under Art. 28 GDPR with Hetzner Online GmbH was concluded on 2026-11-22, and the
+notice says so; if the hosting provider changes, conclude the new agreement before the notice names it. Host hardening: [hardening.md](hardening.md).
