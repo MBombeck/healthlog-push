@@ -1352,8 +1352,13 @@ counts only: no instance id and no value of a single instance.
 | `pushesPerDay` | per completed day: `total`, `byClass`, `accepted`, `softFailed` (soft invalid and activity gone), `unregistered` |
 
 Days are completed days only (yesterday back), so no partial day of a small population is ever shown. With
-fewer than 20 active instances, the summary log line and the metrics snapshot refresh hourly instead of every
-minute, so the traffic of a single instance cannot be read off them. Registrations, key rotations, instance
+fewer than 20 active instances, the summary log line is written hourly instead of every minute, so the
+traffic of a single instance cannot be read off the log. The metrics are counts without any instance or
+device. Only HTTP responses by status class, requests to Apple without a split by kind, Apple's refusals by
+reason, the delivery latency and the gauges of the relay's own health are current at every scrape. Every
+other metric (every split by push class or kind, the key slot, the silent budget refusals, the instances per
+tier, the bindings per state and the usage figures) is served from a copy taken every five minutes, with a
+tier of fewer than three instances counted under `other`. Registrations, key rotations, instance
 deletions and resolved conflict challenges have no log line of their own; they are counted in the `events`
 map of the summary line. Metrics are served on the loopback interface only.
 

@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -103,52 +104,133 @@ func TestUsageAggregates(t *testing.T) {
 	}
 }
 
-// TestMetricsCoarseBelowThreshold: with fewer than 20 active instances the scrape is a snapshot refreshed
-// hourly, so one instance's push cannot be timed from it.
-func TestMetricsCoarseBelowThreshold(t *testing.T) {
+// TestHeldMetricsRefreshEveryFiveMinutes: every metric outside the live set, the figures about who is
+// registered and every count by class or kind among them, shows from a copy taken every five minutes, at
+// every number of instances. The moment one instance registers, one device binds, or a push of one kind
+// passes cannot be read off the scrape.
+func TestHeldMetricsRefreshEveryFiveMinutes(t *testing.T) {
 	h := newHarness(t)
-	i := h.register()
-	d := newDevice(0x51)
-	scrape := func() string {
+	held := func() string {
 		rec := httptest.NewRecorder()
 		h.r.MetricsHandler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", http.NoBody))
-		return rec.Body.String()
+		var out []string
+		for _, line := range strings.Split(rec.Body.String(), "\n") {
+			name, _, _ := strings.Cut(line, "{")
+			name, _, _ = strings.Cut(name, " ")
+			name = strings.TrimSuffix(strings.TrimSuffix(strings.TrimSuffix(name, "_bucket"), "_sum"), "_count")
+			if strings.HasPrefix(name, "hlp_") && !slices.Contains(liveMetrics, name) {
+				out = append(out, line)
+			}
+		}
+		if len(out) < 40 {
+			t.Fatalf("only %d held series in the scrape: the check would prove little", len(out))
+		}
+		return strings.Join(out, "\n")
 	}
-	first := scrape()
+	first := held()
+	i := h.register()
+	d := newDevice(0x51)
 	i.activate(d)
-	if scrape() != first {
-		t.Fatal("metrics changed within the hour with fewer than 20 instances")
+	i.push1(alertItem("a", d))
+	h.clk.Add(heldRefresh - time.Second)
+	// Even with the current values already in the registry, the scrape keeps showing the copy it holds.
+	h.r.usageGauges()
+	if held() != first {
+		t.Fatal("a held metric changed before its refresh")
 	}
-	h.clk.Add(time.Hour)
-	if scrape() == first {
-		t.Fatal("metrics never refresh")
+	h.clk.Add(time.Second)
+	after := held()
+	for _, want := range []string{`hlp_bindings{state="active"} 1`, "hlp_usage_active_instances 1",
+		`hlp_apns_sends_total{kind="alert"} 2`, `hlp_push_total{class="alert",result="accepted"} 2`,
+		`hlp_registrations_total{result="created"} 1`} {
+		if !strings.Contains(after, want+"\n") {
+			t.Errorf("missing %q after the refresh:\n%s", want, after)
+		}
 	}
 }
 
-// TestStateGaugesAreSums checks that the tier and binding-state gauges carry the same sums as `admin stats`,
-// with every label of the closed sets present, zero included.
+// TestLiveMetricsAreTheNarrowSet: exactly these metrics are current at every scrape. Widening the set is a
+// change to a published promise (privacy notice section 6, docs/transparency.md), so it has to change this
+// list as well. The gauges among them exist from the first scrape, before anything went wrong, so a rule on
+// one of them never looks at no data.
+func TestLiveMetricsAreTheNarrowSet(t *testing.T) {
+	want := []string{"hlp_apns_misconfigured", "hlp_apns_rejections_total", "hlp_apns_requests_total", "hlp_breaker_open",
+		"hlp_db_writable", "hlp_delivery_latency_seconds", "hlp_requests_total"}
+	h := newHarness(t)
+	if got := h.r.Metrics.LiveNames(); !slices.Equal(got, want) {
+		t.Fatalf("live metrics %v, want %v", got, want)
+	}
+	rec := httptest.NewRecorder()
+	h.r.MetricsHandler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", http.NoBody))
+	for _, line := range []string{"hlp_apns_misconfigured 0", "hlp_breaker_open 0", "hlp_db_writable 1", "hlp_apns_requests_total 0"} {
+		if !strings.Contains(rec.Body.String(), "\n"+line+"\n") {
+			t.Errorf("missing %q on a healthy relay:\n%s", line, rec.Body.String())
+		}
+	}
+}
+
+// TestStateGaugesAreSums checks that the binding-state gauges carry the same sums as `admin stats`, and the
+// tier gauges too for every tier that holds at least three instances, with every label of the closed sets
+// present, zero included.
 func TestStateGaugesAreSums(t *testing.T) {
 	h := newHarness(t)
 	a, b := h.register(), h.register()
+	h.register()
 	a.activate(newDevice(0x61))
 	b.bind(newDevice(0x62))
 	rec := httptest.NewRecorder()
 	h.r.MetricsHandler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", http.NoBody))
 	body := rec.Body.String()
 	st := h.r.Stats()
-	want := map[string]int{}
+	want := map[string]int{`hlp_instances{tier="` + tierOther + `"}`: 0}
 	for _, tier := range stateTiers {
 		want[`hlp_instances{tier="`+tier+`"}`] = st.Instances[tier]
 	}
 	for _, s := range stateBindings {
 		want[`hlp_bindings{state="`+s+`"}`] = st.Bindings[s]
 	}
-	if st.Instances["probation"] != 2 || st.Bindings["active"] != 1 || st.Bindings["provisional"] != 1 {
+	if st.Instances["probation"] != 3 || st.Bindings["active"] != 1 || st.Bindings["provisional"] != 1 {
 		t.Fatalf("fixture: %+v %+v", st.Instances, st.Bindings)
 	}
 	for series, n := range want {
 		if line := series + " " + strconv.Itoa(n) + "\n"; !strings.Contains(body, line) {
 			t.Errorf("missing %q in\n%s", line, body)
 		}
+	}
+}
+
+// TestSmallTiersAreMergedIntoOther: a tier with one or two instances is not shown on its own, because that
+// would say which tier a single instance is in. Its instances count under `other`, and the tier shows zero.
+func TestSmallTiersAreMergedIntoOther(t *testing.T) {
+	h := newHarness(t)
+	scrape := func() string {
+		h.clk.Add(heldRefresh)
+		rec := httptest.NewRecorder()
+		h.r.MetricsHandler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", http.NoBody))
+		return rec.Body.String()
+	}
+	has := func(body, series string, n int) {
+		t.Helper()
+		if line := series + " " + strconv.Itoa(n) + "\n"; !strings.Contains(body, line) {
+			t.Errorf("missing %q in\n%s", line, body)
+		}
+	}
+	h.register()
+	suspended := h.register()
+	body := scrape()
+	has(body, `hlp_instances{tier="probation"}`, 0)
+	has(body, `hlp_instances{tier="other"}`, 2)
+	h.register()
+	h.register()
+	if err := h.r.Suspend(suspended.id, "spam"); err != nil {
+		t.Fatal(err)
+	}
+	body = scrape()
+	// Three on probation show as their tier; the one suspended instance stays merged.
+	has(body, `hlp_instances{tier="probation"}`, 3)
+	has(body, `hlp_instances{tier="suspended"}`, 0)
+	has(body, `hlp_instances{tier="other"}`, 1)
+	if st := h.r.Stats(); st.Instances["suspended"] != 1 || st.Instances["probation"] != 3 {
+		t.Fatalf("admin stats must keep the exact sums: %+v", st.Instances)
 	}
 }

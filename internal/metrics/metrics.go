@@ -1,6 +1,9 @@
 // Package metrics keeps coarse counters without any instance, device or address label and renders them in
-// the Prometheus text format. The exposed values are a snapshot refreshed every minute, or every hour while
-// fewer than 20 instances are active, so that a single instance's traffic cannot be read off the scrape.
+// the Prometheus text format.
+//
+// Only the metrics declared with Live are rendered as they are at each scrape. Every other metric, counter,
+// gauge or histogram, is served from a held copy that is taken again at most once per interval, so a metric
+// that is not declared live can never become current by accident.
 package metrics
 
 import (
@@ -20,13 +23,19 @@ type Registry struct {
 	gauges   map[string]float64
 	hists    map[string]*histogram
 	help     map[string]string
-	snap     string
-	snapAt   time.Time
+	// live names the metrics rendered with their current value; every other metric is served from the
+	// held copy below.
+	live         map[string]bool
+	heldCounters map[string]float64
+	heldGauges   map[string]float64
+	heldHists    map[string]*histogram
+	heldAt       time.Time
 }
 
 // New returns an empty registry.
 func New() *Registry {
-	return &Registry{counters: map[string]float64{}, gauges: map[string]float64{}, hists: map[string]*histogram{}, help: map[string]string{}}
+	return &Registry{counters: map[string]float64{}, gauges: map[string]float64{}, hists: map[string]*histogram{},
+		help: map[string]string{}, live: map[string]bool{}}
 }
 
 func key(name string, labels ...string) string {
@@ -39,6 +48,11 @@ func key(name string, labels ...string) string {
 	}
 	slices.Sort(parts)
 	return name + "{" + strings.Join(parts, ",") + "}"
+}
+
+func nameOf(k string) string {
+	name, _, _ := strings.Cut(k, "{")
+	return name
 }
 
 // Help sets the help text of a metric.
@@ -59,6 +73,35 @@ func (r *Registry) Set(name string, v float64, labels ...string) {
 	r.mu.Lock()
 	r.gauges[key(name, labels...)] = v
 	r.mu.Unlock()
+}
+
+// Live declares metrics that are rendered with their current value at every write. Every other metric is
+// served from the held copy (see Write).
+func (r *Registry) Live(names ...string) {
+	r.mu.Lock()
+	for _, n := range names {
+		r.live[n] = true
+	}
+	r.mu.Unlock()
+}
+
+// LiveNames returns the names declared live, sorted.
+func (r *Registry) LiveNames() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Sorted(maps.Keys(r.live))
+}
+
+// HeldDue reports whether the held copy is older than interval, so that the caller can compute held gauges
+// only when a scrape is going to show them anew.
+func (r *Registry) HeldDue(now time.Time, interval time.Duration) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.heldDueLocked(now, interval)
+}
+
+func (r *Registry) heldDueLocked(now time.Time, interval time.Duration) bool {
+	return r.heldAt.IsZero() || now.Sub(r.heldAt) >= interval
 }
 
 // histogram is a cumulative histogram without labels, with fixed upper bounds.
@@ -101,8 +144,7 @@ func (r *Registry) Names() []string {
 	set := map[string]bool{}
 	for _, m := range []map[string]float64{r.counters, r.gauges} {
 		for k := range m {
-			name, _, _ := strings.Cut(k, "{")
-			set[name] = true
+			set[nameOf(k)] = true
 		}
 	}
 	for name := range r.hists {
@@ -111,12 +153,24 @@ func (r *Registry) Names() []string {
 	return slices.Sorted(maps.Keys(set))
 }
 
+// current returns the entries of m whose metric is live, with the held copy of the others added.
+func (r *Registry) current(m, held map[string]float64) map[string]float64 {
+	out := make(map[string]float64, len(m))
+	for k, v := range m {
+		if r.live[nameOf(k)] {
+			out[k] = v
+		}
+	}
+	maps.Copy(out, held)
+	return out
+}
+
 func (r *Registry) render() string {
 	var b strings.Builder
 	emit := func(m map[string]float64, typ string) {
 		seen := map[string]bool{}
 		for _, k := range slices.Sorted(maps.Keys(m)) {
-			name, _, _ := strings.Cut(k, "{")
+			name := nameOf(k)
 			if !seen[name] {
 				seen[name] = true
 				if h := r.help[name]; h != "" {
@@ -127,10 +181,21 @@ func (r *Registry) render() string {
 			fmt.Fprintf(&b, "%s %g\n", k, m[k])
 		}
 	}
-	emit(r.counters, "counter")
-	emit(r.gauges, "gauge")
-	for _, name := range slices.Sorted(maps.Keys(r.hists)) {
-		h := r.hists[name]
+	// A held series shows its held value; one that appeared for the first time since the copy was taken is
+	// left out until the next refresh.
+	emit(r.current(r.counters, r.heldCounters), "counter")
+	emit(r.current(r.gauges, r.heldGauges), "gauge")
+	hists := maps.Clone(r.heldHists)
+	if hists == nil {
+		hists = map[string]*histogram{}
+	}
+	for name, h := range r.hists {
+		if r.live[name] {
+			hists[name] = h
+		}
+	}
+	for _, name := range slices.Sorted(maps.Keys(hists)) {
+		h := hists[name]
 		if t := r.help[name]; t != "" {
 			fmt.Fprintf(&b, "# HELP %s %s\n", name, t)
 		}
@@ -143,14 +208,32 @@ func (r *Registry) render() string {
 	return b.String()
 }
 
-// WriteSnapshot writes the exposed snapshot, refreshing it when it is older than interval.
-func (r *Registry) WriteSnapshot(w io.Writer, now time.Time, interval time.Duration) error {
-	r.mu.Lock()
-	if r.snapAt.IsZero() || now.Sub(r.snapAt) >= interval {
-		r.snap = r.render()
-		r.snapAt = now
+// held returns a copy of the entries of m whose metric is not live.
+func (r *Registry) held(m map[string]float64) map[string]float64 {
+	out := map[string]float64{}
+	for k, v := range m {
+		if !r.live[nameOf(k)] {
+			out[k] = v
+		}
 	}
-	s := r.snap
+	return out
+}
+
+// Write renders the registry: the live metrics as they are now, every other metric from the held copy. The
+// copy is taken again when it is older than interval, and a zero interval takes it at every call.
+func (r *Registry) Write(w io.Writer, now time.Time, interval time.Duration) error {
+	r.mu.Lock()
+	if r.heldDueLocked(now, interval) {
+		r.heldCounters, r.heldGauges = r.held(r.counters), r.held(r.gauges)
+		r.heldHists = map[string]*histogram{}
+		for name, h := range r.hists {
+			if !r.live[name] {
+				r.heldHists[name] = &histogram{bounds: h.bounds, counts: slices.Clone(h.counts), sum: h.sum, count: h.count}
+			}
+		}
+		r.heldAt = now
+	}
+	s := r.render()
 	r.mu.Unlock()
 	_, err := io.WriteString(w, s)
 	return err

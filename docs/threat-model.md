@@ -94,7 +94,13 @@ says "a dose was recorded elsewhere, now", and so does the silent intake sync th
 dose is recorded (an accepted limit, see "Known limitations"). With the Live Activity consent, the content state of a start or
 update says more, by design (see "Live Activity start and update"). The relay keeps times only as day or week numbers in its store,
 keeps no class per instance at rest, writes logs and metrics without instance ids, and coarsens the summary
-log line and the metrics to hourly while fewer than 20 instances are active. Registrations, key rotations,
+log line to hourly while fewer than 20 instances are active. A few of its metrics are current at every
+scrape: requests by status class, requests to Apple without their kind, Apple's refusals and the latency.
+So the operator's monitoring holds the time of each push, though never its class, kind, instance or device:
+with very few active instances these counts still reflect their traffic in aggregate, and with a single one
+they are that instance's. Every other metric, every count by class or kind and the figures about who is
+registered among them, is held back and refreshed every five minutes, with small tiers merged
+([transparency.md](transparency.md#metrics-the-operator-sees)). Registrations, key rotations,
 instance deletions and resolved conflict challenges get no log line of their own; they are counted in the
 `events` map of that summary line, so their time is no finer than the summary period. Lines that are still
 written when they happen are a start or stop, the daily run and its results (promotions, the export), store

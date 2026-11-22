@@ -5,20 +5,25 @@ import (
 	"time"
 )
 
+// heldRefresh is how often the scrape takes its copy of every metric that is not in liveMetrics.
+const heldRefresh = 5 * time.Minute
+
+// HeldRefresh is the refresh period of the held metrics, for the test that holds docs/transparency.md to
+// the code.
+func HeldRefresh() time.Duration { return heldRefresh }
+
 // MetricsHandler serves /metrics (127.0.0.1 only) and a local /healthz for the container health check.
 func (r *Relay) MetricsHandler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /metrics", func(w http.ResponseWriter, _ *http.Request) {
-		r.mu.Lock()
-		interval := time.Hour
-		if r.activeInstancesLocked() >= fewInstances {
-			interval = time.Minute
+		now := r.cfg.Now()
+		// The held gauges are computed only when the scrape is going to show them anew.
+		if r.Metrics.HeldDue(now, heldRefresh) {
+			r.usageGauges()
+			r.Metrics.Set("hlp_queue_depth", float64(r.q.Len()))
 		}
-		r.mu.Unlock()
-		r.usageGauges()
-		r.Metrics.Set("hlp_queue_depth", float64(r.q.Len()))
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
-		_ = r.Metrics.WriteSnapshot(w, r.cfg.Now(), interval)
+		_ = r.Metrics.Write(w, now, heldRefresh)
 	})
 	mux.HandleFunc("GET /healthz", r.handleHealthz)
 	return mux
