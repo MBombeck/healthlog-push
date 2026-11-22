@@ -26,10 +26,10 @@ func TestLegalTextsInSync(t *testing.T) {
 	}
 }
 
-// TestInvariantsNameRealTests: every test SECURITY-INVARIANTS.md cites exists in the named file, so the
+// TestInvariantsNameRealTests: every test docs/security-invariants.md cites exists in the named file, so the
 // audit map cannot point at a renamed or deleted test.
 func TestInvariantsNameRealTests(t *testing.T) {
-	doc, err := os.ReadFile("SECURITY-INVARIANTS.md")
+	doc, err := os.ReadFile("docs/security-invariants.md")
 	if err != nil {
 		t.Fatal(err)
 	}

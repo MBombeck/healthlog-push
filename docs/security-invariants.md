@@ -1,8 +1,8 @@
 # Security invariants
 
 Each invariant of the relay with the test that fails when it breaks. `TestInvariantsNameRealTests` fails when a
-test named here no longer exists. The threat model behind these is in [docs/threat-model.md](docs/threat-model.md);
-the protocol in [spec/protocol.md](spec/protocol.md).
+test named here no longer exists. The threat model behind these is in [threat-model.md](threat-model.md);
+the protocol in [spec/protocol.md](../spec/protocol.md).
 
 Concurrency model: all mutable relay state (instances, bindings, quotas, conflicts, control) is guarded by one
 mutex in `internal/relay`. Signatures are verified and bodies read outside it; handlers that release the lock

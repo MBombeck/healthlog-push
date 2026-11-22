@@ -18,7 +18,7 @@ A self-hosted HealthLog server can send push notifications through the relay, an
 
 These are the security requirements. They are written for users in the
 [README](../README.md) and in [privacy.md](privacy.md), and for reviewers as numbered invariants in
-[SECURITY-INVARIANTS.md](../SECURITY-INVARIANTS.md).
+[security-invariants.md](security-invariants.md).
 
 ## 2. Threat model
 

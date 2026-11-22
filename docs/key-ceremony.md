@@ -69,7 +69,7 @@ The public identity keys are pinned in two places that are released separately f
 
 `current`, `next` and `emergency` are pinned in both, in the same way. A new `next` or `emergency` key is
 published in both before it can be promoted. The public keys are also listed in
-`README.md` of this repository, so anyone can compare.
+[hosted-relay.md](hosted-relay.md#identity-keys), so anyone can compare.
 
 ## Rotation
 
@@ -97,8 +97,8 @@ switches to `emergency`, which clients already pin, so no client release is need
    is gone.
 3. Generate a new `next` and a new `emergency` with the generation command above. The new `next` goes into
    the secret store, the new `emergency` is held separately as described under Storage.
-4. Publish both public keys (release notes, `keys/push.healthlog.dev.json`, the README table and
-   [transparency.md](transparency.md)), ship them in the next server and app releases, and drop the lost
+4. Publish both public keys (release notes, `keys/push.healthlog.dev.json`, the table in
+   [hosted-relay.md](hosted-relay.md#identity-keys) and [transparency.md](transparency.md)), ship them in the next server and app releases, and drop the lost
    keys from the pins in the same releases. If the old keys may be compromised, set a notice as for a
    compromised identity key (below).
 

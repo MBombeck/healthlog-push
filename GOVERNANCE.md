@@ -2,7 +2,7 @@
 
 How decisions are made in healthlog-push, which roles exist, and what each role has to do. Who holds a role
 today is listed in [MAINTAINERS.md](MAINTAINERS.md). What happens when the maintainer is not available is in
-[CONTINUITY.md](CONTINUITY.md).
+[docs/continuity.md](docs/continuity.md).
 
 ## Model
 
@@ -33,10 +33,10 @@ does not depend on it.
 
 | Role | Responsibilities | Access |
 |---|---|---|
-| Maintainer | Triage issues. Review and merge pull requests. Keep the specification, the test vectors and the documentation consistent with the code. Cut releases. Answer security reports and publish fixes ([SECURITY.md](SECURITY.md)). Keep the dependencies current. Own the repository settings and the rulesets. Keep [ROADMAP.md](ROADMAP.md) and this document current. | Owner of the repository and of the container package. Receives private vulnerability reports. |
+| Maintainer | Triage issues. Review and merge pull requests. Keep the specification, the test vectors and the documentation consistent with the code. Cut releases. Answer security reports and publish fixes ([SECURITY.md](SECURITY.md)). Keep the dependencies current. Own the repository settings and the rulesets. Keep [docs/roadmap.md](docs/roadmap.md) and this document current. | Owner of the repository and of the container package. Receives private vulnerability reports. |
 | Contributor | Propose changes that meet [CONTRIBUTING.md](CONTRIBUTING.md): tests, text rules, a justification for every new dependency. Follow the [code of conduct](CODE_OF_CONDUCT.md). | None. Contributions arrive as pull requests from forks. |
 | Security reporter | Report privately, give the project time to fix ([SECURITY.md](SECURITY.md)). | None. |
-| Continuity contact | A trusted person designated by the maintainer. No part in day-to-day work; acts only if the maintainer can no longer do so ([CONTINUITY.md](CONTINUITY.md)). | Sealed emergency access, unused in normal operation. |
+| Continuity contact | A trusted person designated by the maintainer. No part in day-to-day work; acts only if the maintainer can no longer do so ([docs/continuity.md](docs/continuity.md)). | Sealed emergency access, unused in normal operation. |
 
 The maintainer is also the operator and the key holder of the hosted relay. Those duties are described in
 [docs/operations.md](docs/operations.md) and [docs/key-ceremony.md](docs/key-ceremony.md).
@@ -50,7 +50,7 @@ The maintainer is also the operator and the key holder of the hosted relay. Thos
   build, the text rules, the deploy lint, the sign-off check and CodeQL.
 - The maintainer reviews every pull request from a contributor before it is merged. The review checks that
   the change does what it says, that a test fails when the rule it adds is broken, that no security
-  invariant in [SECURITY-INVARIANTS.md](SECURITY-INVARIANTS.md) is weakened, that the documentation matches
+  invariant in [docs/security-invariants.md](docs/security-invariants.md) is weakened, that the documentation matches
   the behaviour, and that no dependency arrives without its entry in
   [docs/dependencies.md](docs/dependencies.md).
 - The maintainer's own changes pass the same checks and the checklist in the pull request template. Nobody
