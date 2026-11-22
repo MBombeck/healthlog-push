@@ -35,6 +35,32 @@ jobs:
         run: go vet ./...
       - name: Test
         run: go test -race -count=1 ./...
+      # Statement coverage across all packages, with a floor. The figure goes into the run summary.
+      - name: Coverage
+        run: |
+          set -euo pipefail
+          go test -count=1 -coverpkg=./... -coverprofile=cover.out ./...
+          total=$(go tool cover -func=cover.out | awk '/^total:/ {sub("%","",$3); print $3}')
+          echo "statement coverage: ${total} %" | tee -a "$GITHUB_STEP_SUMMARY"
+          awk -v t="$total" 'BEGIN { exit (t + 0 >= 80.0) ? 0 : 1 }' \
+            || { echo "::error::statement coverage ${total} % is below 80 %"; exit 1; }
+
+  dco:
+    name: DCO sign-off
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: Every commit is signed off by its author
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: scripts/check-dco.sh "${BASE_SHA}..${HEAD_SHA}"
 
   lint:
     name: golangci-lint
