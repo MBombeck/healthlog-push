@@ -153,8 +153,10 @@ func (r *Relay) admitLocked(s *instState, p *wire.PushItem, now time.Time) (Item
 	ik := s.rec.ID + "\x00" + it.Ref
 	if e := r.idem[ik]; e != nil && now.Before(e.exp) {
 		if e.res == nil {
+			r.Metrics.Inc("hlp_push_retries_total", "answer", "joined")
 			return ItemResult{}, e
 		}
+		r.Metrics.Inc("hlp_push_retries_total", "answer", "replayed")
 		res := *e.res
 		res.Duplicate = true
 		return res, nil
@@ -170,13 +172,21 @@ func (r *Relay) admitLocked(s *instState, p *wire.PushItem, now time.Time) (Item
 	ch, res := r.limitsLocked(s, b, m, it, now)
 	if ch == nil {
 		r.Metrics.Inc("hlp_push_total", "class", string(it.Class), "result", res.Error)
+		if res.Status == http.StatusTooManyRequests {
+			r.rateLimited(surfacePush)
+		}
 		return res, nil
 	}
 	ent := &idemEntry{done: make(chan struct{}), exp: now.Add(idemTTL)}
 	push := r.buildPush(it, now)
 	job := &queue.Job{Instance: s.rec.ID, High: it.Class != wire.ClassSilent}
+	kind := kindOf(it)
+	if it.Class == wire.ClassLiveActivity {
+		r.observePriority(push.Urgent)
+	}
 	job.Run = func() {
 		res := r.sender.Send(context.Background(), push)
+		r.observeSend(kind, now, res)
 		r.complete(s.rec.ID, m, it, ik, ent, res)
 	}
 	job.Drop = func() {

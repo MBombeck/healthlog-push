@@ -10,6 +10,7 @@ import (
 // block a device's opt-out, self-read or challenge answer. Caller holds r.mu.
 func (r *Relay) appFailLocked(w http.ResponseWriter, req *http.Request, status int, e errBody) {
 	if !r.appDirect.Allow(r.cfg.Now()) {
+		r.rateLimited(surfaceAppGlobal)
 		r.fail(w, req, http.StatusTooManyRequests, errBody{Error: "global", Scope: "global", RetryAfter: jitter(2 * time.Second)})
 		return
 	}
@@ -28,6 +29,7 @@ func (r *Relay) appAllowedLocked(w http.ResponseWriter, req *http.Request, m str
 	now := r.cfg.Now()
 	d := r.dev(m)
 	if !d.app.Allow(now) {
+		r.rateLimited(surfaceAppDevice)
 		r.fail(w, req, http.StatusTooManyRequests, errBody{Error: "device_quota", Scope: "device", RetryAfter: jitter(d.app.RetryAfter(now))})
 		return false
 	}

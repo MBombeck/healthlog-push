@@ -35,6 +35,57 @@ far as the law allows its type (for example a court order for subscriber data) a
 - Apple delivers every push and can be asked directly; the relay has no influence on that. What Apple sees
   is listed in [threat-model.md](threat-model.md#what-the-relay-sees-and-what-apple-sees).
 
+## Metrics the operator sees
+
+The relay counts its own work and nothing else. The table below is every metric it exposes, the whole of
+what the operator can see about the relay's traffic in monitoring; a test in the repository fails if the code
+registers a metric that is not in this table. No metric carries an instance id, a device, a token, a topic,
+an address, a version of anyone's software or any content, and no metric is per instance, per device or per
+person. Every label takes its value from a short fixed list written into the code, and a second test fails if
+a label outside that list appears. There is no time-of-day breakdown: the only time is the moment of each
+scrape.
+
+`/metrics` listens on `127.0.0.1:9464` on the relay host and is never reachable from the internet. While fewer
+than 20 instances are active, the values change only once an hour, so the traffic of a single instance cannot
+be read off them. The operator's monitoring keeps the scraped values for **6 months**, then deletes them.
+
+| Metric | What it counts | Labels | Why it exists |
+|---|---|---|---|
+| `hlp_push_total` | push items by outcome | `class` (alert, silent, liveactivity), `result` (accepted, a refusal or an Apple outcome) | whether pushes get through, and which limit or answer stops them |
+| `hlp_apns_sends_total` | requests the relay sends to Apple | `kind` (alert, silent_sync, silent_wake, la_start, la_update, la_end) | which kind of push the load comes from; `silent_wake` is the relay's own challenge push, `silent_sync` a background push an instance sends |
+| `hlp_delivery_latency_seconds` | time from the relay accepting an item to Apple's answer, in six coarse buckets (0.1 s to 5 s) | none | whether delivery is slowing down |
+| `hlp_apns_rejections_total` | Apple's refusals | `reason` (Apple's documented reason codes, anything else as `other`) | telling a relay defect from a token problem |
+| `hlp_liveactivity_priority_total` | Live Activity pushes | `priority` (10, 5) | checking that only due doses use the device's priority 10 budget |
+| `hlp_push_retries_total` | items an instance sent again under a ref the relay still remembered | `answer` (replayed, joined) | whether instances retry too eagerly |
+| `hlp_queue_depth` | jobs waiting in the send queue | none | capacity |
+| `hlp_queue_dropped_total` | jobs dropped after waiting too long in the queue | none | capacity |
+| `hlp_silent_budget_refused_total` | background pushes refused by a silent budget | `kind` (sync: the device's hourly budget or a relay-wide pause; wake: the once-a-day challenge) | seeing whether the budgets are too tight or are being pressed |
+| `hlp_silent_paused_total` | times silent pushes were paused for everyone after Apple throttled | none | an alarm about Apple throttling |
+| `hlp_rate_limited_total` | requests refused by a rate limit | `surface` (instance_requests, registration, app_global, app_device, push) | which limit is hit, without saying by whom |
+| `hlp_deliveries_by_key_slot_total` | accepted deliveries | `slot` (current, next, emergency, unpinned) | confirming during a key rotation which pinned identity key the relay runs with |
+| `hlp_registrations_total` | new registrations | `result` (created, limited) | growth and the registration caps |
+| `hlp_registrations_rejected_total` | refused new registrations | `reason` (no_invite, bad_signature, rate_limited) | seeing misconfigured servers and probing |
+| `hlp_auth_failures_total` | requests with a wrong signature, counted at a capped rate | `reason` (bad_signature) | seeing misconfigured servers and probing |
+| `hlp_bindings_total` | binding events | `result` (bound, conflict, challenge_resolved, opt_out_lifted, unbound_instance, unbound_self, liveactivity_consent, liveactivity_consent_withdrawn) | whether binding works |
+| `hlp_challenges_total` | challenge pushes sent | `result` (Apple's classified outcome) | whether conflict challenges reach devices |
+| `hlp_invalid_budget_exceeded_total` | times an instance exceeded its invalid-token budget | none | an abuse alarm; which instance it was is only in the admin socket |
+| `hlp_requests_total` | HTTP responses | `status` (2xx, 4xx, 5xx) | error rates |
+| `hlp_body_budget_refused_total` | requests refused because the budget for request bodies in flight was full | none | flood detection |
+| `hlp_connections_rejected_total` | connections refused at the connection caps | none | flood detection |
+| `hlp_http_errors_total` | error lines of the HTTP server, discarded because they carry addresses | none | noticing TLS scans without logging addresses |
+| `hlp_breaker_open` | 1 while the token-failure breaker is open or half-open | none | an alarm |
+| `hlp_apns_misconfigured` | 1 while Apple rejects the relay's provider token | none | an alarm |
+| `hlp_db_writable` | 1 while the store accepts writes | none | an alarm |
+| `hlp_instances` | instances | `tier` (probation, standard, suspended, revoked) | the same sum as `admin stats` |
+| `hlp_bindings` | bindings | `state` (provisional, active, soft_invalid) | the same sum as `admin stats` |
+| `hlp_usage_active_instances` | probation and standard instances | none | the usage figures of [privacy.md](privacy.md) section 6 |
+| `hlp_usage_instances_pushed` | instances with an accepted push in the window | `window` (7d, 30d) | usage figures |
+| `hlp_usage_active_bindings` | active and soft-invalid bindings | none | usage figures |
+| `hlp_usage_pushes_yesterday` | pushes of the last completed day | `class` | usage figures |
+| `hlp_usage_outcomes_yesterday` | outcomes of the last completed day | `outcome` (accepted, soft_failed, unregistered) | usage figures |
+| `hlp_usage_registrations_last_week` | registrations in the last completed week | none | usage figures |
+| `hlp_usage_opt_outs_last_week` | direct opt-outs in the last completed week | none | usage figures |
+
 ## Rotations and deprecations
 
 **Key rotations are announced here at least 7 days ahead.** A rotation of the relay identity key (the key

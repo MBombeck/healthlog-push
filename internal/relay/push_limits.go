@@ -108,6 +108,7 @@ func (r *Relay) relayGateLocked(s *instState, it *wire.Item, now time.Time) (Ite
 		return itemRetry(it.Ref, http.StatusServiceUnavailable, "maintenance", "", d), false
 	}
 	if it.Class == wire.ClassSilent && now.Before(r.silentOffUntil) {
+		r.Metrics.Inc("hlp_silent_budget_refused_total", "kind", "sync")
 		return itemRetry(it.Ref, http.StatusTooManyRequests, "global", "global", r.silentOffUntil.Sub(now)), false
 	}
 	return ItemResult{}, true
@@ -195,6 +196,7 @@ func (r *Relay) deviceLimits(b *store.Binding, dq *devQuota, it *wire.Item, now 
 		}
 	case wire.ClassSilent:
 		if dq.silentHour.Count(now) >= halve(dl.SilentHour, half) {
+			r.Metrics.Inc("hlp_silent_budget_refused_total", "kind", "sync")
 			return itemRetry(ref, http.StatusTooManyRequests, "device_quota", "device", dq.silentHour.RetryAfter(now)), false
 		}
 	case wire.ClassLiveActivity:

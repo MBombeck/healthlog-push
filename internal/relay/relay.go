@@ -308,6 +308,7 @@ func (r *Relay) describeMetrics() {
 	r.Metrics.Help("hlp_http_errors_total", "Lines the HTTP server wanted to log; discarded because they carry addresses.")
 	r.Metrics.Set("hlp_db_writable", 1)
 	r.Metrics.Set("hlp_breaker_open", 0)
+	r.describeOperational()
 }
 
 // Close stops the queue, flushes counters and bindings and closes nothing else; the caller closes the store.

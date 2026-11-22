@@ -238,6 +238,7 @@ func (r *Relay) admitRequestLocked(s *instState, nonce string, now time.Time) (i
 	}
 	tl := r.tierLimits(s.rec)
 	if !s.reqMin.Allow(now, tl.RequestsMinute) {
+		r.rateLimited(surfaceInstanceRequests)
 		return http.StatusTooManyRequests, &errBody{Error: "instance_rate", Scope: "instance", RetryAfter: jitter(s.reqMin.RetryAfter(now)), Limits: &tl}
 	}
 	if _, seen := s.nonces[nonce]; seen {

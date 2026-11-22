@@ -16,6 +16,7 @@ func (r *Relay) MetricsHandler() http.Handler {
 		}
 		r.mu.Unlock()
 		r.usageGauges()
+		r.Metrics.Set("hlp_queue_depth", float64(r.q.Len()))
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
 		_ = r.Metrics.WriteSnapshot(w, r.cfg.Now(), interval)
 	})

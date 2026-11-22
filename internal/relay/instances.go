@@ -28,6 +28,7 @@ func (r *Relay) handleRegister(w http.ResponseWriter, req *http.Request) {
 		r.fail(w, req, http.StatusUnauthorized, errBody{Error: "stale_timestamp", RelayTime: now.Unix()})
 		return
 	case errors.Is(err, wire.ErrSignature):
+		r.Metrics.Inc("hlp_registrations_rejected_total", "reason", "bad_signature")
 		r.fail(w, req, http.StatusUnauthorized, errBody{Error: "bad_signature"})
 		return
 	case err != nil:
@@ -84,11 +85,14 @@ func (r *Relay) registrationGateLocked(req *http.Request, reg *wire.Registration
 		return http.StatusServiceUnavailable, &errBody{Error: "registration_paused", RetryAfter: jitter(time.Hour)}
 	case RegInvite:
 		if r.inviteIndex(reg.Invite, today) < 0 {
+			r.Metrics.Inc("hlp_registrations_rejected_total", "reason", "no_invite")
 			return http.StatusForbidden, &errBody{Error: "invite_required"}
 		}
 	}
 	if !r.regs.Allow(remoteAddr(req), now, recovery) {
 		r.Metrics.Inc("hlp_registrations_total", "result", "limited")
+		r.Metrics.Inc("hlp_registrations_rejected_total", "reason", "rate_limited")
+		r.rateLimited(surfaceRegistration)
 		return http.StatusServiceUnavailable, &errBody{Error: "registration_paused", RetryAfter: jitter(time.Hour)}
 	}
 	if r.control.Registration == RegInvite {

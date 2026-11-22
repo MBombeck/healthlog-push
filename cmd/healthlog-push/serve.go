@@ -24,6 +24,7 @@ import (
 	"github.com/MBombeck/healthlog-push/internal/relay"
 	"github.com/MBombeck/healthlog-push/internal/store"
 	"github.com/MBombeck/healthlog-push/internal/wire"
+	"github.com/MBombeck/healthlog-push/keys"
 )
 
 // maxStreams bounds concurrent HTTP/2 streams per connection; an instance never needs more, and together
@@ -107,7 +108,7 @@ func relayConfig(host string, id ed25519.PrivateKey, macKeys [][]byte, exportDir
 		return relay.Config{}, fmt.Errorf("HLP_REGISTRATION_MODE: %q is not open, invite or closed", reg)
 	}
 	return relay.Config{
-		Host: host, Identity: id, MACKeys: macKeys, Environments: envs, ExportDir: exportDir, MinClient: minClient,
+		Host: host, Identity: id, IdentitySlot: keys.Slot(host, ed25519.PublicKey(id[32:])), MACKeys: macKeys, Environments: envs, ExportDir: exportDir, MinClient: minClient,
 		Version: buildinfo.Version, Commit: buildinfo.Commit, ImageDigest: os.Getenv("HLP_IMAGE_DIGEST"), Registration: reg,
 	}, nil
 }
