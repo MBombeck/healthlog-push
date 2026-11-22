@@ -20,35 +20,10 @@ any network access and hands the relay a short-lived provider token through a sh
 
 ## What the relay sees and what it never sees
 
-The relay sees:
-
-- the instance id and public key of each registered HealthLog server, and the server software version it
-  reports (`healthlog/1.49.0`, for example);
-- the IP address of a connecting server, in memory only (registration limiter, hashed with a daily salt;
-  connection limiter, while the connection is open);
-- APNs device tokens while a request is processed; at rest only an HMAC of the token is kept;
-- per push: the class (`alert`, `silent`, `liveactivity`), the lifetime, the fixed envelope size and the
-  time it was sent;
-- a SHA-256 hash of the device's binding key, the binding sequence number, the consent text version and
-  the day of consent;
-- the IP address of a device when the app calls the relay directly (opt-out, reading its own binding,
-  withdrawing the Live Activity consent, answering a conflict challenge), in memory only, never stored or
-  logged;
-- a Live Activity token only at the moment the activity is ended, unless the person gives the separate Live
-  Activity consent: then the relay starts and updates the dose Live Activity, and the relay and Apple see its
-  content state in the clear (when a dose is due and its state, from a closed template of six fields without
-  any free text), along with the push-to-start and update tokens. The relay stores the version and day of
-  that consent with the binding, and nothing of the state.
-
-The relay never sees medication names, doses, readings, notes, user names, account data, the host name of
-a HealthLog server, the device's encryption key or any plaintext of a notification. The code contains no
-HPKE, X25519 or AEAD implementation; a structural test (`TestRelayCannotOpenEnvelopes`) fails if one is
-imported.
-
-Apple sees the device token, the time, the push type and the app topic, and Apple can link the token to an
-Apple account. That is true of every iOS push service.
-
-Details: [docs/privacy.md](docs/privacy.md) (the same text is served at `/privacy`).
+The relay forwards sealed envelopes it cannot open and keeps only the metadata needed to address devices and
+enforce limits, never medication names, doses, readings, notes, account data or any plaintext; the full list,
+with every retention period, is the privacy notice in [docs/privacy.md](docs/privacy.md), the single source
+(also served at `/privacy`).
 
 ## Architecture
 
