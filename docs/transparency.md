@@ -102,11 +102,15 @@ is announced at least 90 days ahead (privacy.md section 12).
 
 Newest first:
 
+- **2026-11-22** Correction. Earlier versions of this page, the README and the key ceremony said the
+  `emergency` identity key is kept offline. The accurate statement is: it is held separately from the relay
+  host and from the operational keys, and it is never deployed to the relay. The key and its use are
+  unchanged.
 - **2026-11-22** Relay v1.0.3. No key rotation and no deprecation. The relay exposes more metrics about its
   own work, all listed above. The release binaries carry SLSA provenance
   ([release-verification.md](release-verification.md)).
 - **2026-11-22** Relay v1.0.2. A third identity key is published: `emergency`
-  `dcrihMfqGY7srT95DZrVP7sKA-IS3oJPPhOVbbqTvBU`, generated offline and kept apart from `current` and
+  `dcrihMfqGY7srT95DZrVP7sKA-IS3oJPPhOVbbqTvBU`, held separately from the relay host and from `current` and
   `next`, for the case that both are lost. It is pinned beside them; the relay keeps signing with
   `current`. No deprecation. Live Activity pushes now go with Apple priority
   5 unless the dose is due or overdue or the activity ends; a stale `410` from Apple is answered as

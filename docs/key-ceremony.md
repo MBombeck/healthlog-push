@@ -10,7 +10,7 @@ follow the same steps with their own secret store. Day-to-day rotation commands 
 |---|---|---|---|---|
 | Relay identity key (`current`) | Ed25519 | relay, signs every response and the registry export | `secrets/relay/relay_id_key`, relay process memory | an attacker who also controls DNS or TLS can answer for the relay; switch to `next` |
 | Relay identity key (`next`) | Ed25519 | nobody yet; its public half is pinned by servers and apps | secret store only | as above once it is promoted; generate a new `next` |
-| Relay identity key (`emergency`) | Ed25519 | nobody; its public half is pinned by servers and apps | offline, apart from `current` and `next`; never on the host | as above once it is promoted; generate a new `emergency` |
+| Relay identity key (`emergency`) | Ed25519 | nobody; its public half is pinned by servers and apps | held separately from the relay host and from the operational keys; never deployed to the relay | as above once it is promoted; generate a new `emergency` |
 | APNs key (`.p8`) | ECDSA P-256 | signer only | `secrets/signer/apns.p8`, signer process memory | anyone can send notifications to tokens they know under the app's name; revoke in the Apple developer account |
 | Token MAC keys (current, previous) | 32 random bytes | relay | `secrets/relay/token_mac_key[_previous]` | together with a copy of the database, tokens someone already knows can be matched to bindings |
 | ACME account key | ECDSA P-256 | relay (autocert) | `secrets/relay/acme_account_key` | certificates for the relay name can be requested through this account; the CAA record pins the account |
@@ -57,9 +57,8 @@ docker run --rm --network none "$IMAGE" keygen acme-account
 - Each secret has a fixed name. Its fingerprint (SHA-256 of the public key, or of the value for MAC keys),
   never its value, goes into the operations log.
 - The identity key `next` exists only in the secret store until it is promoted.
-- The identity key `emergency` is kept offline, separate from the relay host and apart from `current` and
-  `next`, so that one loss or one compromise cannot take all three. It is never deployed to the host unless
-  it is promoted (below).
+- The identity key `emergency` is held separately from the relay host and from the operational keys. It is
+  never deployed to the relay unless it is promoted (below).
 
 ## Publication of the identity keys
 
@@ -90,14 +89,14 @@ emergency).
 If the private halves of both `current` and `next` are lost or must be considered compromised, the relay
 switches to `emergency`, which clients already pin, so no client release is needed to keep working:
 
-1. Take the `emergency` seed from its offline storage and deploy it as the relay identity key, exactly like
+1. Take the `emergency` seed from where it is held and deploy it as the relay identity key, exactly like
    a promoted `next` ([operations.md](operations.md#relay-identity-key)). The relay accepts any Ed25519 key
    as its identity; nothing in it requires the key to have been `next` before.
 2. Write a new registry export at once (`admin export`), so the export on disk is signed by the key now in
    use. A restore verifies the export against the running identity key, and the key that signed the old one
    is gone.
 3. Generate a new `next` and a new `emergency` with the generation command above. The new `next` goes into
-   the secret store, the new `emergency` offline as described under Storage.
+   the secret store, the new `emergency` is held separately as described under Storage.
 4. Publish both public keys (release notes, `keys/push.healthlog.dev.json`, the README table and
    [transparency.md](transparency.md)), ship them in the next server and app releases, and drop the lost
    keys from the pins in the same releases. If the old keys may be compromised, set a notice as for a

@@ -230,7 +230,7 @@ key rotation: [operations.md](operations.md).
 Your app build needs to know where the relay is and which keys sign its answers:
 
 - `HLPushRelayURL`: the base URL, for example `https://push.example.org`.
-- `HLPushRelayKeys`: the relay's public identity keys, `current` and `next` (and optionally an offline
+- `HLPushRelayKeys`: the relay's public identity keys, `current` and `next` (and optionally a separately held
   `emergency` key, see [key-ceremony.md](key-ceremony.md#lost-current-and-next)), as printed in the `publicKey`
   field of `keygen relay-id`.
 

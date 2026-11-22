@@ -126,7 +126,11 @@ provenance workflow's own signature. Those are checked with the commands above a
   workflow, so the build job cannot produce a provenance that verifies.
 - **Tags.** A release starts when a `vX.Y.Z` tag is pushed, which needs write access to the repository. A
   ruleset protects `v*` tags from update and deletion, so a published tag cannot be moved to other code, and
-  the workflow refuses a tag that does not point to a commit on `main`.
+  the workflow refuses a tag that does not point to a commit on `main`. From the release after v1.0.3 on,
+  the maintainer signs each release tag (`git tag -s vX.Y.Z -m vX.Y.Z`, an SSH signature). GitHub shows the
+  tag as verified, and `git tag -v vX.Y.Z` checks it with an allowed-signers file built from the maintainer's
+  public signing keys (`https://api.github.com/users/MBombeck/ssh_signing_keys`). The tags v1.0.0 to v1.0.3
+  are unsigned lightweight tags.
 - **The `release` environment.** The job that builds, pushes and signs the image runs in the `release`
   environment, which accepts only `v*` tags, and every later job depends on that job. The environment has no
   required reviewer; no manual approval is part of a release.
