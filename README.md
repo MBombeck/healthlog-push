@@ -316,11 +316,14 @@ reporting. [SECURITY.md](SECURITY.md) has the scope and what to expect.
 - [docs/key-ceremony.md](docs/key-ceremony.md): how the identity, MAC and APNs keys are made, kept and rotated
 - [docs/hardening.md](docs/hardening.md): how the host of the hosted relay is hardened
 - [docs/transparency.md](docs/transparency.md): authority requests, the metric list, rotations and deprecations
+- [docs/assurance-case.md](docs/assurance-case.md): why the design meets its security requirements, with the evidence
 
 ## Contributing
 
-[CONTRIBUTING.md](CONTRIBUTING.md) explains how changes reach `main`, what a test has to prove and the text
-rules. You need the Go version named in `go.mod` and Node 22 for the vector check.
+[CONTRIBUTING.md](CONTRIBUTING.md) explains how changes reach `main`, what a test has to prove, the sign-off
+and the text rules. How decisions are made is in [GOVERNANCE.md](GOVERNANCE.md), who holds which role in
+[MAINTAINERS.md](MAINTAINERS.md), the direction in [ROADMAP.md](ROADMAP.md), and what happens if the
+maintainer is gone in [CONTINUITY.md](CONTINUITY.md). You need the Go version named in `go.mod` and Node 22 for the vector check.
 
 ```sh
 go build ./...

@@ -6,6 +6,21 @@ All notable changes to this project are documented in this file. The format foll
 
 ## [Unreleased]
 
+### Added
+
+- `GOVERNANCE.md`, `MAINTAINERS.md`, `ROADMAP.md`, `CONTINUITY.md` and `docs/assurance-case.md`: how
+  decisions are made, who has access to what, the direction, what is in place if the maintainer is gone,
+  and the argument for why the design meets its security requirements.
+- CI measures statement coverage across all packages and fails below 80 %.
+
+### Changed
+
+- Contributions need a `Signed-off-by` line on every commit (Developer Certificate of Origin 1.1); the check
+  `DCO sign-off` enforces it on pull requests. Until now no sign-off was required.
+- `SECURITY.md` states the support policy, how fixed vulnerabilities are published and credited, the
+  thresholds for findings from automated analysis, and how secrets are handled. `CONTRIBUTING.md` gains the
+  coding style, the test policy and the review rule.
+
 ## [1.0.3] - 2026-11-22
 
 ### Added

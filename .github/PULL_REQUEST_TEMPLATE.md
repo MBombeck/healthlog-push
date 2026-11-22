@@ -9,4 +9,5 @@
 - [ ] Docs and README are updated where behaviour, configuration or the admin interface changed.
 - [ ] No new dependency, or its justification is added to `docs/dependencies.md`.
 - [ ] Spec changes come with a new vector version; no existing vector file was edited.
+- [ ] Every commit is signed off (`git commit -s`, see CONTRIBUTING.md).
 - [ ] `scripts/check-text.sh` passes, and no real instance ids, tokens, keys or host data appear anywhere.
