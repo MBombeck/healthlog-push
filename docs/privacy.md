@@ -1,6 +1,6 @@
 # Privacy notice of the HealthLog push relay
 
-Version 1.0, 2026-11-21 (consent text version `2026-11-21`). Served by the relay itself at https://push.healthlog.dev/privacy; this text is the
+Version 1.1, 2026-11-22 (consent text version `2026-11-21`). Served by the relay itself at https://push.healthlog.dev/privacy; this text is the
 authoritative one. Earlier versions are kept in the source repository
 (https://github.com/MBombeck/healthlog-push, file internal/notice/privacy.md).
 
@@ -122,8 +122,12 @@ All times in the relay's database are day or week numbers (UTC), never a time of
 Kept in memory only, gone at the latest on restart: the device token during a request, the nonces of recent
 requests, recent push results for retries (10 minutes), per-device rate counters, the update counters of
 each running Live Activity (keyed by an HMAC of its token, cleared at the end of each UTC day), the hashed address
-counters of the registration limit (reset daily), pending conflict challenges (30 minutes) and the time of a
-direct opt-out (10 minutes).
+counters of the registration limit (reset daily), pending conflict challenges (30 minutes), the time of a
+direct opt-out (10 minutes), and delivery traces (72 hours). A delivery trace is the identifier Apple
+assigns to one notification (`apns-unique-id`) with its result, keyed by the instance id and the
+notification's reference chosen by your server; it lets the operator look up a single lost notification in
+Apple's delivery log. Apple sends this identifier only for development builds of the app, so notifications
+to the App Store and TestFlight app leave no trace. Traces are never stored, backed up or logged.
 
 The daily backup contains only the list of registered servers and the blocks: instance id, public key,
 tier, reason and its day, day of registration, device limit and day of first delivery; for each opt-out
@@ -248,7 +252,12 @@ with cosign. That answer still comes from the server itself.
 
 ## 12. Changes, data breaches and shutdown
 
-A new version of this notice gets a new version number and date. HealthLog servers receive a notice
+A new version of this notice gets a new version number and date.
+
+Requests from authorities (none so far), how they are handled, and every deprecation and key rotation are
+published in the transparency report:
+https://github.com/MBombeck/healthlog-push/blob/main/docs/transparency.md. Rotations of the relay's identity
+key are announced there at least 7 days ahead. HealthLog servers receive a notice
 identifier from the relay when something important changes.
 
 If a breach affects personal data, the relay informs all HealthLog servers through that notice, and the

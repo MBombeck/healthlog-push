@@ -94,6 +94,7 @@ func (r *Relay) Tick() {
 			delete(r.recentOptOuts, k)
 		}
 	}
+	r.traces.prune(now)
 	for k, e := range r.idem {
 		if e.res != nil && now.After(e.exp) {
 			delete(r.idem, k)

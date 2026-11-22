@@ -551,6 +551,11 @@ and for an update:
 {"aps":{"timestamp":<now>,"event":"update","content-state":{"status":"taken","countdownTarget":0,"confirmed":true,"pendingConfirm":false,"isOverdue":false,"timeFormatRaw":"H24"}}}
 ```
 
+The relay picks Apple's priority from the state, not from the instance: `apns-priority: 10` for the end and
+for a start or update whose `status` is `due` or `overdue`, `5` for every other state. Priority 5 does not
+count against the device's Live Activity budget at Apple, so routine changes cannot use up the budget a due
+dose needs. The start above goes with 10, the update with 5.
+
 Limits: 12 starts per device and day, 12 updates per activity and hour and 48 per day (`429 device_quota`
 with scope `activity`), 12 ends per device and day. A key outside the template or a wrong type refuses the
 whole request (`422 invalid_item`); a missing key, a value outside its set or a `countdownTarget` out of
@@ -569,12 +574,12 @@ Item results:
 | `status` | `result` or `error` | Meaning |
 |---|---|---|
 | 200 | `accepted` | Apple accepted the push |
-| 200 | `soft_invalid` | Apple answered `BadDeviceToken` or `DeviceTokenNotForTopic` (in `reason`); the binding is marked and deleted on a second hit on another day |
+| 200 | `soft_invalid` | Apple answered `BadDeviceToken` or `DeviceTokenNotForTopic` (in `reason`), or a `410` whose `timestamp` lies before the day the binding was made or renewed (`reason` `Unregistered`); the binding is marked and deleted on a second hit on another day |
 | 200 | `activity_gone` | the Live Activity no longer exists |
 | 403 | `activity_refused` | bad activity statement (or the wrong statement for the event, or too old), other binding key, or the binding is still provisional |
 | 403 | `liveactivity_consent_required` | a start or update without the device's Live Activity consent |
 | 404 | `binding_unknown` | the token is not bound to this instance |
-| 410 | `unregistered` | Apple reports the token as gone; the binding was deleted |
+| 410 | `unregistered` | Apple reports the token as gone, at or after the binding day or without a time; the binding was deleted |
 | 422 | `invalid_item` | malformed item, duplicate `ref`, `env` differs from the binding, or a content state outside the template |
 | 429 | `device_quota`, `instance_quota`, `instance_rate`, `binding_quota`, `global` | a limit, with `scope` and `retryAfter`. `device_quota` with scope `activity`: the update limit of one Live Activity. `binding_quota` with scope `device`: a soft-invalid binding on the day it failed (one probe push a day); with scope `instance`: a provisional binding that does not fit, or any non-active binding while the instance is over its invalid-token budget |
 | 502 | `apns_rejected` | Apple refused the request (reason in `reason`); nothing was deleted |

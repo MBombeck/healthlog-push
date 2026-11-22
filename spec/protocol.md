@@ -750,10 +750,15 @@ No `apns-id` is sent. Per class:
 |---|---|---|---|---|
 | `alert` | `alert` | `10` | `<topic>` | the item's `token` |
 | `silent` | `background` | `5` | `<topic>` | the item's `token` |
-| `liveactivity` | `liveactivity` | `10` | `<topic>.push-type.liveactivity` | the item's `activity.token` |
+| `liveactivity` | `liveactivity` | `10` for `end` and for a `start` or `update` whose `status` is `due` or `overdue`, otherwise `5` | `<topic>.push-type.liveactivity` | the item's `activity.token` |
 | conflict challenge | `background` | `5` | `<topic>` | the token of the bind request |
 
 `<topic>` is the app's bundle id, `dev.healthlog.app` for the HealthLog app.
+
+iOS grants each device an hourly budget of priority 10 Live Activity pushes and may throttle beyond it;
+priority 5 does not count against it (Apple, "Starting and updating Live Activities with ActivityKit push
+notifications", "Determine the update frequency"). The relay therefore uses 10 only for what needs the
+person's attention at once, decided from the template-checked state, never by the instance.
 
 The payloads are templates in `internal/apns/apns.go` (alert, silent, challenge) and
 `internal/apns/liveactivity.go` (Live Activity). An instance chooses the class, the envelope, the lifetime
@@ -818,7 +823,7 @@ token, until the end of the UTC day.
 | `status` | `result` or `error` | Other fields | Meaning |
 |---|---|---|---|
 | 200 | `result: accepted` | | Apple accepted the push |
-| 200 | `result: soft_invalid` | `reason` (`BadDeviceToken` or `DeviceTokenNotForTopic`) | Apple refused the token softly; the binding is marked, not deleted |
+| 200 | `result: soft_invalid` | `reason` (`BadDeviceToken`, `DeviceTokenNotForTopic`, or `Unregistered` for a stale `410`) | Apple refused the token softly, or reported it gone before the binding was last made; the binding is marked, not deleted |
 | 200 | `result: activity_gone` | | liveactivity: Apple reported the activity token as gone or invalid; nothing changes |
 | 403 | `activity_refused` | | the activity statement or the binding does not allow the event: a provisional binding, another binding key, a statement that does not verify for the event, or an `iat` outside its window |
 | 403 | `liveactivity_consent_required` | | a `start` or `update` for a binding without the device's Live Activity consent |
@@ -884,10 +889,18 @@ endpoints) carry no timing promise; a client applies its own backoff.
 How Apple's answer maps to the item result and what it changes. Only a definite `410 Unregistered` ever
 deletes a binding outright.
 
+Apple's `410` carries `timestamp`, the time in milliseconds at which APNs confirmed that the token was no
+longer valid for the topic; a provider should stop sending to the token unless it was registered again after
+that time. The relay keeps only the UTC day of a binding (made or renewed with a new `seq`), so it compares
+loosely: the `410` is stale when the binding day begins more than 10 minutes after the timestamp. A binding
+renewed on the same day as the invalidation cannot be told apart and is deleted; the device binds again
+through its server. A missing timestamp, or one before 2015, counts as not stale.
+
 | Apple answer | Item result | Effect at the relay | Kept for replay |
 |---|---|---|---|
 | `200` | `200 accepted` | binding becomes `active`, last success day and last-used week updated, the instance's first and last delivery day updated | yes |
-| `410` | `410 unregistered` (liveactivity: `200 activity_gone`) | binding deleted; counts against the instance's invalid-token budget. Apple's `timestamp` in the answer is not used (known limitation) | yes |
+| `410` | `410 unregistered` (liveactivity: `200 activity_gone`) | binding deleted; counts against the instance's invalid-token budget | yes |
+| `410` with a `timestamp` before the binding day | `200 soft_invalid` with `reason` `Unregistered` | handled as a soft failure: the binding is marked, and a second such answer on a later day deletes it; counts against the invalid-token budget | yes |
 | `400 BadDeviceToken`, `400 DeviceTokenNotForTopic` | `200 soft_invalid` with `reason` (liveactivity: `200 activity_gone`) | binding set to `soft_invalid`; a second such answer on a later day deletes it; counts against the invalid-token budget | yes |
 | any of the three above while the breaker is open or half-open | `503 relay_misconfigured` | nothing is deleted or marked; the invalid-token budget is still charged unless the binding is established (has had an accepted push) | no |
 | `429 TooManyRequests` | `429 device_quota`, scope `device`, retry about 1 h | this class is suspended for this device for 1 h | no |
@@ -1243,7 +1256,11 @@ Only in memory: nonces, idempotency entries, per-device counters (except the ale
 challenges, the per token, instance and day challenge record, the per-instance counts of new bindings and
 challenges of the day and the 24-hour invalid-budget block, the per-activity Live Activity update counts
 (keyed by an HMAC of the update token, cleared at the end of the UTC day), the `iat` of an opt-out (10 minutes),
-registration counters (keyed by salted prefix hashes), receipts, Apple throttling counts.
+registration counters (keyed by salted prefix hashes), receipts, Apple throttling counts, and the delivery
+traces: Apple's `apns-unique-id` of a push, which Apple sends only in the development environment, with the
+item result, keyed by instance id and `ref`, for 72 hours and at most 50,000 entries, so that the operator
+can look up one lost push in Apple's delivery log. Traces are never stored, exported, logged or counted, and
+go with the instance.
 
 Suspension and revocation live in the instance record (tier, reason, reason day); there is no separate
 list. A revocation writes the record and deletes the bindings in one transaction. A suspension of a revoked
@@ -1357,6 +1374,7 @@ controls do is visible in the protocol:
 | recovery | open a recovery window, optionally importing a registry export (verified as above) |
 | breaker | open or close the breaker, or clear the stop after a rejected provider token |
 | status file | produce a signed status file |
+| delivery | show the delivery trace (`apns-unique-id` and result) of one instance id and `ref` from the last 72 hours |
 | suspects | list instances with invalid tokens, rebinds or challenges in the last 7 days, worst first, with their counts; instance ids appear only here and in `instance`, on the operator interface |
 
 Pauses and notices expire on their own when given a duration.

@@ -318,6 +318,26 @@ docker compose exec relay /healthlog-push admin status-file > status.json
 }
 ```
 
+### delivery
+
+Shows Apple's `apns-unique-id` and the item result of one push, by instance id and the item's `ref`, so a
+single lost push can be looked up in the delivery log of Apple's Push Notifications Console. The instance's
+operator supplies both values (the HealthLog server keeps the `ref` of every push in its delivery ledger).
+
+```sh
+docker compose exec relay /healthlog-push admin delivery 6f1c2a4e-8b3d-4c5e-9a7f-0d1e2f3a4b5c dose-1795000000-3
+```
+
+```json
+{ "apnsUniqueId": "3f0c1d2e-4b5a-4c6d-8e7f-90a1b2c3d4e5", "result": "accepted" }
+```
+
+Retention: Apple sends `apns-unique-id` only in the development (sandbox) environment, so only pushes to
+development builds have a trace; production pushes leave none. A trace lives in the relay's memory for 72
+hours, at most 50,000 of them (the oldest go first), and is gone sooner when the relay restarts or the
+instance is deleted. It is never written to the database, the export, a log line or a metric. A retry of
+the same `ref` replaces the trace. When nothing is found the command answers `{"error": "no trace: ..."}`.
+
 ## Key rotation
 
 Generate keys with the same image you run: `docker run --rm "$IMAGE" keygen relay-id|token-mac|acme-account`.
