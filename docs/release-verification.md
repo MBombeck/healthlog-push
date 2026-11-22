@@ -13,6 +13,7 @@ The workflow `.github/workflows/release.yml` runs for a tag `vX.Y.Z` that points
 | SPDX SBOM | attestation on the image digest, type `spdxjson` | same identity |
 | SLSA v1 build provenance | attestation on the image digest, type `slsaprovenance1` | the reusable workflow `.github/workflows/provenance.yml` at the same tag (GitHub's `attest-build-provenance`) |
 | Linux binaries and `SHA256SUMS` | GitHub release | `SHA256SUMS.sigstore.json` bundle, same identity as the image |
+| SLSA v1.0 provenance of the binaries and `SHA256SUMS` (from v1.0.3 on) | GitHub release, `healthlog-push_vX.Y.Z.intoto.jsonl` | the SLSA generic generator `generator_generic_slsa3.yml@refs/tags/v2.1.0` |
 
 BuildKit runs pinned by digest, there is no emulation step, and the SBOM is generated in a job that has no
 signing rights; only a separate job with `id-token: write` attests it. The provenance is signed in a reusable
@@ -43,6 +44,12 @@ cosign verify-attestation "$IMAGE@$DIGEST" --type slsaprovenance1 \
 cosign verify-blob SHA256SUMS --bundle SHA256SUMS.sigstore.json \
   --certificate-identity "$ID" --certificate-oidc-issuer "$ISSUER"
 shasum -a 256 -c SHA256SUMS
+
+# binary provenance, from v1.0.3 on (slsa-verifier v2)
+for f in healthlog-push_${TAG}_linux_amd64 healthlog-push_${TAG}_linux_arm64 SHA256SUMS; do
+  slsa-verifier verify-artifact "$f" --provenance-path "healthlog-push_${TAG}.intoto.jsonl" \
+    --source-uri github.com/MBombeck/healthlog-push --source-tag "$TAG"
+done
 ```
 
 The provenance is also stored as a GitHub artifact attestation, so

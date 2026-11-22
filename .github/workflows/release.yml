@@ -150,6 +150,8 @@ jobs:
     permissions:
       contents: write
       id-token: write
+    outputs:
+      hashes: ${{ steps.hashes.outputs.hashes }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -169,6 +171,11 @@ jobs:
           done
           (cd dist && sha256sum healthlog-push_* > SHA256SUMS)
           cat dist/SHA256SUMS
+      - name: Hash release files for the binary provenance
+        id: hashes
+        run: |
+          set -euo pipefail
+          echo "hashes=$(cd dist && sha256sum healthlog-push_* SHA256SUMS | base64 -w0)" >> "$GITHUB_OUTPUT"
       - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
       - name: Sign checksums
         run: cosign sign-blob --yes --bundle dist/SHA256SUMS.sigstore.json dist/SHA256SUMS
@@ -210,3 +217,22 @@ jobs:
             --notes-file notes.md \
             --verify-tag \
             dist/*
+
+  # SLSA v1.0 provenance for the release binaries and SHA256SUMS, uploaded to the release as
+  # healthlog-push_vX.Y.Z.intoto.jsonl. The generator is a reusable workflow that must be referenced by its
+  # full release tag: slsa-verifier checks the builder ref, and a commit SHA there makes the generator fail
+  # (slsa-framework/slsa-verifier#12). v2.1.0 is commit f7dd8c54c2067bafc12ca7a55595d5ee9b75204a. The image
+  # provenance above is unchanged and remains what the deployment role verifies.
+  binary-provenance:
+    name: Binary provenance
+    needs: [github-release]
+    permissions:
+      actions: read
+      id-token: write
+      contents: write
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0
+    with:
+      base64-subjects: ${{ needs.github-release.outputs.hashes }}
+      provenance-name: healthlog-push_${{ github.ref_name }}.intoto.jsonl
+      upload-assets: true
+      upload-tag-name: ${{ github.ref_name }}

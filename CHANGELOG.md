@@ -4,6 +4,15 @@ All notable changes to this project are documented in this file. The format foll
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- The GitHub release carries SLSA v1.0 provenance for the Linux binaries and `SHA256SUMS`,
+  `healthlog-push_vX.Y.Z.intoto.jsonl`, signed by the SLSA generic generator (v2.1.0). It checks with
+  `slsa-verifier verify-artifact`. The image signature, its SBOM and its provenance, and what the deployment
+  role verifies, do not change.
+
 ## [1.0.2] - 2026-11-22
 
 ### Security
