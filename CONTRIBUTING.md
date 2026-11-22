@@ -84,6 +84,7 @@ The specification under `spec/` is a contract between independent implementation
 - One logical change per commit where practical.
 - No sign-off line is required (no DCO). By submitting a contribution you agree that it is licensed under the Apache License 2.0, as stated in section 5 of the license.
 - Do not force-push over review comments; add commits and squash at the end if asked.
+- `main` changes only through a pull request whose CI and CodeQL checks are green. Pull requests are merged by squash or rebase, so the history of `main` stays linear.
 
 ## Text rules
 
