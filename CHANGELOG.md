@@ -12,6 +12,11 @@ All notable changes to this project are documented in this file. The format foll
   `healthlog-push_vX.Y.Z.intoto.jsonl`, signed by the SLSA generic generator (v2.1.0). It checks with
   `slsa-verifier verify-artifact`. The image signature, its SBOM and its provenance, and what the deployment
   role verifies, do not change.
+- Two gauges on the local metrics listener: `hlp_instances{tier}` (probation, standard, suspended, revoked)
+  and `hlp_bindings{state}` (provisional, active, soft_invalid), the same sums as the `instances` and
+  `bindings` blocks of `admin stats`. Every label of the closed sets is present on every scrape, zero
+  included, and the values pass through the same coarse snapshot as the other metrics. An operator can now
+  chart registrations and binding states without polling the admin socket.
 
 ## [1.0.2] - 2026-11-22
 

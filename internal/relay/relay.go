@@ -303,6 +303,8 @@ func (r *Relay) describeMetrics() {
 	r.Metrics.Help("hlp_requests_total", "HTTP responses by status class.")
 	r.Metrics.Help("hlp_breaker_open", "1 while the token-failure circuit breaker is open or half-open.")
 	r.Metrics.Help("hlp_db_writable", "1 while the store accepts writes.")
+	r.Metrics.Help("hlp_instances", "Instances by tier, without any instance label.")
+	r.Metrics.Help("hlp_bindings", "Bindings by state, without any instance or device label.")
 	r.Metrics.Help("hlp_http_errors_total", "Lines the HTTP server wanted to log; discarded because they carry addresses.")
 	r.Metrics.Set("hlp_db_writable", 1)
 	r.Metrics.Set("hlp_breaker_open", 0)

@@ -233,6 +233,7 @@ func (r *Relay) UsageReport(days int) Usage {
 // usageGauges publishes the usage counts as metrics. Gauges for completed days only; the snapshot itself
 // refreshes hourly below 20 active instances.
 func (r *Relay) usageGauges() {
+	r.stateGauges()
 	u := r.UsageReport(7)
 	r.Metrics.Set("hlp_usage_active_instances", float64(u.ActiveInstances))
 	r.Metrics.Set("hlp_usage_instances_pushed", float64(u.PushedLast7Days), "window", "7d")
@@ -250,6 +251,33 @@ func (r *Relay) usageGauges() {
 	if n := len(u.RegistrationsPerWeek); n > 0 {
 		r.Metrics.Set("hlp_usage_registrations_last_week", float64(u.RegistrationsPerWeek[n-1].N))
 		r.Metrics.Set("hlp_usage_opt_outs_last_week", float64(u.OptOutsPerWeek[n-1].N))
+	}
+}
+
+// stateTiers and stateBindings are the closed label sets of the state gauges. Every value is set on every
+// scrape, zero included, so a series never disappears when its last member changes state.
+var (
+	stateTiers    = []string{store.TierProbation, store.TierStandard, store.TierSuspended, store.TierRevoked}
+	stateBindings = []string{store.StateProvisional, store.StateActive, store.StateSoftInvalid}
+)
+
+// stateGauges publishes how many instances are in each tier and how many bindings in each state: the same
+// sums as `admin stats`, without any instance label.
+func (r *Relay) stateGauges() {
+	r.mu.Lock()
+	tiers, states := map[string]int{}, map[string]int{}
+	for _, in := range r.instances {
+		tiers[in.rec.Tier]++
+	}
+	for _, b := range r.bindings {
+		states[b.State]++
+	}
+	r.mu.Unlock()
+	for _, t := range stateTiers {
+		r.Metrics.Set("hlp_instances", float64(tiers[t]), "tier", t)
+	}
+	for _, s := range stateBindings {
+		r.Metrics.Set("hlp_bindings", float64(states[s]), "state", s)
 	}
 }
 
