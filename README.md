@@ -1,33 +1,35 @@
-# healthlog-push
+# healthlog-push: end-to-end encrypted APNs push relay for self-hosted HealthLog
 
-[![CI](https://github.com/MBombeck/healthlog-push/actions/workflows/ci.yml/badge.svg)](https://github.com/MBombeck/healthlog-push/actions/workflows/ci.yml)
-[![CodeQL](https://github.com/MBombeck/healthlog-push/actions/workflows/codeql.yml/badge.svg)](https://github.com/MBombeck/healthlog-push/actions/workflows/codeql.yml)
-[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/MBombeck/healthlog-push/badge)](https://scorecard.dev/viewer/?uri=github.com/MBombeck/healthlog-push)
-[![Go Report Card](https://goreportcard.com/badge/github.com/MBombeck/healthlog-push)](https://goreportcard.com/report/github.com/MBombeck/healthlog-push)
+[![CI status](https://github.com/MBombeck/healthlog-push/actions/workflows/ci.yml/badge.svg)](https://github.com/MBombeck/healthlog-push/actions/workflows/ci.yml)
+[![Linted with golangci-lint](https://img.shields.io/badge/linted%20with-golangci--lint-00ADD8.svg)](https://github.com/MBombeck/healthlog-push/actions/workflows/ci.yml)
+[![CodeQL analysis status](https://github.com/MBombeck/healthlog-push/actions/workflows/codeql.yml/badge.svg)](https://github.com/MBombeck/healthlog-push/actions/workflows/codeql.yml)
+[![OpenSSF Scorecard result](https://api.scorecard.dev/projects/github.com/MBombeck/healthlog-push/badge)](https://scorecard.dev/viewer/?uri=github.com/MBombeck/healthlog-push)
+[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/17008/badge)](https://www.bestpractices.dev/projects/17008)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
-The push relay of the HealthLog project. Self-hosted HealthLog servers use it to send notifications to the
-HealthLog iOS app from the App Store. The relay holds the Apple Push Notification service (APNs) key for the
-app, so a self-hoster does not need an Apple developer account. Notification content is end-to-end
-encrypted on the HealthLog server for each device; the relay forwards an opaque envelope and cannot open it.
+healthlog-push is a push relay written in Go. It lets a self-hosted [HealthLog](https://healthlog.dev) server
+send push notifications to the HealthLog iOS app through Apple Push Notification service (APNs), so a
+self-hoster does not need an Apple developer account. Every notification is end-to-end encrypted: the server
+seals it for one device with HPKE, and the relay forwards an envelope it has no key for. The relay keeps only
+the metadata it needs to address devices and enforce limits. What it stores and what its operator can see is
+published in full, and tests fail when the code and the published lists drift apart.
 
-The hosted relay runs at `https://push.healthlog.dev`. It is meant for households: one person or a family
-running their own HealthLog server. It is not a medical service. Local reminders on the device stay the
-authoritative reminder path; the relay only adds convenience.
+A hosted relay for households runs at `https://push.healthlog.dev`. You can also run your own for an app you
+build yourself.
 
-One Go binary, two processes: `relay` serves the API and talks to Apple, `signer` holds the APNs key without
-any network access and hands the relay a short-lived provider token through a shared tmpfs.
+## What it is
 
-## What the relay sees and what it never sees
+An APNs key belongs to one Apple developer team, and a device token works only with the key of the team that
+signed the app. A self-hosted HealthLog server therefore cannot push to the App Store app by itself. The
+relay holds the APNs key for that app and passes on what registered servers send to their own devices.
 
-The relay forwards sealed envelopes it cannot open and keeps only the metadata needed to address devices and
-enforce limits, never medication names, doses, readings, notes, account data or any plaintext; the full list,
-with every retention period, is the privacy notice in [docs/privacy.md](docs/privacy.md), the single source
-(also served at `/privacy`). The relay only carries what a registered server sends to its own bound
-devices. The operator never sends anything through it: no announcements, no update notices, no messages of
-any kind.
+It is one Go binary that runs as two processes. `relay` serves the API and talks to Apple. `signer` holds the
+APNs key, has no network access, and hands the relay a short-lived provider token through a shared tmpfs.
 
-## Architecture
+The relay is not a medical service. Reminders that the app schedules on the device stay the authoritative
+reminder path. A notification sent through the relay can be late or lost.
+
+## How the privacy works
 
 ```mermaid
 flowchart LR
@@ -50,38 +52,158 @@ flowchart LR
   D -- "direct: opt-out, self-read, Live Activity withdrawal, challenge answer" --> R
 ```
 
-- Every request from an instance is signed with its Ed25519 key; every `/v1` response is signed with the
-  relay identity key, which instances and the app pin. The response signature covers method, path, the
-  request's mandatory nonce, status and body, so an answer cannot be replayed onto another request.
-- A device binding needs a statement signed by a key that only the app holds. A server that merely knows a
-  device token cannot bind it.
-- The app can leave an instance directly (`DELETE /v1/bindings/self`) without the instance's cooperation.
-  The pair is then blocked for 12 months; only the same device can lift the block, with a newly signed
-  binding statement. The binding key is pinned to the token for the same time, so another instance, even
-  one the same operator registers with a made-up key, cannot bind the token without a challenge that only
-  the device can answer.
-- The relay builds every APNs payload from constants. An instance chooses the class, the opaque envelope,
-  the lifetime and a collapse id, never visible text, a category or `userInfo` keys.
 
-## Threat model in short
+- **Sealed envelopes.** The HealthLog server encrypts each notification for one device with HPKE (RFC 9180) in
+  auth mode: DHKEM(X25519, HKDF-SHA256), HKDF-SHA256 and ChaCha20-Poly1305. The app's notification service
+  extension opens it on the device. The relay never holds a key that opens an envelope
+  ([spec/envelope.md](spec/envelope.md)).
+- **Fixed payloads.** The relay builds every APNs payload from constants. A server chooses the class, the
+  envelope, the lifetime and a collapse id. It cannot set visible text, a category or `userInfo` keys.
+- **Signed in both directions.** Every request from a server is signed with its Ed25519 key. Every `/v1`
+  response is signed with the relay identity key, and the signature covers method, path, the request's
+  mandatory nonce, status and body, so an answer cannot be replayed onto another request.
+- **Pinned keys.** HealthLog servers and the app pin the relay's public identity keys at build time and
+  never fetch them from the relay, because an answer cannot vouch for the key that signs it. Three keys are
+  pinned: `current`, `next` for a planned rotation, and an offline `emergency` key
+  ([Hosted relay identity keys](#hosted-relay-identity-keys)).
+- **Bindings need the device.** A device binding needs a statement signed by a key that only the app holds. A
+  server that merely knows a device token cannot bind it.
+- **Leaving needs nobody's help.** The app can leave a server directly (`DELETE /v1/bindings/self`). The pair
+  is then blocked for 12 months, and only the same device can lift the block with a newly signed binding
+  statement. The binding key stays pinned to the token for the same time, so another server cannot bind the
+  token without a challenge that only the device can answer.
 
-The relay cannot read content. It does see metadata, and time patterns can reveal health behaviour (for
-example when a dose was recorded on another device). Whoever holds the APNs key (the operator, or someone who
-compromises the signer or the host) can put a plaintext alert with arbitrary text on a device whose token
-they have seen. They cannot read any data, and the HealthLog app is built to take no action on a
-notification it could not decrypt and verify. A compromised relay process can forge relay responses; of the
-APNs credentials it only ever holds a provider token valid for at most one hour. DNS or TLS takeover turns into an outage rather than a
-takeover, because responses are signed. Nobody can prove which code runs on a server they do not control.
-The full analysis, including the known limitations, is in [docs/threat-model.md](docs/threat-model.md). How
-the host of the hosted relay is hardened is in [docs/hardening.md](docs/hardening.md).
+What the design cannot do is stated just as plainly. The relay sees metadata, and time patterns can reveal
+health behaviour, for example when a dose was recorded on another device. Whoever holds the APNs key (the
+operator, or someone who compromises the signer or the host) can put a plaintext alert on a device whose
+token they have seen; they cannot read any data, and the app takes no action on a notification it could not
+decrypt and verify. A Live Activity cannot decrypt anything, so its fixed set of state fields travels in the
+clear, and only after a separate consent in the app. DNS or TLS takeover becomes an outage, because responses
+are signed. Nobody can prove which code runs on a server they do not control. The full analysis is in
+[docs/threat-model.md](docs/threat-model.md).
 
-## Self-hosting quick guide
+## What the operator can see
 
-A self-hosted relay only works with an app you build yourself under your own Apple developer account. It
+The privacy notice in [docs/privacy.md](docs/privacy.md), also served at `/privacy`, is the single source for
+what the relay sees and stores and for every retention period. In short:
+
+- **Never:** medication names, doses, readings, notes, account data, the host name of a HealthLog server, or
+  any plaintext of a notification.
+- **While a request is processed:** the device token, and the class, lifetime, size and time of a
+  notification. IP addresses are held in memory for the connection and registration limits and are neither
+  stored nor logged.
+- **At rest:** an HMAC of the device token, the server's instance id and public key, a hash of the app's
+  binding key, and day or week numbers. The database holds no time of day and no raw token.
+- **Metrics:** exactly the list in
+  [docs/transparency.md](docs/transparency.md#metrics-the-operator-sees). A test fails when the code
+  registers a metric that is not in that table. No metric is per server, per device or per person, and every
+  label comes from a fixed list in the code.
+- **Logs:** no access log. Log lines are JSON with a closed set of keys, none of which can hold an address,
+  a token or an instance id.
+- **Per server:** one view, `admin suspects` on the host's admin socket, for handling abuse. It is shown on
+  request and never logged or exported.
+
+The relay only carries what a registered server sends to its own bound devices. The operator never sends
+anything through it: no announcements, no update notices, no messages of any kind.
+
+Requests from authorities (none so far), how they are handled, and every key rotation and deprecation are
+listed in [docs/transparency.md](docs/transparency.md).
+
+## Using the hosted relay
+
+The hosted relay at `https://push.healthlog.dev` serves the HealthLog app from the App Store. It is free, run
+by one person on a best-effort basis, and meant for households: one person or a family running their own
+HealthLog server. Organisations run their own relay. The [terms](docs/terms.md) are short.
+
+Using it is voluntary and takes two steps. The operator of a HealthLog server switches the relay on for that
+server, then every person decides in their own app. The app creates its keys and asks for a binding only
+after that consent.
+
+Contact: relay@healthlog.dev (operation), abuse@healthlog.dev (abuse, suspension appeals),
+privacy@healthlog.dev (data protection).
+
+### Limits
+
+Defaults of the hosted relay (`DefaultLimits` in `internal/relay/config.go`, `DefaultRegistrationLimits` in
+`internal/limits/limits.go`). Every `429` names its scope (`device`, `activity`, `instance`, `tier` or `global`) and
+carries a retry hint spread by plus or minus 30 %: the `retryAfter` field, and on a refusal of the whole
+request also the `Retry-After` header. Clients take the hint only from the signed `retryAfter` (capped at one
+day), never from the unsigned header. Request-rate and binding-quota refusals include the instance's limits.
+
+| Limit | probation | standard | Refusal |
+|---|---|---|---|
+| Active device bindings per instance | 20 | 50; 80 automatically after 30 quiet days above 80 % use; up to 150 by the operator | `429 binding_quota` |
+| Provisional bindings at the same time | 10 | 20 | `429 binding_quota` |
+| New device bindings per day | 20 | 100 | `429 binding_quota` |
+| Authenticated requests per minute | 20 | 60 | `429 instance_rate` |
+| Pushes per instance per day | 500 | 10,000 | `429 instance_quota` |
+| Pushes per instance per minute | 30 | 120 | `429 instance_rate` |
+| Invalid tokens per instance per day | 20 | 100 | above it for 24 h: no new bindings, and provisional and soft-invalid bindings get `429 binding_quota` |
+| Conflict challenges per instance per day | 20 | 20 | `409 binding_conflict` with reason `challenge_quota` |
+| Failed signatures counted in metrics (token bucket, refills per minute) | 30 | 60 | none: limits only the counting, never refuses a request |
+
+| Per device (every tier) | Value | Refusal |
+|---|---|---|
+| All classes per day | 300 | `429 device_quota` |
+| Alerts | bucket of 20, refills 6 per hour, at most 100 per day | `429 device_quota` |
+| Silent pushes per hour | 6 | `429 device_quota` |
+| Live Activity starts per day (only with the Live Activity consent) | 12 | `429 device_quota` |
+| Live Activity updates per activity (only with the Live Activity consent) | 12 per hour, 48 per day | `429 device_quota`, scope `activity` |
+| Live Activity ends per day | 12 | `429 device_quota` |
+| Soft-invalid binding | no push on the day it failed, then one probe a day | `429 binding_quota`, scope `device` |
+| Challenges per token | 1 per token, instance and day | `409 binding_conflict`, `challenge_quota` |
+| Verified app calls (opt-out, self-read, Live Activity withdrawal, challenge answer) | bucket of 10, refills 10 per hour | `429 device_quota` |
+
+| Relay-wide | Value |
+|---|---|
+| Global push limit per minute | 5 times the busiest minute of the last 7 days, at least 600, at most 6,000 |
+| Share of the global limit for standard instances | silent 70 %, Live Activity 85 %, alert 100 % |
+| Pool of all probation instances per minute | 10 % of the global limit, at least 60, at most 600 |
+| Registrations | 3 per day per IPv4 address or IPv6 /64, 10 per IPv6 /48, 30 per hour and 200 per day globally (ten times the global caps during a recovery window) |
+| Failed app calls | token bucket of 100, refills 20 per second, shared by all callers; only failed attempts are charged |
+| Connections | 2,000 in total, 8 per IPv4 address or IPv6 /64, 64 per IPv6 /48, 16 HTTP/2 streams per connection |
+| Request bodies | `Content-Length` required on `POST` and `DELETE` (`411 length_required`); push batch at most 50 items and 128 KiB, other bodies 4 KiB; 32 MiB in flight in total (`503 overloaded`) |
+| Response bodies | at most 64 KiB; clients refuse more than 256 KiB |
+| Send queue | 4,096 jobs, 256 per instance; an empty queue always admits, otherwise a job is refused when the estimated wait exceeds 2 s |
+| Signed time window | plus or minus 300 s |
+
+After a restart, counts held in memory are gone. Until the next UTC midnight the relay therefore halves the
+global registration caps and the per-device silent and Live Activity start and end limits; the
+per-activity update counts start again from zero. The daily alert count of a
+device, the daily push count of an instance and an instance's anomaly flag are stored and survive a restart.
+The per-instance counts of new bindings and challenges and the 24-hour block after an exceeded invalid-token
+budget do not; see the known limitations in [docs/threat-model.md](docs/threat-model.md#known-limitations).
+
+### Hosted relay identity keys
+
+The public identity keys of `push.healthlog.dev` are unpadded base64url Ed25519 public keys. `current` and
+`next` were published with v1.0.0, `emergency` with v1.0.2, each in the release notes and in
+[`keys/push.healthlog.dev.json`](keys/push.healthlog.dev.json) in the tagged tree. The HealthLog server ships
+them as its hosted relay pins, the iOS app as its `HLPushRelayKeys` build setting.
+
+| Key | Ed25519 public key (base64url) |
+|---|---|
+| `current` | `IU8JGZzcE-O4gp4q2BL2o6YYNJeHyDg8MNmAGL5_Ypo` |
+| `next` | `kPhnCqIwrF_cyQIFTAgCHrWnPavdWkcwMB35oi_wCH0` |
+| `emergency` | `dcrihMfqGY7srT95DZrVP7sKA-IS3oJPPhOVbbqTvBU` |
+
+
+`emergency` is generated and kept offline, apart from `current` and `next`, and is never deployed to the
+relay host. It is used only if both other keys are lost
+([docs/key-ceremony.md](docs/key-ceremony.md#lost-current-and-next)).
+
+A new `next` key is published in the release notes of the release that ships it, before the relay switches
+to it. Rotations are announced in [docs/transparency.md](docs/transparency.md) at least 7 days before the
+relay signs with the new key. How the keys are made, kept and rotated is in
+[docs/key-ceremony.md](docs/key-ceremony.md) and [docs/operations.md](docs/operations.md#relay-identity-key).
+
+## Self-hosting quick start
+
+A self-hosted relay works only with an app you build yourself under your own Apple developer account. It
 cannot serve the App Store app. Read [docs/self-hosting.md](docs/self-hosting.md) first; this is the short
 version. Host provisioning with Ansible is described in [deploy/ansible/README.md](deploy/ansible/README.md).
 
-1. Pick a released image by digest and verify it (see [Verifying releases](#verifying-releases)):
+1. Pick a released image by digest and verify it (see [Verifying a release](#verifying-a-release)):
 
    ```sh
    IMAGE=ghcr.io/mbombeck/healthlog-push@sha256:<digest>
@@ -139,59 +261,7 @@ version. Host provisioning with Ansible is described in [deploy/ansible/README.m
    The certificate comes from Let's Encrypt over TLS-ALPN-01 on port 443 once DNS points at the host.
    The complete rule set is `deploy/ansible/roles/firewall/templates/nftables.conf.j2`.
 
-## Limits
-
-Defaults of the hosted relay (`DefaultLimits` in `internal/relay/config.go`, `DefaultRegistrationLimits` in
-`internal/limits/limits.go`). Every `429` names its scope (`device`, `activity`, `instance`, `tier` or `global`) and
-carries a retry hint spread by plus or minus 30 %: the `retryAfter` field, and on a refusal of the whole
-request also the `Retry-After` header. Clients take the hint only from the signed `retryAfter` (capped at one
-day), never from the unsigned header. Request-rate and binding-quota refusals include the instance's limits.
-
-| Limit | probation | standard | Refusal |
-|---|---|---|---|
-| Active device bindings per instance | 20 | 50; 80 automatically after 30 quiet days above 80 % use; up to 150 by the operator | `429 binding_quota` |
-| Provisional bindings at the same time | 10 | 20 | `429 binding_quota` |
-| New device bindings per day | 20 | 100 | `429 binding_quota` |
-| Authenticated requests per minute | 20 | 60 | `429 instance_rate` |
-| Pushes per instance per day | 500 | 10,000 | `429 instance_quota` |
-| Pushes per instance per minute | 30 | 120 | `429 instance_rate` |
-| Invalid tokens per instance per day | 20 | 100 | above it for 24 h: no new bindings, and provisional and soft-invalid bindings get `429 binding_quota` |
-| Conflict challenges per instance per day | 20 | 20 | `409 binding_conflict` with reason `challenge_quota` |
-| Failed signatures counted in metrics (token bucket, refills per minute) | 30 | 60 | none: limits only the counting, never refuses a request |
-
-| Per device (every tier) | Value | Refusal |
-|---|---|---|
-| All classes per day | 300 | `429 device_quota` |
-| Alerts | bucket of 20, refills 6 per hour, at most 100 per day | `429 device_quota` |
-| Silent pushes per hour | 6 | `429 device_quota` |
-| Live Activity starts per day (only with the Live Activity consent) | 12 | `429 device_quota` |
-| Live Activity updates per activity (only with the Live Activity consent) | 12 per hour, 48 per day | `429 device_quota`, scope `activity` |
-| Live Activity ends per day | 12 | `429 device_quota` |
-| Soft-invalid binding | no push on the day it failed, then one probe a day | `429 binding_quota`, scope `device` |
-| Challenges per token | 1 per token, instance and day | `409 binding_conflict`, `challenge_quota` |
-| Verified app calls (opt-out, self-read, Live Activity withdrawal, challenge answer) | bucket of 10, refills 10 per hour | `429 device_quota` |
-
-| Relay-wide | Value |
-|---|---|
-| Global push limit per minute | 5 times the busiest minute of the last 7 days, at least 600, at most 6,000 |
-| Share of the global limit for standard instances | silent 70 %, Live Activity 85 %, alert 100 % |
-| Pool of all probation instances per minute | 10 % of the global limit, at least 60, at most 600 |
-| Registrations | 3 per day per IPv4 address or IPv6 /64, 10 per IPv6 /48, 30 per hour and 200 per day globally (ten times the global caps during a recovery window) |
-| Failed app calls | token bucket of 100, refills 20 per second, shared by all callers; only failed attempts are charged |
-| Connections | 2,000 in total, 8 per IPv4 address or IPv6 /64, 64 per IPv6 /48, 16 HTTP/2 streams per connection |
-| Request bodies | `Content-Length` required on `POST` and `DELETE` (`411 length_required`); push batch at most 50 items and 128 KiB, other bodies 4 KiB; 32 MiB in flight in total (`503 overloaded`) |
-| Response bodies | at most 64 KiB; clients refuse more than 256 KiB |
-| Send queue | 4,096 jobs, 256 per instance; an empty queue always admits, otherwise a job is refused when the estimated wait exceeds 2 s |
-| Signed time window | plus or minus 300 s |
-
-After a restart, counts held in memory are gone. Until the next UTC midnight the relay therefore halves the
-global registration caps and the per-device silent and Live Activity start and end limits; the
-per-activity update counts start again from zero. The daily alert count of a
-device, the daily push count of an instance and an instance's anomaly flag are stored and survive a restart.
-The per-instance counts of new bindings and challenges and the 24-hour block after an exceeded invalid-token
-budget do not; see the known limitations in [docs/threat-model.md](docs/threat-model.md#known-limitations).
-
-## Verifying releases
+## Verifying a release
 
 Releases are built by `.github/workflows/release.yml` from a `vX.Y.Z` tag. The image is signed keyless
 with cosign, carries an SPDX SBOM attestation and SLSA provenance, all in the Sigstore bundle format that
@@ -232,36 +302,41 @@ From v1.0.3 on the release also carries SLSA provenance for the binaries and `SH
 The hosted relay reports its version, commit and image digest at `https://push.healthlog.dev/version`.
 That answer comes from the server being checked, so it is a statement, not proof.
 
-[docs/release-verification.md](docs/release-verification.md) walks through checking a release end to end.
-The pipeline can be rehearsed locally, with a throwaway registry and key, with `scripts/release-dry-run.sh`.
+[docs/release-verification.md](docs/release-verification.md) walks through checking a release end to end
+and describes how the build pipeline is protected. The pipeline can be rehearsed locally, with a throwaway
+registry and key, with `scripts/release-dry-run.sh`.
 
-### Hosted relay identity keys
+## Security
 
-The public identity keys of the hosted relay `push.healthlog.dev`, `current` and `next`, were published with
-the first release (v1.0.0): in its release notes and as `keys/push.healthlog.dev.json` in the tagged tree, in the
-form `{"host": "push.healthlog.dev", "current": "<base64url 32>", "next": "<base64url 32>"}` (unpadded
-base64url Ed25519 public keys); v1.0.2 added `"emergency"` beside them. Clients pin them at build time. The HealthLog server ships them as its hosted
-relay pins, the iOS app as its `HLPushRelayKeys` build setting. Neither fetches them from the relay at
-run time, because an answer from the relay cannot vouch for the key that signs it. A new `next` key is
-published in the release notes of the release that ships it, before the relay switches to it (see
-[docs/operations.md](docs/operations.md), "Relay identity key", and [docs/key-ceremony.md](docs/key-ceremony.md)
-for how the keys are made and kept).
+Report a vulnerability privately, by email to relay@healthlog.dev or through GitHub's private vulnerability
+reporting. [SECURITY.md](SECURITY.md) has the scope and what to expect.
 
-| Key | Ed25519 public key (base64url) |
-|---|---|
-| `current` | `IU8JGZzcE-O4gp4q2BL2o6YYNJeHyDg8MNmAGL5_Ypo` |
-| `next` | `kPhnCqIwrF_cyQIFTAgCHrWnPavdWkcwMB35oi_wCH0` |
-| `emergency` | `dcrihMfqGY7srT95DZrVP7sKA-IS3oJPPhOVbbqTvBU` |
+- [docs/threat-model.md](docs/threat-model.md): assets, actors and known limitations
+- [SECURITY-INVARIANTS.md](SECURITY-INVARIANTS.md): every security invariant and the tests that fail when it breaks
+- [docs/key-ceremony.md](docs/key-ceremony.md): how the identity, MAC and APNs keys are made, kept and rotated
+- [docs/hardening.md](docs/hardening.md): how the host of the hosted relay is hardened
+- [docs/transparency.md](docs/transparency.md): authority requests, the metric list, rotations and deprecations
 
-`emergency` is a third key, generated and kept offline, apart from `current` and `next`, and never deployed
-to the relay host. It is pinned like the others and is used only if both `current` and `next` are lost
-([docs/key-ceremony.md](docs/key-ceremony.md#lost-current-and-next)).
+## Contributing
 
-The same values are in [`keys/push.healthlog.dev.json`](keys/push.healthlog.dev.json). Key rotations are
-announced in [docs/transparency.md](docs/transparency.md) at least 7 days before the relay signs with the
-new key.
+[CONTRIBUTING.md](CONTRIBUTING.md) explains how changes reach `main`, what a test has to prove and the text
+rules. You need the Go version named in `go.mod` and Node 22 for the vector check.
 
-## Project layout
+```sh
+go build ./...
+go vet ./...
+go test -race ./...
+golangci-lint run                                        # v2, config in .golangci.yml
+go run golang.org/x/vuln/cmd/govulncheck@v1.10.0 ./...
+node spec/tools/check-vectors.mjs
+scripts/check-text.sh
+docker build -t healthlog-push:dev .
+```
+
+Fuzz targets run for 20 seconds each in CI; see [CONTRIBUTING.md](CONTRIBUTING.md) for running one
+locally. Dependencies and the policy for adding one: [docs/dependencies.md](docs/dependencies.md).
+
+### Project layout
 
 ```
 cmd/healthlog-push/    entry point: relay, signer, admin, keygen, healthcheck, version
@@ -279,45 +354,20 @@ internal/admin/        operator command line over the admin socket
 spec/                  protocol specification, test vectors and their tools
 deploy/compose/        compose file for relay and signer
 deploy/ansible/        host provisioning and verified deployment
+keys/                  the published identity keys of the hosted relay, checked by a test
 docs/                  operations, privacy, terms, threat model, self-hosting, API, dependencies, migration
 structure_test.go      structural rules about the code base itself
 ```
 
-## Development
-
-You need the Go version named in `go.mod` and Node 22 for the vector check.
-
-```sh
-go build ./...
-go vet ./...
-go test -race ./...
-golangci-lint run                                        # v2, config in .golangci.yml
-go run golang.org/x/vuln/cmd/govulncheck@v1.10.0 ./...
-node spec/tools/check-vectors.mjs
-scripts/check-text.sh
-docker build -t healthlog-push:dev .
-```
-
-Fuzz targets run for 20 seconds each in CI; see [CONTRIBUTING.md](CONTRIBUTING.md) for running one
-locally. Dependencies and the policy for adding one: [docs/dependencies.md](docs/dependencies.md).
-
-## Documentation
+### Documentation
 
 - [docs/operations.md](docs/operations.md): deploy, rollback, admin commands, key rotation, alerts, runbooks
 - [docs/self-hosting.md](docs/self-hosting.md): running your own relay for your own app build
 - [docs/api.md](docs/api.md): API reference with examples; the contract is `spec/protocol.md` and `spec/relay-api.yaml`
-- [docs/threat-model.md](docs/threat-model.md): assets, actors, limitations
-- [SECURITY-INVARIANTS.md](SECURITY-INVARIANTS.md): every security invariant and the tests that fail when it breaks
-- [docs/key-ceremony.md](docs/key-ceremony.md): how the relay identity, MAC and APNs keys are made, kept and rotated
-- [docs/transparency.md](docs/transparency.md): authority requests (none so far), how they are handled, and the feed of deprecations and key rotations
 - [docs/release-verification.md](docs/release-verification.md): verifying a release and rehearsing one locally
-- [docs/hardening.md](docs/hardening.md): how the hosted relay's host is hardened
 - [docs/privacy.md](docs/privacy.md) and [docs/terms.md](docs/terms.md): the texts of the hosted relay
 - [docs/migration.md](docs/migration.md): moving the relay to a new host
 - [docs/dependencies.md](docs/dependencies.md): every module and why it is there
-
-Security reports: [SECURITY.md](SECURITY.md). Contact: relay@healthlog.dev (operation),
-abuse@healthlog.dev (abuse, suspension appeals), privacy@healthlog.dev (data protection).
 
 ## License
 

@@ -102,6 +102,9 @@ is announced at least 90 days ahead (privacy.md section 12).
 
 Newest first:
 
+- **2026-11-22** Relay v1.0.3. No key rotation and no deprecation. The relay exposes more metrics about its
+  own work, all listed above. The release binaries carry SLSA provenance
+  ([release-verification.md](release-verification.md)).
 - **2026-11-22** Relay v1.0.2. A third identity key is published: `emergency`
   `dcrihMfqGY7srT95DZrVP7sKA-IS3oJPPhOVbbqTvBU`, generated offline and kept apart from `current` and
   `next`, for the case that both are lost. It is pinned beside them; the relay keeps signing with

@@ -57,7 +57,9 @@ func (r *Relay) handlePush(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	now := r.cfg.Now()
-	results, entries, status, e := r.admitBatch(s, pb, now)
+	// Admitted items are queued and sent on the queue's workers; a client that disconnects must not cancel
+	// them, so the sends do not inherit the request context.
+	results, entries, status, e := r.admitBatch(s, pb, now) //nolint:contextcheck // queued sends outlive the request
 	if e != nil {
 		r.fail(w, req, status, *e)
 		return
