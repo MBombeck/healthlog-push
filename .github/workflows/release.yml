@@ -141,16 +141,16 @@ jobs:
       image: ${{ needs.image.outputs.image }}
       digest: ${{ needs.image.outputs.digest }}
 
-  github-release:
-    name: Binaries and GitHub release
-    needs: [image, provenance, attest-sbom]
+  # The release binaries and one SPDX SBOM for each, built in a job that can neither sign nor write to the
+  # release. syft reads each SBOM from the finished binary, so it lists the modules and the Go version that
+  # were compiled in. The syft version is the one fixed by the pinned action.
+  binaries:
+    name: Binaries and their SBOMs (no signing rights)
+    needs: image
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 15
     permissions:
-      contents: write
-      id-token: write
-    outputs:
-      hashes: ${{ steps.hashes.outputs.hashes }}
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -168,6 +168,65 @@ jobs:
               -ldflags "-s -w -buildid= -X github.com/MBombeck/healthlog-push/internal/buildinfo.Version=${GITHUB_REF_NAME} -X github.com/MBombeck/healthlog-push/internal/buildinfo.Commit=${GITHUB_SHA}" \
               -o "dist/healthlog-push_${GITHUB_REF_NAME}_linux_${arch}" ./cmd/healthlog-push
           done
+      - name: SBOM of the amd64 binary
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        with:
+          file: dist/healthlog-push_${{ github.ref_name }}_linux_amd64
+          format: spdx-json
+          output-file: dist/healthlog-push_${{ github.ref_name }}_linux_amd64.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+      - name: SBOM of the arm64 binary
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        with:
+          file: dist/healthlog-push_${{ github.ref_name }}_linux_arm64
+          format: spdx-json
+          output-file: dist/healthlog-push_${{ github.ref_name }}_linux_arm64.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+      - name: Each SBOM carries the hash of its binary and the modules in it
+        run: |
+          set -euo pipefail
+          for arch in amd64 arm64; do
+            bin="healthlog-push_${GITHUB_REF_NAME}_linux_${arch}"
+            jq -e --arg sum "$(sha256sum "dist/$bin" | cut -d' ' -f1)" '
+              .spdxVersion == "SPDX-2.3"
+              and any(.packages[]; .name == "go.etcd.io/bbolt")
+              and any(.packages[]; .name == "stdlib")
+              and any(.files[]; any(.checksums[]; .checksumValue == $sum))
+            ' "dist/$bin.spdx.json" > /dev/null \
+              || { echo "::error::dist/$bin.spdx.json does not describe $bin"; exit 1; }
+          done
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: binaries
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
+
+  github-release:
+    name: Checksums, signature and GitHub release
+    needs: [image, binaries, provenance, attest-sbom]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      id-token: write
+    outputs:
+      hashes: ${{ steps.hashes.outputs.hashes }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: binaries
+          path: dist
+      # SHA256SUMS lists the two binaries and their two SBOMs, so the signature on it covers all four.
+      - name: Checksums
+        run: |
+          set -euo pipefail
+          test "$(find dist -type f | wc -l)" -eq 4
           (cd dist && sha256sum healthlog-push_* > SHA256SUMS)
           cat dist/SHA256SUMS
       - name: Hash release files for the binary provenance
@@ -217,7 +276,7 @@ jobs:
             --verify-tag \
             dist/*
 
-  # SLSA v1.0 provenance for the release binaries and SHA256SUMS, uploaded to the release as
+  # SLSA v1.0 provenance for the release binaries, their SBOMs and SHA256SUMS, uploaded to the release as
   # healthlog-push_vX.Y.Z.intoto.jsonl. The generator is a reusable workflow that must be referenced by its
   # full release tag: slsa-verifier checks the builder ref, and a commit SHA there makes the generator fail
   # (slsa-framework/slsa-verifier#12). v2.1.0 is commit f7dd8c54c2067bafc12ca7a55595d5ee9b75204a. The image

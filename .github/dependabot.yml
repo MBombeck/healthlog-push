@@ -35,3 +35,16 @@ updates:
         patterns: ["*"]
     commit-message:
       prefix: "deps(docker)"
+
+  # ansible-lint and yamllint for the deploy code, pinned with hashes by pip-compile.
+  - package-ecosystem: pip
+    directory: /.github
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      deploy-linters:
+        patterns: ["*"]
+    commit-message:
+      prefix: "deps(pip)"
