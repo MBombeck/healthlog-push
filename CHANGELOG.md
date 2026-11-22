@@ -4,6 +4,43 @@ All notable changes to this project are documented in this file. The format foll
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.2] - 2026-11-22
+
+### Changed
+
+- Live Activity pushes go to Apple with `apns-priority: 10` only for the end and for a start or update whose
+  `status` is `due` or `overdue`; every other state (`pending`, `snoozed`, `taken`, `skipped`) goes with 5.
+  iOS grants each device an hourly budget of priority 10 Live Activity pushes and may throttle beyond it,
+  and priority 5 does not count against it, so routine changes no longer use up the budget a due dose
+  needs. The relay decides from the checked content state; nothing in the API changes.
+- A `410` from Apple whose `timestamp` lies before the UTC day the binding was made or renewed (with 10
+  minutes of tolerance) no longer deletes the binding. Apple confirmed the old registration gone, and the
+  device has registered the token again since. The item answers `200 soft_invalid` with `reason`
+  `Unregistered`, the binding is marked, and the same answer on a later day deletes it. A `410` without a
+  timestamp, or one at or after the binding day, deletes as before.
+
+### Added
+
+- Delivery traces: for a push to a development build, Apple returns `apns-unique-id`. The relay keeps it
+  with the item result in memory for 72 hours (at most 50,000 traces, keyed by instance id and `ref`), and
+  `admin delivery <instance-id> <ref>` shows it, so one lost push can be looked up in Apple's delivery log.
+  Traces are never stored, exported, logged or counted; production pushes have none. The retention is in
+  `docs/privacy.md` (now version 1.1; the consent text version stays `2026-11-21`) and
+  `docs/operations.md`.
+- `docs/transparency.md`: authority requests (none so far), how a request is handled, and a dated feed of
+  deprecations and key rotations. Identity key rotations are announced there at least 7 days ahead. Linked
+  from the README, the privacy notice and the threat model.
+- Tests for the provider token path (`FileTokens`), which had none, for the Live Activity priorities, the
+  410 timestamp and the delivery traces.
+
+### Documentation
+
+- The threat model states as an accepted limit that the silent intake sync goes out at once after a dose
+  is recorded, so Apple and the relay can see that time: preventing a double dose is chosen over hiding it.
+- The README lists the hosted identity keys once; the second, stale table is gone.
+
+The test vectors (`spec/vectors/v1.json`) are unchanged.
+
 ## [1.0.1] - 2026-11-21
 
 ### Security
@@ -207,5 +244,6 @@ First release.
   `HLP_MIN_CLIENT_VERSION`; the admin socket default follows `HLP_DATA_DIR` for server and client; a failing
   listener makes the process exit with an error.
 
+[1.0.2]: https://github.com/MBombeck/healthlog-push/releases/tag/v1.0.2
 [1.0.1]: https://github.com/MBombeck/healthlog-push/releases/tag/v1.0.1
 [1.0.0]: https://github.com/MBombeck/healthlog-push/releases/tag/v1.0.0
