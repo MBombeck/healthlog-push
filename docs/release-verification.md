@@ -99,7 +99,7 @@ other command is the one the workflow uses. It checks:
    SBOMs match `SHA256SUMS`, whose signature bundle verifies;
 7. rebuilding the binary gives a byte-identical file.
 
-Last run, on 2026-11-21 against commit `cd66d8b`:
+Last run, on 2026-11-22 against commit `8014f1b` with the binary SBOM step applied:
 
 ```
 platforms: ['amd64', 'arm64']
@@ -108,9 +108,13 @@ SBOM attestation: verified
 build type: https://github.com/moby/buildkit/blob/master/docs/attestations/slsa-definitions.md
 provenance attestation: verified
 unsigned platform manifest: refused
+binary SBOM: 8 packages, hash of the binary present
+binary SBOM: 8 packages, hash of the binary present
 checksums signature: verified
 healthlog-push-linux-amd64: OK
+healthlog-push-linux-amd64.spdx.json: OK
 healthlog-push-linux-arm64: OK
+healthlog-push-linux-arm64.spdx.json: OK
 binary rebuild: identical
 ```
 

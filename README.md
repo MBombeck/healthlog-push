@@ -85,7 +85,8 @@ The relay listens on 8443, so redirect 443 to it. File layout, firewall rules an
 ## Verify a release
 
 Every release is built from a `vX.Y.Z` tag by the release workflow and signed keyless with cosign. The image
-carries an SBOM and SLSA provenance, the binaries a signed checksum file and provenance of their own.
+carries an SBOM and SLSA provenance, the binaries a signed checksum file, provenance of their own and, from
+the release after v1.0.3 on, an SBOM each.
 
 ```sh
 TAG=vX.Y.Z

@@ -8,6 +8,11 @@ All notable changes to this project are documented in this file. The format foll
 
 ### Added
 
+- The GitHub release carries an SPDX SBOM for each Linux binary,
+  `healthlog-push_vX.Y.Z_linux_<arch>.spdx.json`. syft reads it from the finished binary, so it lists the
+  modules and the Go version that were compiled in. The SBOMs are listed in `SHA256SUMS` and covered by its
+  signature and by the binary provenance. A job without signing rights builds the binaries and the SBOMs.
+- Dependabot also watches the hash-pinned linters for the deploy code.
 - `GOVERNANCE.md`, `MAINTAINERS.md`, `docs/roadmap.md`, `docs/continuity.md` and `docs/assurance-case.md`: how
   decisions are made, who has access to what, the direction, what is in place if the maintainer is gone,
   and the argument for why the design meets its security requirements.
