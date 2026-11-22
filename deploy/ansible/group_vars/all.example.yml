@@ -3,7 +3,7 @@
 # Secrets are NOT set here; see the end of this file.
 
 # --------------------------------------------------------------- base -------
-base_hostname: push-01
+base_hostname: relay-01
 base_admin_users:
   - name: admin
     ssh_keys:
@@ -32,7 +32,7 @@ healthlog_push_mgmt_vpn_egress:
 healthlog_push_egress_receivers:
   - {address: 192.0.2.20, port: 4318, proto: tcp, oifname: wg0}
 firewall_allow_dhcp: true
-# Hetzner Cloud: cloud-init reads the metadata service on boot.
+# Some providers' cloud-init reads the metadata service on every boot.
 firewall_allow_cloud_metadata: true
 
 # ------------------------------------------------------------- docker -------

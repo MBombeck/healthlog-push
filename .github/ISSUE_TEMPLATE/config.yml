@@ -1,8 +1,8 @@
 blank_issues_enabled: false
 contact_links:
   - name: Security vulnerability
-    url: https://github.com/MBombeck/healthlog-push/blob/main/SECURITY.md
-    about: Please report security problems privately as described in SECURITY.md, never in a public issue.
+    url: https://github.com/MBombeck/healthlog-push/security/advisories/new
+    about: Report security problems privately through GitHub's private vulnerability reporting, never in a public issue. SECURITY.md has the details.
   - name: Abuse of the hosted relay
     url: mailto:abuse@healthlog.dev
     about: Report abuse of push.healthlog.dev by email. Do not post instance ids publicly.

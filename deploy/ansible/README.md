@@ -2,9 +2,9 @@
 
 This directory turns a fresh Ubuntu 24.04 host into a single-purpose
 healthlog-push relay host and deploys a signed release onto it. It is written
-for a small cloud VM (the reference host is a Hetzner Cloud CPX11, later a
-CX23) but contains nothing provider-specific apart from the cloud firewall
-table at the end of this page.
+for a small cloud VM and contains nothing provider-specific; the cloud
+firewall table further down uses plain rules that any provider firewall can
+express.
 
 The runtime contract the roles follow (paths, users, ports, health) is the
 same one the compose file in `deploy/compose/compose.yaml` encodes. The role
@@ -128,7 +128,7 @@ the host.
 No rule logs packets. Drops go to named counters only:
 `nft list counters table inet healthlog_push`.
 
-## Cloud firewall (Hetzner Cloud Firewall)
+## Cloud firewall
 
 Run the provider firewall in front of the host firewall. The host rules work
 on any provider; the cloud rules keep scans off the host in the first place.

@@ -10,7 +10,7 @@ follow the same steps with their own secret store. Day-to-day rotation commands 
 |---|---|---|---|---|
 | Relay identity key (`current`) | Ed25519 | relay, signs every response and the registry export | `secrets/relay/relay_id_key`, relay process memory | an attacker who also controls DNS or TLS can answer for the relay; switch to `next` |
 | Relay identity key (`next`) | Ed25519 | nobody yet; its public half is pinned by servers and apps | secret store only | as above once it is promoted; generate a new `next` |
-| Relay identity key (`emergency`) | Ed25519 | nobody; its public half is pinned by servers and apps | offline with the key holder, apart from `current` and `next`; never on the host | as above once it is promoted; generate a new `emergency` |
+| Relay identity key (`emergency`) | Ed25519 | nobody; its public half is pinned by servers and apps | offline, apart from `current` and `next`; never on the host | as above once it is promoted; generate a new `emergency` |
 | APNs key (`.p8`) | ECDSA P-256 | signer only | `secrets/signer/apns.p8`, signer process memory | anyone can send notifications to tokens they know under the app's name; revoke in the Apple developer account |
 | Token MAC keys (current, previous) | 32 random bytes | relay | `secrets/relay/token_mac_key[_previous]` | together with a copy of the database, tokens someone already knows can be matched to bindings |
 | ACME account key | ECDSA P-256 | relay (autocert) | `secrets/relay/acme_account_key` | certificates for the relay name can be requested through this account; the CAA record pins the account |
@@ -52,16 +52,14 @@ docker run --rm --network none "$IMAGE" keygen acme-account
 
 ## Storage
 
-- One project in the secret store holds the relay secrets. Only the key holder and the deployment have
-  access; the deployment's access is read-only and limited to that project.
-- Each secret has a fixed name and a note with its creation date, its fingerprint (SHA-256 of the public
-  key, or of the value for MAC keys) and its planned rotation date. Fingerprints, not values, go into the
-  operations log.
+- The relay secrets are kept in a secret store that only the key holder and the deployment can read. The
+  relay host has no access to that store: it receives each secret as a file, written by the deployment.
+- Each secret has a fixed name. Its fingerprint (SHA-256 of the public key, or of the value for MAC keys),
+  never its value, goes into the operations log.
 - The identity key `next` exists only in the secret store until it is promoted.
-- The identity key `emergency` is not in that secret store. The key holder keeps its seed offline, on media
-  that are never connected to the relay host or to the deployment, stored apart from the copies of `current`
-  and `next`, so that one loss or one compromise cannot take all three. It is never deployed to the host
-  unless it is promoted (below).
+- The identity key `emergency` is kept offline, separate from the relay host and apart from `current` and
+  `next`, so that one loss or one compromise cannot take all three. It is never deployed to the host unless
+  it is promoted (below).
 
 ## Publication of the identity keys
 

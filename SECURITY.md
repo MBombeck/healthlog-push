@@ -47,4 +47,12 @@ Please give us 90 days from your report before publishing details, or until a fi
 
 ## Supported versions
 
-Only the latest release receives security fixes. Releases are signed; see the README for how to verify an image before you run it.
+Only the latest release receives security fixes.
+
+## Verifying a release
+
+Every release is built by the release workflow from a `vX.Y.Z` tag on `main`. The image is signed keyless with cosign and carries an SBOM attestation and SLSA provenance; the release binaries come with a signed `SHA256SUMS` and, from v1.0.3 on, SLSA provenance of their own. The commands to check all of it are in [docs/release-verification.md](docs/release-verification.md). Verify before you run a release, and report anything that does not verify as a vulnerability.
+
+## Build pipeline
+
+Actions in the workflows are pinned to full commit SHAs. The one exception is the SLSA generator that signs the binary provenance (`slsa-framework/slsa-github-generator`, `generator_generic_slsa3.yml@v2.1.0`): it must be referenced by its release tag, because `slsa-verifier` checks the builder reference against the generator's release tags and the generator does not run from a commit SHA. Workflow tokens start without permissions, and each job is granted only what it needs. Details: [docs/release-verification.md](docs/release-verification.md#how-the-pipeline-is-protected).
