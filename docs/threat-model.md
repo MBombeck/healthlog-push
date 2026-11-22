@@ -90,7 +90,8 @@ The relay sends them only for a binding whose device gave the second, separate L
   there, as with device tokens.
 
 Metadata is the residual risk. The class and the timing of pushes can reveal behaviour: a Live Activity end
-says "a dose was recorded elsewhere, now". With the Live Activity consent, the content state of a start or
+says "a dose was recorded elsewhere, now", and so does the silent intake sync that goes out at once after a
+dose is recorded (an accepted limit, see "Known limitations"). With the Live Activity consent, the content state of a start or
 update says more, by design (see "Live Activity start and update"). The relay keeps times only as day or week numbers in its store,
 keeps no class per instance at rest, writes logs and metrics without instance ids, and coarsens the summary
 log line and the metrics to hourly while fewer than 20 instances are active. Registrations, key rotations,
@@ -133,7 +134,8 @@ An attacker who runs code inside the relay process (for example through a parser
 - the current provider JWT, valid at Apple for at most one hour;
 - the token MAC key and the database: they can confirm whether a token they already know is bound, but the
   database holds no tokens;
-- the tokens of pushes that pass while they are inside.
+- the tokens of pushes that pass while they are inside, and the delivery traces of the last 72 hours
+  (Apple's `apns-unique-id` per instance and `ref`, development builds only).
 
 They do not get the APNs key, which lives in another container with another user and no network. The signer
 parses nothing from the relay; its only input is the modification time of an empty marker file.
@@ -222,6 +224,13 @@ the token and the old binding key can never take over a binding that went quiet.
   limits how often failures are counted in the metrics, so knowing an instance id does not allow locking that
   instance out.
 
+## Authorities
+
+An authority can ask the relay operator for what the relay holds, which is bounded by the store and
+memory described above; there is no content to hand over. Requests received (none so far), how they are
+handled, and every deprecation and key rotation are published in [transparency.md](transparency.md). Apple
+can be asked directly for what it sees, without the relay.
+
 ## Nobody can prove which code runs
 
 The hosted relay runs a digest-pinned image that was built by a public workflow from a tag and signed
@@ -291,9 +300,24 @@ app does not depend on the relay for anything else. Protections against a self-i
   a day). The per-instance counts of new bindings and challenges of the day, the record of which token each
   instance challenged that day, the 24-hour block after an exceeded invalid-token budget and the
   per-activity Live Activity update counts (not halved) start again from zero, so each restart gives every instance these allowances afresh for the rest of the day.
-- **Apple's timestamp on a `410` is not used.** Apple reports when it learned that a token became invalid;
-  the relay deletes the binding on any `410`, even one created after that time. The device binds again
-  through its server.
+- **Apple's timestamp on a `410` is compared by day only.** Apple reports when it confirmed that a token
+  became invalid. A binding made or renewed on a UTC day that begins more than 10 minutes after that time is
+  kept and handled like a soft failure (a second such answer on a later day deletes it); the relay stores no
+  finer time of a binding. A binding renewed later on the very day of the invalidation is deleted as before,
+  and the device binds again through its server.
+- **Silent intake syncs go out at once (accepted).** When a dose is recorded, the server sends the silent
+  `MEDICATION_INTAKE_SYNC` to the person's other devices without delay, so Apple and the relay can see when
+  a dose was recorded, to the minute, from the time of that background push (the content stays sealed). A
+  random delay or batching of a few minutes would blur that time, but in that window another device could
+  still fire its local reminder, or offer the dose as open, for a dose that was already taken. Preventing a
+  double dose is chosen over hiding the timing. This is a decision, not an oversight: the time of this push
+  stays visible, like that of every push (see "Metadata is the residual risk" above).
+- **Delivery traces are kept for 72 hours in memory.** For a push to a development build, Apple returns an
+  `apns-unique-id`; the relay keeps it with the result, keyed by instance id and `ref`, so the operator can
+  trace one lost push in Apple's delivery log (`admin delivery`). It is the only per-push record kept beyond
+  the 10-minute idempotency window, it is never stored, exported, logged or counted, and production pushes
+  have none because Apple does not send the identifier there. An intruder in the relay process could read
+  the traces of the last 72 hours.
 - **A panic in a send worker ends the process.** It is not recovered; the container is restarted, with the
   restart rules above.
 - **One global lock.** All mutable relay state is guarded by one mutex; signatures are verified and bodies
