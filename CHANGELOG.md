@@ -11,6 +11,9 @@ All notable changes to this project are documented in this file. The format foll
 - `docs/verify.md` and `scripts/verify-release.sh`: one command checks a release from public sources. It
   reads `/version`, verifies the signed `SHA256SUMS`, rebuilds both binaries from the tag, verifies the
   image signature and provenance, and compares the binary inside each platform image with the release.
+- `/version` also reports `binarySha256`, the SHA-256 of the running executable that the relay hashes at
+  start, `platform` and `goVersion`, so the answer can be matched to a line of the release's `SHA256SUMS`.
+  No field describes the host, the configuration or anyone using the relay.
 
 ### Fixed
 

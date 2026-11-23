@@ -1239,8 +1239,10 @@ The body carries no time stamp.
 
 ### GET /version
 
-`200 { "version": "...", "commit": "...", "imageDigest": "..." }`: the build version, the source commit and
-the container image digest the operator configured. Signed; `HL-Nonce` is optional.
+`200 { "version": "...", "commit": "...", "imageDigest": "...", "binarySha256": "...", "platform": "...", "goVersion": "..." }`:
+the build version, the source commit, the container image digest the operator configured, the SHA-256 of
+the running executable (hashed by the relay at start; absent when it could not read the file), the
+platform and the Go release. A client must ignore fields it does not know. Signed; `HL-Nonce` is optional.
 
 ### Human pages
 

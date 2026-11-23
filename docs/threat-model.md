@@ -243,7 +243,10 @@ can be asked directly for what it sees, without the relay.
 The hosted relay runs a digest-pinned image that was built by a public workflow from a tag and signed
 keyless; anyone can verify the signature and the provenance of that image. Nobody outside the host can
 verify that this image is what actually answers at `push.healthlog.dev`; `/version` is a statement by the
-server being checked. The design therefore does not rely on the code being honest for the content: the relay
+server being checked. What can be checked from outside is that the statement fits together: the binary
+hash in `/version`, the release's signed `SHA256SUMS`, the binary inside the signed image and a rebuild
+of the tagged source are the same file ([verify.md](verify.md)), so a deploy of anything else would have to
+report values that are not its own. The design therefore does not rely on the code being honest for the content: the relay
 has no means to decrypt envelopes, whatever code runs. It does rely on it for metadata handling.
 
 ## Availability

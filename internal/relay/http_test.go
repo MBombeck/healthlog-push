@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -168,6 +169,33 @@ func TestPublicEndpoints(t *testing.T) {
 	}
 	if len(rp.Body) != 5 {
 		t.Errorf("healthz has extra fields: %s", rp.Raw)
+	}
+}
+
+// TestVersionMatchesTheRunningBuild: /version is signed and names the version, the commit, the image digest,
+// the hash of the running executable, the platform and the Go release, and nothing else.
+func TestVersionMatchesTheRunningBuild(t *testing.T) {
+	sum := strings.Repeat("ab", 32)
+	h := newHarness(t, func(c *Config) {
+		c.Version, c.Commit, c.ImageDigest, c.BinarySHA256 = "v9.9.9", strings.Repeat("c", 40), "sha256:"+strings.Repeat("d", 64), sum
+	})
+	req, _ := http.NewRequest(http.MethodGet, h.srv.URL+"/version", http.NoBody)
+	rp := h.send(req, "")
+	want := map[string]string{"version": "v9.9.9", "commit": strings.Repeat("c", 40), "imageDigest": "sha256:" + strings.Repeat("d", 64),
+		"binarySha256": sum, "platform": runtime.GOOS + "/" + runtime.GOARCH, "goVersion": runtime.Version()}
+	for k, v := range want {
+		if rp.str(k) != v {
+			t.Errorf("/version %s = %q, want %q", k, rp.str(k), v)
+		}
+	}
+	if len(rp.Body) != len(want) {
+		t.Errorf("/version has other fields: %s", rp.Raw)
+	}
+	// Without a hash the field is left out, not sent empty.
+	h2 := newHarness(t)
+	req, _ = http.NewRequest(http.MethodGet, h2.srv.URL+"/version", http.NoBody)
+	if rp := h2.send(req, ""); strings.Contains(string(rp.Raw), "binarySha256") {
+		t.Errorf("/version without a hash: %s", rp.Raw)
 	}
 }
 

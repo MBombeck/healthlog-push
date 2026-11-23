@@ -544,7 +544,7 @@ paths:
     get:
       tags: [public]
       operationId: getVersion
-      summary: Build version, commit and image digest
+      summary: Build version, commit, image digest and the hash of the running executable
       security: []
       parameters:
         - $ref: "#/components/parameters/HL-Nonce-Optional"
@@ -1238,6 +1238,14 @@ components:
         version: { type: string }
         commit: { type: string }
         imageDigest: { type: string }
+        binarySha256:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+          description: SHA-256 of the running executable, hashed by the relay at start; absent when the file could not be read.
+        platform:
+          type: string
+          description: "`linux/amd64` or `linux/arm64`, as in the names of the release binaries."
+        goVersion: { type: string }
     Error:
       description: The error envelope of every refused request and every refused item.
       type: object
