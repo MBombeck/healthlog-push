@@ -10,6 +10,7 @@ Dockerfile
 docs/
 deploy/
 scripts/
+!scripts/build.sh
 dist/
 bin/
 coverage*

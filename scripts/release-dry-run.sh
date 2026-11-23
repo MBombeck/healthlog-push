@@ -90,9 +90,7 @@ echo "unsigned platform manifest: refused"
 step "release binaries and their SBOMs with signed checksums"
 mkdir -p "$work/dist"
 for arch in amd64 arm64; do
-  CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build -mod=readonly -trimpath \
-    -ldflags "-s -w -buildid= -X github.com/MBombeck/healthlog-push/internal/buildinfo.Version=${version} -X github.com/MBombeck/healthlog-push/internal/buildinfo.Commit=${commit}" \
-    -o "$work/dist/healthlog-push-linux-${arch}" ./cmd/healthlog-push
+  scripts/build.sh "$version" "$commit" "$arch" "$work/dist/healthlog-push-linux-${arch}"
   (cd "$work/dist" && syft -q "file:healthlog-push-linux-${arch}" -o "spdx-json=healthlog-push-linux-${arch}.spdx.json")
   python3 - "$work/dist/healthlog-push-linux-${arch}.spdx.json" \
     "$(shasum -a 256 < "$work/dist/healthlog-push-linux-${arch}" | cut -d' ' -f1)" <<'PY'
@@ -111,14 +109,24 @@ quiet cosign verify-blob --insecure-ignore-tlog=true --key "$work/cosign.pub" --
 (cd "$work/dist" && shasum -a 256 -c SHA256SUMS)
 
 step "reproducible binary: a second build gives the same hash"
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -mod=readonly -trimpath \
-  -ldflags "-s -w -buildid= -X github.com/MBombeck/healthlog-push/internal/buildinfo.Version=${version} -X github.com/MBombeck/healthlog-push/internal/buildinfo.Commit=${commit}" \
-  -o "$work/again" ./cmd/healthlog-push
+scripts/build.sh "$version" "$commit" amd64 "$work/again"
 if [ "$(shasum -a 256 < "$work/again")" = "$(shasum -a 256 < "$work/dist/healthlog-push-linux-amd64")" ]; then
   echo "binary rebuild: identical"
 else
   echo "binary rebuild: differs" >&2
   exit 1
 fi
+
+step "the binary in each platform image is the release binary"
+for arch in amd64 arm64; do
+  got="$(crane export --platform "linux/${arch}" "$ref" - | tar -xOf - healthlog-push | shasum -a 256 | cut -d' ' -f1)"
+  want="$(shasum -a 256 < "$work/dist/healthlog-push-linux-${arch}" | cut -d' ' -f1)"
+  if [ "$got" = "$want" ]; then
+    echo "linux/${arch}: image binary = release binary"
+  else
+    echo "linux/${arch}: image binary ${got} differs from release binary ${want}" >&2
+    exit 1
+  fi
+done
 
 printf '\ndry run complete: %s %s\n' "$version" "$commit"

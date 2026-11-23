@@ -182,14 +182,13 @@ jobs:
         with:
           go-version-file: go.mod
           cache: false
+      # The same recipe as the Dockerfile, so each binary here is the file in the image (job same-binary).
       - name: Build binaries
         run: |
           set -euo pipefail
           mkdir -p dist
           for arch in amd64 arm64; do
-            CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build -mod=readonly -trimpath \
-              -ldflags "-s -w -buildid= -X github.com/MBombeck/healthlog-push/internal/buildinfo.Version=${GITHUB_REF_NAME} -X github.com/MBombeck/healthlog-push/internal/buildinfo.Commit=${GITHUB_SHA}" \
-              -o "dist/healthlog-push_${GITHUB_REF_NAME}_linux_${arch}" ./cmd/healthlog-push
+            scripts/build.sh "$GITHUB_REF_NAME" "$GITHUB_SHA" "$arch" "dist/healthlog-push_${GITHUB_REF_NAME}_linux_${arch}"
           done
       - name: SBOM of the amd64 binary
         uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
@@ -227,9 +226,47 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  # The binary in each platform image of the pushed digest must be the release binary of that platform,
+  # byte for byte; otherwise SHA256SUMS would not describe what runs, and no GitHub release is created.
+  same-binary:
+    name: Image binary equals release binary
+    needs: [image, binaries]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      packages: read
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: binaries
+          path: dist
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Compare
+        env:
+          REF: ${{ needs.image.outputs.image }}@${{ needs.image.outputs.digest }}
+        run: |
+          set -euo pipefail
+          for arch in amd64 arm64; do
+            docker pull -q --platform "linux/$arch" "$REF" > /dev/null
+            id=$(docker create --platform "linux/$arch" "$REF")
+            docker cp -q "$id:/healthlog-push" "image_$arch"
+            docker rm "$id" > /dev/null
+            want=$(sha256sum "dist/healthlog-push_${GITHUB_REF_NAME}_linux_${arch}" | cut -d' ' -f1)
+            got=$(sha256sum "image_$arch" | cut -d' ' -f1)
+            echo "linux/$arch image $got release $want" | tee -a "$GITHUB_STEP_SUMMARY"
+            if [ "$got" != "$want" ]; then
+              echo "::error::linux/$arch: the binary in the image differs from the release binary"
+              exit 1
+            fi
+          done
+
   github-release:
     name: Checksums, signature and GitHub release
-    needs: [image, scan, binaries, provenance, attest-sbom]
+    needs: [image, scan, binaries, same-binary, provenance, attest-sbom]
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:

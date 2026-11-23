@@ -140,6 +140,52 @@ jobs:
             VERSION=ci
             COMMIT=${{ github.sha }}
 
+  # The binary in the image and the release binary come from one recipe, scripts/build.sh. This job builds
+  # both ways from the same commit, for both platforms, and fails when a single byte differs: on the runner
+  # as the release workflow does, and through the Dockerfile as the image is built.
+  reproducible:
+    name: Reproducible binary (image = release)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Build the release binaries
+        run: |
+          set -euo pipefail
+          for arch in amd64 arm64; do
+            scripts/build.sh v0.0.0-ci "$GITHUB_SHA" "$arch" "release/healthlog-push_linux_${arch}"
+          done
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Build the image file system
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: false
+          provenance: false
+          outputs: type=local,dest=image
+          build-args: |
+            VERSION=v0.0.0-ci
+            COMMIT=${{ github.sha }}
+      - name: Compare
+        run: |
+          set -euo pipefail
+          for arch in amd64 arm64; do
+            want=$(sha256sum "release/healthlog-push_linux_${arch}" | cut -d' ' -f1)
+            got=$(sha256sum "image/linux_${arch}/healthlog-push" | cut -d' ' -f1)
+            echo "linux/$arch image $got release $want" | tee -a "$GITHUB_STEP_SUMMARY"
+            if [ "$got" != "$want" ]; then
+              echo "::error::linux/$arch: the binary in the image differs from the release build"
+              exit 1
+            fi
+          done
+
   # The amd64 image as the Dockerfile builds it, scanned with Grype: base image packages and the Go binary
   # (modules and standard library). Fails on a HIGH or CRITICAL finding that has a fix.
   image-scan:

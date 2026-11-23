@@ -6,8 +6,21 @@ All notable changes to this project are documented in this file. The format foll
 
 ## [Unreleased]
 
+### Added
+
+- `docs/verify.md` and `scripts/verify-release.sh`: one command checks a release from public sources. It
+  reads `/version`, verifies the signed `SHA256SUMS`, rebuilds both binaries from the tag, verifies the
+  image signature and provenance, and compares the binary inside each platform image with the release.
+
 ### Fixed
 
+- The binary in the image was not the release binary of the same tag (for v1.0.6, linux/amd64:
+  `83830217...` in the image, `3b32835f...` in the release), because the release job built in a checkout
+  and Go stamped VCS details into it, while the Docker build had no `.git`. Both now run one recipe,
+  `scripts/build.sh` (Go release from `go.mod`, `-trimpath`, `-buildvcs=false`, version and commit from
+  `-ldflags` only), so `SHA256SUMS` describes what runs. A CI job builds every change both ways and fails
+  on any difference, and the release workflow compares the pushed image with the release binaries before
+  it creates the GitHub release.
 - A hung relay stayed hung: Docker does not restart a container that is only unhealthy. A watchdog now
   exits the relay (log `relay.watchdog`, status 2) when the core lock cannot be taken for 60 seconds or
   the maintenance loop has not finished a pass for 3 minutes, and the signer exits after six failed token

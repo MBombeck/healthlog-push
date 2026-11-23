@@ -1,7 +1,6 @@
 # Builder runs on the build host and cross-compiles for the target platform.
 FROM --platform=$BUILDPLATFORM golang:1.27.4-alpine@sha256:70bd7ddea8b6cbe5d6943cde279d6b67feb10cc924fb9100d1d8757c1575b280 AS build
 
-ARG TARGETOS
 ARG TARGETARCH
 ARG VERSION=dev
 ARG COMMIT=unknown
@@ -13,14 +12,11 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     go mod download && go mod verify
 
 COPY . .
+# scripts/build.sh is the one build recipe; the release binaries are built with it too, so the binary in
+# this image and the release binary of the same tag are the same file (docs/verify.md).
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
-    go build -mod=readonly -trimpath \
-      -ldflags "-s -w -buildid= \
-        -X github.com/MBombeck/healthlog-push/internal/buildinfo.Version=${VERSION} \
-        -X github.com/MBombeck/healthlog-push/internal/buildinfo.Commit=${COMMIT}" \
-      -o /out/healthlog-push ./cmd/healthlog-push
+    sh scripts/build.sh "$VERSION" "$COMMIT" "$TARGETARCH" /out/healthlog-push
 
 FROM gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab
 
