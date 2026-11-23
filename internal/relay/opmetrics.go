@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/MBombeck/healthlog-push/internal/apns"
+	"github.com/MBombeck/healthlog-push/internal/store"
 	"github.com/MBombeck/healthlog-push/internal/wire"
 )
 
@@ -100,7 +101,9 @@ func (r *Relay) observeSend(kind string, accepted time.Time, res apns.Result) {
 	if res.Outcome == apns.NoProviderToken || (res.Outcome == apns.Unavailable && res.Reason == "transport") {
 		return
 	}
-	r.Metrics.Observe("hlp_delivery_latency_seconds", r.cfg.Now().Sub(accepted).Seconds())
+	now := r.cfg.Now()
+	r.Metrics.Observe("hlp_delivery_latency_seconds", now.Sub(accepted).Seconds())
+	r.latDays.observe(store.Day(now), now.Sub(accepted).Seconds())
 	if res.Outcome == apns.Accepted {
 		r.Metrics.Inc("hlp_deliveries_by_key_slot_total", "slot", r.identitySlot())
 		return

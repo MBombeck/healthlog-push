@@ -96,6 +96,7 @@ ones in `cmd/healthlog-push/main.go`.
 | `HLP_APNS_ENVIRONMENT` | `production` | comma-separated list of served environments; only `production` and `sandbox` are accepted, any other value stops the relay at start |
 | `HLP_MIN_CLIENT_VERSION` | none | refuse instance requests whose `HL-Client` version is lower, for example `1.49.0` (`426 min_server_version`); the compose file passes it from `.env`, and a value that is not `major.minor.patch` stops the relay at start |
 | `HLP_IMAGE_DIGEST` | empty | shown at `/version`; the compose file requires it |
+| `HLP_PUBLIC_STATS` | `false` | `true` serves the public day aggregates at `/stats` ([api.md](api.md#get-stats)); any value that is not true or false stops the relay at start |
 | `HLP_REGISTRATION_MODE` | `invite` | registration mode of a store that has none yet: `invite`, `closed` or `open`; applied and stored before the first request is accepted. A mode set later with `admin registration` is stored and wins (see [Registration](#registration)); any other value stops the relay at start |
 | `HLP_APPARMOR_RELAY`, `HLP_APPARMOR_SIGNER` | `docker-default` | AppArmor profile per container, read by the compose file only (see [AppArmor](#apparmor)) |
 

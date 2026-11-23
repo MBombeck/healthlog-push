@@ -125,6 +125,9 @@ of about 0.23 s and a 99th of about 0.8 s. Apple refused none. The floor of abou
 to North America. The tail from 0.25 s on matches a new connection to Apple, which costs two or three more
 round trips; `hlp_apns_connections_total` now counts how often that happens.
 
+A relay can publish such figures as day aggregates once three or more servers use it
+([api.md](api.md#get-stats)).
+
 ## What the numbers do not say
 
 - They say nothing about how long Apple takes to reach a device; that is Apple's, and it varies with the

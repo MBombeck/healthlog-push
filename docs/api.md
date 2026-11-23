@@ -647,6 +647,44 @@ source ([verify.md](verify.md)). The image digest cannot be built into the binar
 of the build's own output; the deployment passes it as `HLP_IMAGE_DIGEST`. Nothing here describes the
 host, the configuration or anyone using the relay.
 
+### GET /stats
+
+Public day aggregates of the relay's work, for anyone: how many push items went to Apple, how many it
+accepted, the shares that failed, had a token that is gone or were throttled by Apple, and the time to
+Apple's answer. Off unless the operator sets `HLP_PUBLIC_STATS=true`; otherwise the path answers the signed
+`404 not_found` of any unknown path. The hosted relay does not serve it yet; when it does, the
+[transparency](transparency.md) feed and the privacy notice will say so first.
+
+Signed; `HL-Nonce` is optional.
+
+```json
+{"minInstances":3,"shown":true,"granularity":"day","uptimeHours":52,
+ "windows":{"7d":{"from":"2026-11-17","to":"2026-11-23","items":5120,"delivered":5087,"deliveredShare":0.9936,
+   "failedShare":0.0012,"tokenGoneShare":0.0047,"throttledShare":0.0005,
+   "latency":{"p50Seconds":0.15,"p90Seconds":0.25,"p99Seconds":1,"daysCovered":2}},
+  "30d":null}}
+```
+
+The rules that keep it from describing anyone:
+
+- **A floor of three.** While fewer than three servers are registered (probation or standard), `shown` is
+  `false` and there is no `windows` field: with one or two servers every total would be that household's.
+  A window is `null` unless at least three servers had a push accepted on a completed day inside it; a
+  server that pushed only today does not count.
+- **Completed UTC days only.** `7d` and `30d` end with yesterday. There is no today, no hour and no time of
+  day.
+- **Sums only.** No instance id, no tier, no count of servers or devices, no split by push class.
+- **Cached.** The answer is computed at most every 15 minutes and served unchanged in between.
+
+`items` are the push items that went to Apple and got an answer; refusals by the relay's own limits are not
+in it. `deliveredShare` is what Apple accepted, `failedShare` what failed on the relay's or Apple's side
+(`apns_unavailable`, `apns_rejected`, `relay_misconfigured`), `tokenGoneShare` what Apple reported as a
+token no longer valid (`unregistered`, `soft_invalid`, `activity_gone`), and `throttledShare` what Apple
+throttled for the device. Shares are rounded to four places. The latency percentiles are the upper bounds
+of the buckets of `hlp_delivery_latency_seconds` they fall in, so "at most this long"; the per-day
+histogram behind them lives in memory, and `daysCovered` says over how many days of the window the relay
+has been running. `uptimeHours` is the time since the process started, in whole hours.
+
 ### GET /privacy, GET /terms, GET /.well-known/security.txt, GET /
 
 Plain text (`text/plain; charset=utf-8`): the privacy notice, the terms, the RFC 9116 security contact

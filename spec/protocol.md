@@ -1244,6 +1244,13 @@ the build version, the source commit, the container image digest the operator co
 the running executable (hashed by the relay at start; absent when it could not read the file), the
 platform and the Go release. A client must ignore fields it does not know. Signed; `HL-Nonce` is optional.
 
+### GET /stats
+
+Optional and off by default. A relay whose operator enables it answers public day aggregates of its work,
+signed like every other answer: no figure while fewer than three servers are registered, no window unless
+three or more servers had a push accepted on a completed day in it, completed UTC days and sums only. A
+client never needs it. The body is described in `docs/api.md` of the relay repository.
+
 ### Human pages
 
 `GET /` (index), `GET /privacy` (privacy notice) and `GET /terms` (terms of use) return
