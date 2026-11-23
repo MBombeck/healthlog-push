@@ -102,6 +102,29 @@ jobs:
           path: sbom.spdx.json
           retention-days: 7
 
+  # The pushed image, by digest, scanned with Grype. A HIGH or CRITICAL finding that has a fix stops the
+  # GitHub release; the image is already in the registry, so fix and tag again.
+  scan:
+    name: Image scan (Grype)
+    needs: image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      packages: read
+    steps:
+      - name: Scan image
+        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
+        env:
+          GRYPE_REGISTRY_AUTH_AUTHORITY: ghcr.io
+          GRYPE_REGISTRY_AUTH_USERNAME: ${{ github.actor }}
+          GRYPE_REGISTRY_AUTH_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          image: ${{ needs.image.outputs.image }}@${{ needs.image.outputs.digest }}
+          only-fixed: true
+          severity-cutoff: high
+          fail-build: true
+          output-format: table
+
   attest-sbom:
     name: Attest SBOM
     needs: [image, sbom]
@@ -206,7 +229,7 @@ jobs:
 
   github-release:
     name: Checksums, signature and GitHub release
-    needs: [image, binaries, provenance, attest-sbom]
+    needs: [image, scan, binaries, provenance, attest-sbom]
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:

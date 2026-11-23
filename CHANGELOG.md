@@ -16,6 +16,11 @@ All notable changes to this project are documented in this file. The format foll
   which then failed with `apns_unavailable` after 3 seconds. The client now sends an HTTP/2 PING after two
   minutes without traffic instead of an hour and closes a connection whose PING is not answered within
   15 seconds, so the next push opens a fresh one. `spec/protocol.md` says so.
+- `docs/hardening.md` said container images are scanned for known vulnerabilities, but no workflow did.
+  Grype now scans the image on every pull request and push to `main`, the pushed image by digest before a
+  GitHub release is created, and the latest release weekly; a HIGH or CRITICAL finding with a fix fails
+  the run. govulncheck also runs weekly, so a fix in the Go standard library is noticed without a commit.
+  All actions stay pinned by commit.
 
 ## [1.0.6] - 2026-11-23
 

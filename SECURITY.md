@@ -57,7 +57,7 @@ Every fixed vulnerability is listed under "Security" in [CHANGELOG.md](CHANGELOG
 
 ## Findings from automated analysis
 
-**Dependencies.** `govulncheck` runs on every pull request and every push to `main`, and Dependabot watches the Go modules, the base images, the GitHub Actions and the pinned deploy linters. The threshold is zero: a known vulnerability in code the relay can reach blocks the merge, whatever its severity, and no release is tagged while one is open. A vulnerable dependency that the relay does not reach is updated with the next regular update. A new dependency is accepted only under the rules in [docs/dependencies.md](docs/dependencies.md), which exist to keep malicious or abandoned code out; a pull request that adds a module without its entry is not merged.
+**Dependencies.** `govulncheck` runs on every pull request, every push to `main` and weekly, Grype scans the image (base packages and the Go binary) on the same occasions and before a release is published, and Dependabot watches the Go modules, the base images, the GitHub Actions and the pinned deploy linters. The threshold is zero: a known vulnerability in code the relay can reach blocks the merge, whatever its severity, and no release is tagged while one is open. A vulnerable dependency that the relay does not reach is updated with the next regular update. A new dependency is accepted only under the rules in [docs/dependencies.md](docs/dependencies.md), which exist to keep malicious or abandoned code out; a pull request that adds a module without its entry is not merged.
 
 **Licenses.** Dependencies must be under a permissive license compatible with Apache-2.0 (Apache-2.0, MIT, BSD, ISC). Anything else is refused at review.
 

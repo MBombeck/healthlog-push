@@ -1,8 +1,8 @@
 # Hardening statement
 
 How the host of the hosted relay at `push.healthlog.dev` is hardened. Measured on 2026-11-21 on the prepared
-host, a dedicated cloud server in Germany. Statements about the containers, image scanning and the
-external availability check apply to the deployed relay. For the threat model and the guarantees of the
+host, a dedicated cloud server in Germany. Statements about the containers and the external availability
+check apply to the deployed relay. For the threat model and the guarantees of the
 relay software itself see [threat-model.md](threat-model.md); hosting and certifications of the provider are
 in section 13 of [privacy.md](privacy.md#13-hosting-and-certifications).
 
@@ -41,13 +41,15 @@ wider package set. Kernel security fixes are applied to the running kernel throu
 the host reboots automatically at a fixed early-morning time, checked daily; there is no weekly window.
 
 **Monitoring.** An audit trail records changes to accounts, privileged access, the relay's key files, container
-configuration and the firewall. File integrity is checked, container images are scanned for known vulnerabilities,
-and availability is checked from outside. None of this records the IP addresses of relay users: the relay writes no
+configuration and the firewall. File integrity is checked and availability is checked from outside. The relay image
+is scanned for known vulnerabilities with Grype in the published workflows: on every pull request and push to
+`main`, before a release is published (by digest) and weekly against the latest release; a HIGH or CRITICAL
+finding that has a fix fails the run. The host does not scan the running containers itself. None of this records the IP addresses of relay users: the relay writes no
 access log, the system does not log martian packets, and no monitoring component reads the relay's traffic. A community
 blocklist of known attacking addresses is applied at the firewall.
 
 **What the published code covers.** The kernel measures (apart from disabling core dumps), the audit trail, file
-integrity checking, image scanning, live patching and the address blocklist belong to the operator's host baseline
+integrity checking, live patching and the address blocklist belong to the operator's host baseline
 and are not part of the published Ansible roles, so they cannot be verified from this repository.
 
 **Backups.** Only a daily export of registered instances (suspended and revoked ones with their tier and reason) and
