@@ -18,6 +18,10 @@ All notable changes to this project are documented in this file. The format foll
   opened a new connection or reused one. The share of `reused` shows whether slow deliveries come from new
   connections to Apple. `docs/transparency.md` lists it and has a short table of queries for the figures
   that matter.
+- Benchmarks of the push path (envelope frame check, batch parse and validation, request signature,
+  binding statement, queue, the send to Apple, and a whole push through the handler) and a load test in
+  the test binary (`-tags load`), with the method and the figures of a run in `docs/performance.md`. CI
+  runs both as a smoke test.
 
 ### Fixed
 

@@ -35,6 +35,12 @@ jobs:
         run: go vet ./...
       - name: Test
         run: go test -race -count=1 ./...
+      # Smoke runs only: shared runners are too noisy for figures (docs/performance.md). They fail when a
+      # benchmark or the load test breaks.
+      - name: Benchmarks (100 iterations each)
+        run: go test -run '^$' -bench . -benchtime 100x ./...
+      - name: Load test (10 servers, 5 s)
+        run: go test -tags load -run TestLoad -count=1 -v ./internal/relay -load.instances=10 -load.duration=5s
       # Statement coverage across all packages, with a floor. The figure goes into the run summary.
       - name: Coverage
         run: |
