@@ -224,3 +224,124 @@ func TestFlagSurvivesMidnightAndRestart(t *testing.T) {
 		t.Fatal("unflagged instance not promoted")
 	}
 }
+
+// silentRun pushes silent items under refs prefix0, prefix1, ... until one is refused, and returns how many
+// were accepted and the refusal.
+func silentRun(t *testing.T, i *instance, d *device, prefix string) (int, ItemResult) {
+	t.Helper()
+	for n := 0; n < 20; n++ {
+		res := i.push1(silentItem(prefix+strconv.Itoa(n), d))
+		if res.Result != "accepted" {
+			return n, res
+		}
+	}
+	t.Fatal("silent budget never refused")
+	return 0, ItemResult{}
+}
+
+// TestSilentHalvedOnlyInTheHourOfTheStart: after a restart the per-device silent limit is halved only in
+// the clock hour in which the relay started, because only that hour's window lost counts. From the next
+// hour on the device gets the full 6 per hour again, also before midnight. Halving it until midnight
+// refused a device's fourth silent push hours after a deploy, with nothing lost to protect.
+func TestSilentHalvedOnlyInTheHourOfTheStart(t *testing.T) {
+	h := newHarness(t)
+	h.clk.Add(30 * time.Minute)
+	h.r.mu.Lock()
+	h.r.started = h.clk.Now() // the relay started at 10:30, the window 10:00 to 11:00 lost its counts
+	h.r.mu.Unlock()
+	i := h.register()
+	d := newDevice(0x84)
+	i.activate(d)
+	n, res := silentRun(t, i, d, "a")
+	if n != 3 || res.Error != "device_quota" || res.Scope != "device" || res.RetryAfter <= 0 || res.RetryAfter > 3600 {
+		t.Fatalf("hour of the start: %d accepted, then %+v; want 3 and device_quota", n, res)
+	}
+	h.clk.Add(30 * time.Minute) // 11:00, a window the relay saw from its start
+	if n, res = silentRun(t, i, d, "b"); n != 6 || res.Error != "device_quota" {
+		t.Fatalf("next hour: %d accepted, then %+v; want 6", n, res)
+	}
+	h.clk.Add(4 * time.Hour) // 15:00, still before the midnight that ends the halved day limits
+	if n, _ = silentRun(t, i, d, "c"); n != 6 {
+		t.Fatalf("later the same day: %d accepted, want 6", n)
+	}
+}
+
+// TestSilentBudgetCountsOnlySilentSends: the device's silent budget counts the instance's silent pushes
+// that went to Apple and nothing else. Alerts, Live Activity start, update and end, the relay's own wake
+// push for a challenge, a replayed ref and a send Apple did not take for a reason of its own (refunded)
+// leave it alone.
+func TestSilentBudgetCountsOnlySilentSends(t *testing.T) {
+	h := newHarness(t)
+	a, b := h.register(), h.register()
+	d := newDevice(0x85)
+	a.activate(d)
+	if rp := a.laConsent(d, d.key); rp.Status != 200 {
+		t.Fatalf("consent: %d %s", rp.Status, rp.Raw)
+	}
+	now := h.clk.Now()
+	la := bytes.Repeat([]byte{0x75}, 32)
+	for _, it := range []wire.PushItem{
+		alertItem("x1", d), alertItem("x2", d),
+		d.laItem("x3", wire.EventStart, a.id, bytes.Repeat([]byte{0x76}, 32), now.Unix(), dueState(now)),
+		d.laItem("x4", wire.EventUpdate, a.id, la, now.Unix(), dueState(now)),
+		d.activity("x5", a.id, la, now.Unix()),
+	} {
+		if res := a.push1(it); res.Result != "accepted" {
+			t.Fatalf("%s: %+v", it.Ref, res)
+		}
+	}
+	if rp := b.bind(newDevice(0x85)); rp.str("reason") != "challenge_sent" {
+		t.Fatalf("challenge: %d %s", rp.Status, rp.Raw)
+	}
+	if res := a.push1(silentItem("s0", d)); res.Result != "accepted" {
+		t.Fatalf("s0: %+v", res)
+	}
+	for range 3 {
+		if res := a.push1(silentItem("s0", d)); !res.Duplicate {
+			t.Fatalf("replay: %+v", res)
+		}
+	}
+	h.apns.setAnswer(func(string, apnsReq) (int, string) { return 500, "InternalServerError" })
+	if res := a.push1(silentItem("f0", d)); res.Result == "accepted" {
+		t.Fatalf("Apple failure accepted: %+v", res)
+	}
+	h.apns.setAnswer(func(string, apnsReq) (int, string) { return 200, "" })
+	if n, res := silentRun(t, a, d, "t"); n != 5 || res.Error != "device_quota" {
+		t.Fatalf("silent budget after other traffic: %d accepted, then %+v", n, res)
+	}
+}
+
+// TestProvisionalGetsSilentAndKeepsItsBudgetAcrossRebind: a provisional binding, also one bound again after
+// the device opted out, receives silent pushes within the device budget; only Live Activity waits for an
+// accepted push. The budget belongs to the device token, so leaving and binding again neither resets nor
+// lowers it.
+func TestProvisionalGetsSilentAndKeepsItsBudgetAcrossRebind(t *testing.T) {
+	h := newHarness(t)
+	a := h.register()
+	d := newDevice(0x86)
+	if rp := a.bind(d); rp.Status != http.StatusCreated || rp.str("state") != store.StateProvisional {
+		t.Fatalf("bind: %d %s", rp.Status, rp.Raw)
+	}
+	for n := range 3 {
+		if res := a.push1(silentItem("p"+strconv.Itoa(n), d)); res.Result != "accepted" {
+			t.Fatalf("silent to a new binding: %+v", res)
+		}
+	}
+	h.clk.Add(time.Second)
+	if rp := h.unbindSelf(d, d.key, a.id); rp.Status != http.StatusNoContent {
+		t.Fatalf("opt-out: %d %s", rp.Status, rp.Raw)
+	}
+	h.clk.Add(time.Second)
+	if rp := a.bind(d); rp.Status != http.StatusCreated || rp.str("state") != store.StateProvisional {
+		t.Fatalf("return: %d %s", rp.Status, rp.Raw)
+	}
+	if res := a.push1(d.activity("la", a.id, bytes.Repeat([]byte{0x77}, 32), h.clk.Now().Unix())); res.Error != "activity_refused" {
+		t.Fatalf("Live Activity to a provisional binding: %+v", res)
+	}
+	if res := a.push1(silentItem("r0", d)); res.Result != "accepted" {
+		t.Fatalf("silent to a provisional binding after the return: %+v", res)
+	}
+	if n, res := silentRun(t, a, d, "q"); n != 2 || res.Error != "device_quota" {
+		t.Fatalf("budget across the rebind: %d more accepted, then %+v; want 2 (6 in the hour)", n, res)
+	}
+}

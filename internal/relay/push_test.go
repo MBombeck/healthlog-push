@@ -141,7 +141,8 @@ func TestDeviceAlertBucketAndSilentLimit(t *testing.T) {
 	if refused.Error != "device_quota" || refused.Scope != "device" || refused.RetryAfter <= 0 {
 		t.Fatalf("alert bucket: %+v", refused)
 	}
-	// Silent: 6 per hour, halved to 3 until midnight after a (re)start.
+	// Silent: 6 per hour. The harness starts the relay on a full hour, so no window lost counts and nothing
+	// is halved (TestSilentHalvedOnlyInTheHourOfTheStart covers a start within the hour).
 	e := newDevice(14)
 	i.activate(e)
 	var n int
@@ -150,8 +151,8 @@ func TestDeviceAlertBucketAndSilentLimit(t *testing.T) {
 			break
 		}
 	}
-	if n != 3 {
-		t.Fatalf("silent after restart: %d allowed, want 3", n)
+	if n != 6 {
+		t.Fatalf("silent: %d allowed, want 6", n)
 	}
 }
 

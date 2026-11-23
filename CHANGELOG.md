@@ -6,6 +6,22 @@ All notable changes to this project are documented in this file. The format foll
 
 ## [Unreleased]
 
+### Fixed
+
+- After a restart the per-device silent limit was halved to 3 per hour until the next UTC midnight, so a
+  device's fourth silent push in an hour was refused with `429 device_quota` hours after a deploy, although
+  Apple had not throttled anything. The limit is a fixed UTC clock-hour window, and only the window in which
+  the relay started lost counts; the halving now ends with that hour, and the device gets 6 per hour again
+  from the next one. The halved Live Activity start and end limits, which are counted per day, still last
+  until midnight. `spec/protocol.md` ("After a restart", push rule 11) and the threat model say so.
+- Tests now hold that every request to Apple, on every send path and whatever Apple answers, counts in
+  exactly one kind of `hlp_apns_sends_total`, so the kinds add up to `hlp_apns_requests_total`; that the
+  silent budget counts only the instance's silent pushes (not alerts, Live Activity pushes, the challenge
+  push, a replayed ref or a refunded send); and that a provisional binding, also one bound again after an
+  opt-out, gets silent pushes within the device budget, which leaving and binding again neither resets nor
+  lowers. The split by kind is served from the copy taken every five minutes while the total is live, so
+  between two copies the kinds can trail the total; a test shows they agree again at the next copy.
+
 ## [1.0.5] - 2026-11-23
 
 ### Changed

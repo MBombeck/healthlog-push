@@ -717,7 +717,7 @@ counted against any limit only when every check passed.
 | 9 | instance pushes this minute below `pushesPerMinute` | `429 instance_rate`, scope `instance` |
 | 10 | device pushes today below 300 (all classes) | `429 device_quota`, scope `device` |
 | 11 | alert: device alerts today below 100; then a token in the device's alert bucket | `429 device_quota`, scope `device` |
-| | silent: device silent pushes this hour below 6 | `429 device_quota`, scope `device` |
+| | silent: device silent pushes in the current UTC clock hour below 6 (only the instance's silent pushes count, not the relay's challenge push, and an item Apple did not take for a reason of its own or of the relay's is taken off again) | `429 device_quota`, scope `device` |
 | | liveactivity `start`: device starts today below 12 | `429 device_quota`, scope `device` |
 | | liveactivity `update`: updates of this activity (keyed by its update token) this hour below 12 and today below 48 | `429 device_quota`, scope `activity` |
 | | liveactivity `end`: device `end` events today below 12 | `429 device_quota`, scope `device` |
@@ -1078,8 +1078,11 @@ per-address caps still apply.
 Counts kept only in memory are lost on a restart. So that a restart does not hand out fresh quotas:
 
 - until the next UTC midnight after the start, the global registration caps are halved (15 per hour, 100
-  per day), and the per-device limits for silent pushes (3 per hour), Live Activity `start` events (6 per
-  day) and Live Activity `end` events (6 per day) are halved;
+  per day), and the per-device limits for Live Activity `start` events (6 per day) and Live Activity `end`
+  events (6 per day) are halved;
+- until the end of the UTC clock hour in which the relay started, the per-device limit for silent pushes is
+  halved (3 per hour). Only that hour's count was lost; from the next hour on the count is complete and the
+  limit is 6 again;
 - the per-device alert count of the day is stored with the binding (flushed every minute) and survives;
 - the per-instance daily push count is restored from the stored day counters;
 - an instance flag is stored as a day and survives;

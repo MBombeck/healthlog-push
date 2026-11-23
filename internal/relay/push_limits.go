@@ -183,7 +183,7 @@ func (r *Relay) instanceLimits(s *instState, ref string, now time.Time) (ItemRes
 // deviceLimits applies the per-device quotas: all classes per day, then the class's own limit.
 func (r *Relay) deviceLimits(b *store.Binding, dq *devQuota, it *wire.Item, now time.Time) (ItemResult, bool) {
 	ref, dl := it.Ref, r.cfg.Limits.Device
-	half := now.Before(r.halfUntil) // after a restart, counts from before it are gone: halve until midnight
+	half := now.Before(r.halfUntil) // after a restart, the day counts from before it are gone: halve until midnight
 	if dq.all.Count(now) >= dl.AllDay {
 		return itemRetry(ref, http.StatusTooManyRequests, "device_quota", "device", dq.all.RetryAfter(now)), false
 	}
@@ -200,7 +200,9 @@ func (r *Relay) deviceLimits(b *store.Binding, dq *devQuota, it *wire.Item, now 
 			return itemRetry(ref, http.StatusTooManyRequests, "device_quota", "device", dq.alerts.RetryAfter(now)), false
 		}
 	case wire.ClassSilent:
-		if dq.silentHour.Count(now) >= halve(dl.SilentHour, half) {
+		// The hourly window lost counts only if it began before the relay started: from the next hour on it
+		// is complete, so the silent limit is halved for the rest of the hour of the start, not until midnight.
+		if dq.silentHour.Count(now) >= halve(dl.SilentHour, now.Truncate(time.Hour).Before(r.started)) {
 			r.Metrics.Inc("hlp_silent_budget_refused_total", "kind", "sync")
 			return itemRetry(ref, http.StatusTooManyRequests, "device_quota", "device", dq.silentHour.RetryAfter(now)), false
 		}
