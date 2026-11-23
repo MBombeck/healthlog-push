@@ -6,6 +6,13 @@ All notable changes to this project are documented in this file. The format foll
 
 ## [Unreleased]
 
+### Fixed
+
+- A hung relay stayed hung: Docker does not restart a container that is only unhealthy. A watchdog now
+  exits the relay (log `relay.watchdog`, status 2) when the core lock cannot be taken for 60 seconds or
+  the maintenance loop has not finished a pass for 3 minutes, and the signer exits after six failed token
+  writes in a row instead of logging `signer.write_failed` forever. The restart policy brings either back.
+
 ## [1.0.6] - 2026-11-23
 
 ### Fixed
