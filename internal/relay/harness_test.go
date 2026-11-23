@@ -64,6 +64,8 @@ type fakeAPNs struct {
 	answer func(token string, push apnsReq) (int, string)
 	// extra, when set, adds response headers and the 410 timestamp (milliseconds; 0 for none) of an answer.
 	extra func(token string, push apnsReq) (header map[string]string, timestamp int64)
+	// noRecord stops keeping every request, for the load test.
+	noRecord bool
 }
 
 type apnsReq struct {
@@ -73,7 +75,7 @@ type apnsReq struct {
 	Proto  string
 }
 
-func newFakeAPNs(t *testing.T, pub *ecdsa.PublicKey) *fakeAPNs {
+func newFakeAPNs(t testing.TB, pub *ecdsa.PublicKey) *fakeAPNs {
 	f := &fakeAPNs{pub: pub, answer: func(string, apnsReq) (int, string) { return 200, "" }}
 	f.srv = httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		b, _ := io.ReadAll(r.Body)
@@ -85,7 +87,9 @@ func newFakeAPNs(t *testing.T, pub *ecdsa.PublicKey) *fakeAPNs {
 			return
 		}
 		f.mu.Lock()
-		f.reqs = append(f.reqs, ar)
+		if !f.noRecord {
+			f.reqs = append(f.reqs, ar)
+		}
 		ans := f.answer
 		f.mu.Unlock()
 		status, reason := ans(tok, ar)
@@ -147,7 +151,7 @@ func (s *staticTokens) Token() (string, int64, bool) {
 	return s.jwt, s.iat, s.jwt != ""
 }
 func (s *staticTokens) RequestRefresh() { s.mu.Lock(); s.refresh++; s.mu.Unlock() }
-func (s *staticTokens) renew(t *testing.T, iat time.Time) {
+func (s *staticTokens) renew(t testing.TB, iat time.Time) {
 	j, err := signer.MakeJWT(s.key, "KEYID12345", "TEAMID1234", iat)
 	if err != nil {
 		t.Fatal(err)
@@ -158,7 +162,7 @@ func (s *staticTokens) renew(t *testing.T, iat time.Time) {
 }
 
 type harness struct {
-	t      *testing.T
+	t      testing.TB
 	clk    *clock
 	r      *Relay
 	st     *store.Store
@@ -180,7 +184,7 @@ func (s *syncBuf) Write(p []byte) (int, error) { s.mu.Lock(); defer s.mu.Unlock(
 
 type option func(*Config)
 
-func newHarness(t *testing.T, opts ...option) *harness {
+func newHarness(t testing.TB, opts ...option) *harness {
 	t.Helper()
 	pk, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	f := newFakeAPNs(t, &pk.PublicKey)
