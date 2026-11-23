@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="330" viewBox="0 0 900 330" role="img" aria-labelledby="title desc">
+<title id="title">How a push travels through the HealthLog push relay</title>
+<desc id="desc">A self-hosted HealthLog server seals one envelope per device and sends a signed request to the relay. The relay checks signatures and limits, gets its Apple token from a signer without network access, and sends a fixed payload with the sealed envelope to Apple. Apple delivers it to the iPhone, where the HealthLog app opens the envelope. The app signs the binding that lets a server reach the device.</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#9198a1"/></marker></defs>
+<g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" fill="#f0f6fc">
+<rect x="10" y="40" width="190" height="150" rx="10" fill="#161b22" stroke="#3d444d" stroke-width="1.5"/>
+<text x="105.0" y="70" text-anchor="middle" font-size="16" font-weight="600">HealthLog server</text>
+<text x="105.0" y="96" text-anchor="middle" font-size="13" fill="#9198a1">self-hosted, yours</text>
+<text x="105.0" y="114" text-anchor="middle" font-size="13" fill="#9198a1">seals one envelope</text>
+<text x="105.0" y="132" text-anchor="middle" font-size="13" fill="#9198a1">per device (HPKE)</text>
+<rect x="250" y="40" width="230" height="150" rx="10" fill="#0c2d6b" stroke="#4493f8" stroke-width="1.5"/>
+<text x="365.0" y="70" text-anchor="middle" font-size="16" font-weight="600">Push relay</text>
+<text x="365.0" y="96" text-anchor="middle" font-size="13" fill="#9198a1">checks signatures</text>
+<text x="365.0" y="114" text-anchor="middle" font-size="13" fill="#9198a1">and limits, cannot</text>
+<text x="365.0" y="132" text-anchor="middle" font-size="13" fill="#9198a1">open an envelope</text>
+<rect x="530" y="40" width="150" height="150" rx="10" fill="#161b22" stroke="#3d444d" stroke-width="1.5"/>
+<text x="605.0" y="70" text-anchor="middle" font-size="16" font-weight="600">Apple (APNs)</text>
+<text x="605.0" y="96" text-anchor="middle" font-size="13" fill="#9198a1">delivers to the</text>
+<text x="605.0" y="114" text-anchor="middle" font-size="13" fill="#9198a1">device</text>
+<rect x="730" y="40" width="160" height="150" rx="10" fill="#161b22" stroke="#3d444d" stroke-width="1.5"/>
+<text x="810.0" y="70" text-anchor="middle" font-size="16" font-weight="600">iPhone</text>
+<text x="810.0" y="96" text-anchor="middle" font-size="13" fill="#9198a1">the HealthLog app</text>
+<text x="810.0" y="114" text-anchor="middle" font-size="13" fill="#9198a1">opens the envelope</text>
+<rect x="270" y="148" width="190" height="32" rx="6" fill="#212830" stroke="#3d444d" stroke-dasharray="4 3"/>
+<text x="365.0" y="169" text-anchor="middle" font-size="12" fill="#9198a1">signer: Apple key, no network</text>
+<line x1="202" y1="115" x2="247" y2="115" stroke="#9198a1" stroke-width="1.5" marker-end="url(#arrow)"/>
+<line x1="482" y1="115" x2="527" y2="115" stroke="#9198a1" stroke-width="1.5" marker-end="url(#arrow)"/>
+<line x1="682" y1="115" x2="727" y2="115" stroke="#9198a1" stroke-width="1.5" marker-end="url(#arrow)"/>
+<text x="225" y="232" text-anchor="middle" font-size="12" fill="#9198a1">signed request</text>
+<text x="225" y="248" text-anchor="middle" font-size="12" fill="#9198a1">sealed envelope</text>
+<text x="505" y="232" text-anchor="middle" font-size="12" fill="#9198a1">fixed payload</text>
+<text x="505" y="248" text-anchor="middle" font-size="12" fill="#9198a1">same envelope</text>
+<text x="705" y="232" text-anchor="middle" font-size="12" fill="#9198a1">push</text>
+<line x1="225" y1="120" x2="225" y2="216" stroke="#3d444d" stroke-width="1" stroke-dasharray="2 3"/>
+<line x1="505" y1="120" x2="505" y2="216" stroke="#3d444d" stroke-width="1" stroke-dasharray="2 3"/>
+<line x1="705" y1="120" x2="705" y2="216" stroke="#3d444d" stroke-width="1" stroke-dasharray="2 3"/>
+<path d="M810 190 V285 H105 V193" fill="none" stroke="#3fb950" stroke-width="1.5" stroke-dasharray="6 4" marker-end="url(#arrow)"/>
+<text x="462" y="305" text-anchor="middle" font-size="13" fill="#3fb950">the app signs the binding and holds the only key that opens an envelope</text>
+</g></svg>
