@@ -169,7 +169,8 @@ that time: device tokens, instance ids, envelopes (unreadable) and timing. They 
   example a `204` to an opt-out) cannot be replayed onto another request. A HealthLog server and the app treat
   a missing or wrong signature, and an answer bound to no nonce, as a transport error, and take retry hints
   only from the signed body. A non-canonical path gets a signed `404`, never an unsigned redirect.
-  `/privacy`, `/terms`, `/.well-known/security.txt` and `/` are plain text and not signed;
+  `/privacy`, `/terms`, `/.well-known/security.txt` and `/` are plain text (or, for a browser, HTML
+  rendered from the same text) and not signed;
 - replay instance requests elsewhere: the request signature covers the host name, the instance id, method,
   path and query, time, nonce and body hash;
 - bind devices: a binding needs a statement signed by the device's binding key for that host and instance.

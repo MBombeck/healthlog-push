@@ -16,7 +16,8 @@ info:
     status and the hex SHA-256 of the body. A response without a valid signature, or bound to `-` although
     the request carried a nonce, is a transport error. Clients take retry hints only from the signed
     `retryAfter` field (capped at 86400 seconds), never from the unsigned `Retry-After` header. The
-    plain-text pages `/`, `/privacy`, `/terms` and `/.well-known/security.txt` are not signed.
+    pages `/`, `/privacy`, `/terms`, `/privacy.txt`, `/terms.txt` and `/.well-known/security.txt` are not
+    signed.
 
     `HL-Nonce` is mandatory on every `/v1` request (the path `/v1` itself and everything under `/v1/`),
     including registration and the app's direct calls; without a valid one the relay answers
@@ -558,7 +559,25 @@ paths:
     get:
       tags: [public]
       operationId: getPrivacy
-      summary: Privacy notice (plain text, unsigned)
+      summary: Privacy notice (plain text or HTML, unsigned)
+      description: |
+        Plain text, byte for byte the text in `internal/notice/privacy.md`, unless the `Accept` header asks
+        for `text/html` (or `application/xhtml+xml`) above `text/plain`; then an HTML page rendered from the
+        same text. The response carries `Vary: Accept`.
+      security: []
+      responses:
+        "200":
+          description: Privacy notice.
+          content:
+            text/plain:
+              schema: { type: string }
+            text/html:
+              schema: { type: string }
+  /privacy.txt:
+    get:
+      tags: [public]
+      operationId: getPrivacyText
+      summary: Privacy notice (always plain text, unsigned)
       security: []
       responses:
         "200":
@@ -570,7 +589,25 @@ paths:
     get:
       tags: [public]
       operationId: getTerms
-      summary: Terms of use (plain text, unsigned)
+      summary: Terms of use (plain text or HTML, unsigned)
+      description: |
+        Plain text, byte for byte the text in `internal/notice/terms.md`, unless the `Accept` header asks
+        for `text/html` (or `application/xhtml+xml`) above `text/plain`; then an HTML page rendered from the
+        same text. The response carries `Vary: Accept`.
+      security: []
+      responses:
+        "200":
+          description: Terms of use.
+          content:
+            text/plain:
+              schema: { type: string }
+            text/html:
+              schema: { type: string }
+  /terms.txt:
+    get:
+      tags: [public]
+      operationId: getTermsText
+      summary: Terms of use (always plain text, unsigned)
       security: []
       responses:
         "200":
@@ -597,13 +634,16 @@ paths:
     get:
       tags: [public]
       operationId: getIndex
-      summary: Index page (plain text, unsigned)
+      summary: Index page (plain text or HTML, unsigned)
+      description: Negotiated like `/privacy`.
       security: []
       responses:
         "200":
           description: Index page.
           content:
             text/plain:
+              schema: { type: string }
+            text/html:
               schema: { type: string }
 components:
   securitySchemes:

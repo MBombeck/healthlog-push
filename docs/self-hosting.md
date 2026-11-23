@@ -244,8 +244,10 @@ HealthLog server documentation for its relay settings. Every response of your re
 
 ## Responsibilities
 
-Running a relay for other people makes you responsible for what it processes. Publish your own privacy
-notice and terms: the relay serves the texts compiled into the binary at `/privacy` and `/terms`, which
-describe the hosted relay of the HealthLog project, so build your own binary with your texts in
-`internal/notice/` if you serve anyone but yourself. The same applies to `/.well-known/security.txt` and the
-index page (`internal/notice/notice.go`), which name the HealthLog project's contacts.
+Running a relay for other people makes you responsible for what it processes. Publish your own privacy notice
+and terms: the relay serves the texts compiled into the binary at `/privacy` and `/terms` (as HTML to a
+browser, rendered from the same text), which describe the hosted relay of the HealthLog project, so build your
+own binary with your texts in `internal/notice/` if you serve anyone but yourself. Keep them in the markdown
+subset the HTML renderer accepts (headings, paragraphs, `-` and numbered lists, code, bold, https and mailto
+links); the tests fail on anything else. The same applies to `/.well-known/security.txt` and the index page
+(`internal/notice/notice.go`), which name the HealthLog project's contacts.

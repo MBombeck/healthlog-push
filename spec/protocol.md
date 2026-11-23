@@ -41,7 +41,9 @@ What each party learns:
 - At most 2000 concurrent connections in total, 8 per IPv4 address or IPv6 /64 and 64 per IPv6 /48. A
   HealthLog server needs one connection. Connections over a limit are closed at accept, without a response.
 - Every response carries `Cache-Control: no-store`, `X-Content-Type-Options: nosniff`,
-  `Strict-Transport-Security: max-age=31536000` and `Content-Security-Policy: default-src 'none'`.
+  `Strict-Transport-Security: max-age=31536000` and `Content-Security-Policy: default-src 'none'`. The HTML
+  pages (see Human pages) carry a policy that adds only their one inline style, allowed by its SHA-256
+  hash, and no script.
 - The relay sends no CORS headers.
 - An unknown path, or a known path with another method, answers `404 not_found` (signed).
 - Only canonical paths are routed. A path that `path.Clean` would change (for example `/v1//push` or
@@ -122,7 +124,7 @@ the router's `404`) carries `HL-Relay-Signature`: the relay identity key's signa
 request's `HL-Nonce`, the status code and the hex SHA-256 of the body. The nonce field is `-` only when the
 request carried no valid nonce: `/healthz` and `/version` called without one, the `400 nonce_required`
 refusal, and the router's `404` for an unknown path outside `/v1` (under `/v1` the nonce is checked first). The
-plain-text pages `/`, `/privacy` and `/terms` are not signed.
+pages `/`, `/privacy`, `/terms`, `/privacy.txt` and `/terms.txt` are not signed.
 
 Instances and the app pin the relay identity public keys (`current` and `next`) at build time. They rebuild
 the text from their own request and the received response and verify it. A response whose signature is
@@ -1237,11 +1239,19 @@ The body carries no time stamp.
 `200 { "version": "...", "commit": "...", "imageDigest": "..." }`: the build version, the source commit and
 the container image digest the operator configured. Signed; `HL-Nonce` is optional.
 
-### Plain-text pages
+### Human pages
 
-`GET /` (index), `GET /privacy` (privacy notice), `GET /terms` (terms of use) and
+`GET /` (index), `GET /privacy` (privacy notice) and `GET /terms` (terms of use) return
+`text/plain; charset=utf-8`, unsigned: the text compiled into the binary, byte for byte. A client whose
+`Accept` header names `text/html` or `application/xhtml+xml` with a quality above zero and above the
+quality it gives `text/plain` gets an HTML page rendered from the same text instead
+(`text/html; charset=utf-8`). A wildcard such as `*/*`, no `Accept` header, or equal preference keeps the
+plain text. Both answers carry `Vary: Accept`. The HTML page loads nothing: its policy is
+`default-src 'none'; style-src 'sha256-...'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`,
+with the hash of its one inline style, and it carries `X-Frame-Options: DENY` and
+`Referrer-Policy: no-referrer`. `GET /privacy.txt` and `GET /terms.txt` always return the plain text.
 `GET /.well-known/security.txt` (RFC 9116: contact `relay@healthlog.dev` and the repository's GitHub
-security advisories, with an `Expires` date) return `text/plain; charset=utf-8`, unsigned.
+security advisories, with an `Expires` date) returns `text/plain; charset=utf-8`, unsigned.
 
 ## State
 
