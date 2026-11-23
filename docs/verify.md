@@ -31,6 +31,7 @@ image tag of the release instead.
 | 3 | a fresh clone of the tag, built twice with `scripts/build.sh` (linux/amd64, linux/arm64) | the source at the tag gives exactly these binaries; nothing else went into them |
 | 4 | `cosign verify` and `cosign verify-attestation --type slsaprovenance1` on the image digest | the image was built and signed by the release workflow at this tag, with SLSA build provenance |
 | 5 | the binary extracted from each platform image | the image contains the same file as the release, so steps 2 and 3 also describe the image |
+| 6 | `binarySha256` and `platform` from step 1 against `SHA256SUMS` | the relay's own process reports the hash of exactly that release binary |
 
 Every step can fail, and the script exits with status 1 when one does.
 

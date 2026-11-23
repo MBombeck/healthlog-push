@@ -637,8 +637,15 @@ Field meanings: [operations.md](operations.md#health).
 Signed.
 
 ```json
-{"commit":"<git commit>","imageDigest":"sha256:<64 hex>","version":"v1.0.0"}
+{"version":"vX.Y.Z","commit":"<git commit>","imageDigest":"sha256:<64 hex>","binarySha256":"<64 hex>","platform":"linux/amd64","goVersion":"go1.27.4"}
 ```
+
+`binarySha256` is the SHA-256 of the running executable, which the relay hashes itself at start (from
+`/proc/self/exe`). It equals the line for `platform` in the release's `SHA256SUMS`, and the binary inside
+the image of `imageDigest`, so the answer can be matched to a signed release and to a rebuild of the tagged
+source ([verify.md](verify.md)). The image digest cannot be built into the binary, because it is the hash
+of the build's own output; the deployment passes it as `HLP_IMAGE_DIGEST`. Nothing here describes the
+host, the configuration or anyone using the relay.
 
 ### GET /privacy, GET /terms, GET /.well-known/security.txt, GET /
 

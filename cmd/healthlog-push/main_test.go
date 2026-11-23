@@ -3,7 +3,9 @@ package main
 import (
 	"bytes"
 	"crypto/ed25519"
+	"crypto/sha256"
 	"crypto/tls"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -185,5 +187,25 @@ func TestCheckPublicHost(t *testing.T) {
 		if checkPublicHost(bad) == nil {
 			t.Errorf("%q accepted", bad)
 		}
+	}
+}
+
+// TestRelayConfigCarriesTheExecutableHash: the configuration the relay starts with names the SHA-256 of the
+// running file, which /version reports.
+func TestRelayConfigCarriesTheExecutableHash(t *testing.T) {
+	cfg, err := relayConfig(testHost, testID, [][]byte{bytes.Repeat([]byte{7}, 32)}, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sum := sha256.Sum256(b); cfg.BinarySHA256 != hex.EncodeToString(sum[:]) {
+		t.Fatalf("BinarySHA256 = %q, the running file is %x", cfg.BinarySHA256, sum)
 	}
 }

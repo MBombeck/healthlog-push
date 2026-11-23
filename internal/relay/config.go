@@ -75,6 +75,7 @@ type Config struct {
 	Version      string             // build version, shown at /version
 	Commit       string             // source commit, shown at /version
 	ImageDigest  string             // container image digest, shown at /version
+	BinarySHA256 string             // SHA-256 of the running executable, shown at /version
 	Now          func() time.Time   // the clock; nil means time.Now
 	// Registration is the registration mode a store without a stored mode starts in (a new store, or one
 	// on which no mode was ever set): open, invite or closed. Empty means invite. A stored mode, set with

@@ -3,6 +3,8 @@ package relay
 import (
 	"net/http"
 	"time"
+
+	"github.com/MBombeck/healthlog-push/internal/buildinfo"
 )
 
 // heldRefresh is how often the scrape takes its copy of every metric that is not in liveMetrics.
@@ -69,6 +71,20 @@ func (r *Relay) handleHealthz(w http.ResponseWriter, req *http.Request) {
 	r.reply(w, req, status, h)
 }
 
+// VersionInfo is the public /version body: enough to match the running relay to a signed release
+// (docs/verify.md), and nothing about its configuration, its host or anyone using it.
+type VersionInfo struct {
+	Version     string `json:"version"`
+	Commit      string `json:"commit"`
+	ImageDigest string `json:"imageDigest"`
+	// BinarySHA256 is the SHA-256 of the running executable, hashed by the process at start; the release
+	// lists the same value in SHA256SUMS. Absent when the file could not be read.
+	BinarySHA256 string `json:"binarySha256,omitempty"`
+	Platform     string `json:"platform"`
+	GoVersion    string `json:"goVersion"`
+}
+
 func (r *Relay) handleVersion(w http.ResponseWriter, req *http.Request) {
-	r.reply(w, req, http.StatusOK, map[string]string{"version": r.cfg.Version, "commit": r.cfg.Commit, "imageDigest": r.cfg.ImageDigest})
+	r.reply(w, req, http.StatusOK, VersionInfo{Version: r.cfg.Version, Commit: r.cfg.Commit, ImageDigest: r.cfg.ImageDigest,
+		BinarySHA256: r.cfg.BinarySHA256, Platform: buildinfo.Platform(), GoVersion: buildinfo.GoVersion()})
 }

@@ -110,7 +110,19 @@ func relayConfig(host string, id ed25519.PrivateKey, macKeys [][]byte, exportDir
 	return relay.Config{
 		Host: host, Identity: id, IdentitySlot: keys.Slot(host, ed25519.PublicKey(id[32:])), MACKeys: macKeys, Environments: envs, ExportDir: exportDir, MinClient: minClient,
 		Version: buildinfo.Version, Commit: buildinfo.Commit, ImageDigest: os.Getenv("HLP_IMAGE_DIGEST"), Registration: reg,
+		BinarySHA256: executableHash(),
 	}, nil
+}
+
+// executableHash is the SHA-256 of the running file, for /version. A file the process cannot read leaves
+// the field out rather than stopping the relay.
+func executableHash() string {
+	sum, err := buildinfo.ExecutableSHA256()
+	if err != nil {
+		logx.Event("relay.binary_hash_failed")
+		return ""
+	}
+	return sum
 }
 
 // listenerExit is how one of the three listeners ended; name is public, metrics or admin.

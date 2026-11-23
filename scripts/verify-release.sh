@@ -5,7 +5,8 @@
 #   2. the signature on SHA256SUMS and the downloaded release binaries against it;
 #   3. a rebuild of the tagged source with scripts/build.sh, which must give the same two files;
 #   4. the signature and SLSA provenance of the image digest;
-#   5. the binary inside each platform image, which must be the same file again.
+#   5. the binary inside each platform image, which must be the same file again;
+#   6. the hash the relay reports for its own executable, which must be that file too.
 #
 # Needs: bash, git, go (any recent release; the build fetches the exact one go.mod names), curl, jq, tar,
 # cosign 3 and crane. docs/verify.md explains each step.
@@ -106,5 +107,22 @@ for arch in amd64 arm64; do
   [ "$got" = "$(want "$arch")" ] || fail "the binary in the linux/$arch image is $got, SHA256SUMS says $(want "$arch")"
 done
 ok "the binary in both platform images is the release binary"
+
+# 6. The hash the relay reports of its own executable.
+if [ -n "$RELAY" ]; then
+  reported_sum="$(jq -r '.binarySha256 // empty' "$work/version.json")"
+  platform="$(jq -r '.platform // empty' "$work/version.json")"
+  if [ -z "$reported_sum" ]; then
+    echo "note $RELAY does not report a binary hash (a release before this field, or the file was unreadable)"
+  else
+    case "$platform" in
+      linux/amd64 | linux/arm64) ;;
+      *) fail "$RELAY reports platform $platform" ;;
+    esac
+    [ "$reported_sum" = "$(want "${platform#linux/}")" ] \
+      || fail "$RELAY reports binary $reported_sum for $platform, SHA256SUMS says $(want "${platform#linux/}")"
+    ok "$RELAY reports the hash of the $platform release binary for its own executable"
+  fi
+fi
 
 printf '\n%s verified: signed, rebuilt from source, and the image runs exactly the released binaries.\n' "$tag"
