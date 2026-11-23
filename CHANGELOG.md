@@ -22,6 +22,11 @@ All notable changes to this project are documented in this file. The format foll
   the run. govulncheck also runs weekly, so a fix in the Go standard library is noticed without a commit.
   All actions stay pinned by commit.
 
+### Security
+
+- `golang.org/x/net` v0.63.0 (from v0.62.0). The relay uses it only for `idna` in autocert; govulncheck
+  reported nothing reachable before or after.
+
 ## [1.0.6] - 2026-11-23
 
 ### Fixed

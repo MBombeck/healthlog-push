@@ -21,7 +21,7 @@ Prometheus text output, which is written by hand in `internal/metrics`.
 
 | Module | Version | Pulled in by | Why |
 |---|---|---|---|
-| `golang.org/x/net` | v0.62.0 | `golang.org/x/crypto/acme/autocert` | `idna` for host name handling in autocert. |
+| `golang.org/x/net` | v0.63.0 | `golang.org/x/crypto/acme/autocert` | `idna` for host name handling in autocert. |
 | `golang.org/x/text` | v0.44.0 | `golang.org/x/net/idna` | Unicode tables (`secure/bidirule`) used by `idna`. |
 | `golang.org/x/sys` | v0.50.0 | `go.etcd.io/bbolt` | `unix` system calls for memory mapping and file locking. |
 
