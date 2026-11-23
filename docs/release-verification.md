@@ -27,6 +27,10 @@ verifies. Signature, SBOM and provenance are Sigstore bundles in the registry's 
 
 ## Checking a release
 
+[verify.md](verify.md) has the one-command check (`scripts/verify-release.sh`): signatures, a rebuild of
+the tagged source, and the binary inside the image, which is the release binary byte for byte from the
+release after v1.0.6 on. The commands below are the signature, SBOM and provenance checks one by one.
+
 With cosign 3 (tested with v3.1.4), from v1.0.1 on, no format flag:
 
 ```sh
@@ -97,7 +101,8 @@ other command is the one the workflow uses. It checks:
 5. a reference that was not signed (a single platform manifest) is refused;
 6. each release binary has an SPDX SBOM that carries its hash and the compiled-in modules, and binaries and
    SBOMs match `SHA256SUMS`, whose signature bundle verifies;
-7. rebuilding the binary gives a byte-identical file.
+7. rebuilding the binary gives a byte-identical file;
+8. the binary in each platform image is the release binary of that platform.
 
 Last run, on 2026-11-22 against commit `8014f1b` with the binary SBOM step applied:
 
