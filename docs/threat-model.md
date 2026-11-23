@@ -328,6 +328,10 @@ app does not depend on the relay for anything else. Protections against a self-i
   the traces of the last 72 hours.
 - **A panic in a send worker ends the process.** It is not recovered; the container is restarted, with the
   restart rules above.
+- **A hang ends the process too.** Docker does not restart a container that is only unhealthy, so a
+  watchdog exits the relay (log `relay.watchdog`, status 2) when the core lock cannot be taken for 60 s or
+  the maintenance loop has not finished a pass for 3 minutes; the signer exits after six failed steps in a
+  row. A false trip costs one restart, with the restart rules above.
 - **One global lock.** All mutable relay state is guarded by one mutex; signatures are verified and bodies
   read outside it. This keeps the invariants simple to check but bounds throughput to one handler in the
   critical section at a time. The concurrency model is in

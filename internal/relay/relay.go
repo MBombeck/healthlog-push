@@ -58,6 +58,10 @@ type Relay struct {
 	// ErrLog is the http.Server error log: it counts lines and discards them, because they carry addresses.
 	ErrLog *logx.CountingWriter
 
+	// loopBeat is the wall time (unix nanoseconds) of the maintenance loop's last finished pass; the
+	// watchdog reads it.
+	loopBeat atomic.Int64
+
 	mu            sync.Mutex
 	instances     map[string]*instState
 	byKey         map[string]string // raw public key to instance id

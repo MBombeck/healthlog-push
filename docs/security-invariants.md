@@ -67,6 +67,7 @@ comparison is needed; signatures are checked by the standard library.
 | F5 | Health status and the deploy gate depend only on the relay's own facts; third-party receipts are capped and shown only. | `TestReceiptsDriveDeliveryHealth` (internal/relay/push_test.go), `TestPublicEndpoints` (internal/relay/http_test.go) |
 | F6 | Periodic maintenance writes in batches and a metrics scrape writes nothing. | `TestFlushIsOneTransaction` (internal/relay/push_test.go), `TestMaintenanceWritesInBatches` (internal/relay/concurrency_test.go) |
 | F7 | Live Activity pushes use Apple priority 10 only for the end and for a due or overdue state, decided by the relay from the checked state, so routine updates stay outside the device's budget. | `TestLiveActivityPriorityFollowsTheState` (internal/relay/apns_answers_test.go), `TestPriorities` (internal/apns/apns_test.go), `TestLiveActivityUrgent` (internal/apns/apns_test.go) |
+| F8 | A hang ends the process so the restart policy applies: a lock attempt on the core mutex waiting over 60 s or a maintenance loop without a finished pass for 3 minutes exits the relay, six failed signer steps in a row (about a minute) exit the signer. | `TestWatchdogExitsOnHeldLock` (internal/relay/watchdog_test.go), `TestWatchdogExitsOnStalledLoop` (internal/relay/watchdog_test.go), `TestWatchdogQuietWhileHealthy` (internal/relay/watchdog_test.go), `TestSignerExitsOnPersistentWriteFailure` (cmd/healthlog-push/signer_test.go), `TestSignerFailureCountResets` (cmd/healthlog-push/signer_test.go) |
 
 ## Data minimisation
 

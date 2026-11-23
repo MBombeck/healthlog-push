@@ -36,16 +36,34 @@ func runSigner() error {
 	logx.Event("signer.start", logx.Str(logx.KVersion, buildinfo.Version))
 	t := time.NewTicker(signer.PollInterval)
 	defer t.Stop()
+	return signerLoop(ctx, s.Step, t.C, signerMaxFailures)
+}
+
+// signerMaxFailures consecutive failed steps (one per PollInterval, so about a minute) end the signer with
+// an error, and the container's restart policy starts it again. Before, it logged forever while the relay's
+// token aged towards expiry.
+const signerMaxFailures = 6
+
+// signerLoop runs step on every tick until ctx ends or step has failed maxFailures times in a row.
+func signerLoop(ctx context.Context, step func() (bool, error), tick <-chan time.Time, maxFailures int) error {
+	failures := 0
 	for {
-		if wrote, err := s.Step(); err != nil {
-			logx.Event("signer.write_failed")
-		} else if wrote {
-			logx.Event("signer.token_written")
+		if wrote, err := step(); err != nil {
+			failures++
+			logx.Event("signer.write_failed", logx.Int(logx.KCount, int64(failures)))
+			if failures >= maxFailures {
+				return fmt.Errorf("signer: %d steps in a row failed: %w", failures, err)
+			}
+		} else {
+			failures = 0
+			if wrote {
+				logx.Event("signer.token_written")
+			}
 		}
 		select {
 		case <-ctx.Done():
 			return nil
-		case <-t.C:
+		case <-tick:
 		}
 	}
 }

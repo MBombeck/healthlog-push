@@ -60,9 +60,13 @@ func (r *Relay) flushLocked() {
 }
 
 // Run drives the periodic work until ctx ends: every minute a flush and the summary log line, at every
-// day change the retention, promotion and export tasks.
+// day change the retention, promotion and export tasks. A watchdog ends the process when the core lock or
+// this loop stops making progress (see watchdog.go).
 func (r *Relay) Run(ctx context.Context) {
+	r.loopBeat.Store(time.Now().UnixNano())
+	go newWatchdog().run(ctx, r)
 	r.Daily()
+	r.loopBeat.Store(time.Now().UnixNano())
 	t := time.NewTicker(time.Minute)
 	defer t.Stop()
 	for {
@@ -71,6 +75,7 @@ func (r *Relay) Run(ctx context.Context) {
 			return
 		case <-t.C:
 			r.Tick()
+			r.loopBeat.Store(time.Now().UnixNano())
 		}
 	}
 }
