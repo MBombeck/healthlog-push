@@ -300,8 +300,9 @@ app does not depend on the relay for anything else. Protections against a self-i
   instance in the last three days. The `delivery` signal needs at least 20 accepted pushes and reports from at
   least three instances in 24 hours. Cooperating `standard` instances can still turn it to `degraded`; it is
   display only and changes neither the `/healthz` status nor the deploy gate.
-- **A restart forgets in-memory counters.** Per-device silent and Live Activity start and end limits and the global
-  registration caps are halved until midnight to compensate; the alert bucket starts full; the nonce cache
+- **A restart forgets in-memory counters.** Per-device Live Activity start and end limits and the global
+  registration caps are halved until midnight to compensate, the per-device silent limit for the rest of the
+  clock hour of the start (the only hourly window that lost counts); the alert bucket starts full; the nonce cache
   is empty, which is why time stamps from before the start are refused. Only each binding's alert count of
   the day and each instance's push count of the day are restored (and the instance flag, which is stored as
   a day). The per-instance counts of new bindings and challenges of the day, the record of which token each

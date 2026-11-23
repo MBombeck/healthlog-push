@@ -381,3 +381,133 @@ func TestLatencyBucketsResolveTheUsefulRange(t *testing.T) {
 		}
 	}
 }
+
+// sendsByKind is the sum of hlp_apns_sends_total over every kind.
+func sendsByKind(m map[string]float64) float64 {
+	var n float64
+	for _, k := range pushKinds {
+		n += m[`hlp_apns_sends_total{kind="`+k+`"}`]
+	}
+	return n
+}
+
+// TestEverySendCountsOneKind: every request to Apple, on every send path and whatever Apple answers,
+// raises hlp_apns_requests_total and exactly one kind of hlp_apns_sends_total by one, so the kinds always
+// add up to the total. A send path that skipped the split would let the two drift apart.
+func TestEverySendCountsOneKind(t *testing.T) {
+	answers := []struct {
+		name   string
+		status int
+		reason string
+	}{{"accepted", 200, ""}, {"refused", 400, "BadTopic"}, {"unavailable", 503, "ServiceUnavailable"}}
+	cases := []struct {
+		kind string
+		item func(h *harness, i *instance, d *device, ref string) wire.PushItem
+	}{
+		{kindAlert, func(_ *harness, _ *instance, d *device, ref string) wire.PushItem { return alertItem(ref, d) }},
+		{kindSilentSync, func(_ *harness, _ *instance, d *device, ref string) wire.PushItem { return silentItem(ref, d) }},
+		{kindLAStart, func(h *harness, i *instance, d *device, ref string) wire.PushItem {
+			now := h.clk.Now()
+			return d.laItem(ref, wire.EventStart, i.id, bytes.Repeat([]byte{0x71}, 32), now.Unix(), dueState(now))
+		}},
+		{kindLAUpdate, func(h *harness, i *instance, d *device, ref string) wire.PushItem {
+			now := h.clk.Now()
+			return d.laItem(ref, wire.EventUpdate, i.id, bytes.Repeat([]byte{0x72}, 32), now.Unix(), dueState(now))
+		}},
+		{kindLAEnd, func(h *harness, i *instance, d *device, ref string) wire.PushItem {
+			return d.activity(ref, i.id, bytes.Repeat([]byte{0x73}, 32), h.clk.Now().Unix())
+		}},
+	}
+	for _, a := range answers {
+		for _, c := range cases {
+			t.Run(c.kind+"/"+a.name, func(t *testing.T) {
+				h := newHarness(t)
+				i := h.register()
+				d := newDevice(0xd1)
+				i.activate(d)
+				if rp := i.laConsent(d, d.key); rp.Status != 200 {
+					t.Fatalf("consent: %d %s", rp.Status, rp.Raw)
+				}
+				m0 := live(t, h)
+				h.apns.setAnswer(func(string, apnsReq) (int, string) { return a.status, a.reason })
+				if res := i.push1(c.item(h, i, d, "k")); res.Status == http.StatusTooManyRequests || res.Error == "invalid_item" {
+					t.Fatalf("not sent: %+v", res)
+				}
+				m1 := live(t, h)
+				if d := m1["hlp_apns_requests_total"] - m0["hlp_apns_requests_total"]; d != 1 {
+					t.Fatalf("requests rose by %g, want 1", d)
+				}
+				for _, k := range pushKinds {
+					want := 0.0
+					if k == c.kind {
+						want = 1
+					}
+					s := `hlp_apns_sends_total{kind="` + k + `"}`
+					if d := m1[s] - m0[s]; d != want {
+						t.Errorf("%s rose by %g, want %g", s, d, want)
+					}
+				}
+				if sendsByKind(m1) != m1["hlp_apns_requests_total"] {
+					t.Errorf("kinds add up to %g, requests %g", sendsByKind(m1), m1["hlp_apns_requests_total"])
+				}
+			})
+		}
+	}
+	// The relay's own wake push for a challenge is the remaining send path.
+	t.Run(kindSilentWake, func(t *testing.T) {
+		h := newHarness(t)
+		a, b := h.register(), h.register()
+		a.activate(newDevice(0xd2))
+		m0 := live(t, h)
+		if rp := b.bind(newDevice(0xd2)); rp.str("reason") != "challenge_sent" {
+			t.Fatalf("conflict: %d %s", rp.Status, rp.Raw)
+		}
+		deadline := time.Now().Add(5 * time.Second)
+		for live(t, h)["hlp_apns_requests_total"] == m0["hlp_apns_requests_total"] && time.Now().Before(deadline) {
+			time.Sleep(10 * time.Millisecond)
+		}
+		m1 := live(t, h)
+		grew(t, m0, m1, `hlp_apns_sends_total{kind="silent_wake"}`, 1)
+		if sendsByKind(m1) != m1["hlp_apns_requests_total"] || sendsByKind(m1) != sendsByKind(m0)+1 {
+			t.Errorf("kinds %g, requests %g", sendsByKind(m1), m1["hlp_apns_requests_total"])
+		}
+	})
+}
+
+// TestKindSplitIsHeldNotLost: the split by kind is served from the copy taken every heldRefresh while the
+// total is live, so between two copies the kinds can trail the total. They are equal again at the next
+// copy; nothing is lost.
+func TestKindSplitIsHeldNotLost(t *testing.T) {
+	h := newHarness(t)
+	i := h.register()
+	d := newDevice(0xd3)
+	scrape := func() map[string]float64 {
+		t.Helper()
+		var b bytes.Buffer
+		if err := h.r.Metrics.Write(&b, h.clk.Now(), heldRefresh); err != nil {
+			t.Fatal(err)
+		}
+		out := map[string]float64{}
+		for _, line := range strings.Split(b.String(), "\n") {
+			if line == "" || strings.HasPrefix(line, "#") {
+				continue
+			}
+			k := strings.LastIndexByte(line, ' ')
+			v, _ := strconv.ParseFloat(line[k+1:], 64)
+			out[line[:k]] = v
+		}
+		return out
+	}
+	scrape()
+	i.activate(d)
+	i.push1(silentItem("h1", d))
+	i.push1(d.activity("h2", i.id, bytes.Repeat([]byte{0x74}, 32), h.clk.Now().Unix()))
+	m := scrape()
+	if m["hlp_apns_requests_total"] != 3 || sendsByKind(m) != 0 {
+		t.Fatalf("before the next copy: requests %g, kinds %g", m["hlp_apns_requests_total"], sendsByKind(m))
+	}
+	h.clk.Add(heldRefresh)
+	if m = scrape(); sendsByKind(m) != m["hlp_apns_requests_total"] {
+		t.Fatalf("after the next copy: requests %g, kinds %g", m["hlp_apns_requests_total"], sendsByKind(m))
+	}
+}
