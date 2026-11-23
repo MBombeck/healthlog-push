@@ -33,7 +33,8 @@ characters), public keys 32 bytes (43 characters).
 - Signed texts are fields joined with a single `\n`, no trailing newline. Times are Unix seconds and must be
   within 300 seconds of the relay clock.
 - Every response carries `Cache-Control: no-store`, `Strict-Transport-Security`,
-  `X-Content-Type-Options: nosniff` and `Content-Security-Policy: default-src 'none'`.
+  `X-Content-Type-Options: nosniff` and `Content-Security-Policy: default-src 'none'`. The HTML form of the
+  human pages adds only its inline style to the policy, by hash.
 
 ### Request signing (instance endpoints)
 
@@ -64,7 +65,7 @@ only limits how often failures are counted in the metrics.
 
 ### Response signing
 
-Every response except `/privacy`, `/terms`, `/.well-known/security.txt` and `/` has `HL-Relay-Signature`: an Ed25519 signature by the
+Every response except `/privacy`, `/terms`, their `.txt` forms, `/.well-known/security.txt` and `/` has `HL-Relay-Signature`: an Ed25519 signature by the
 relay identity key over
 
 ```
@@ -643,5 +644,9 @@ Signed.
 
 Plain text (`text/plain; charset=utf-8`): the privacy notice, the terms, the RFC 9116 security contact
 (`relay@healthlog.dev` and the repository's GitHub security advisories), and a short index with contact
-addresses. Not signed. Any other path, a known path with another method and any non-canonical path answer a
+addresses. Not signed. `/privacy`, `/terms` and `/` answer a browser, that is a request whose `Accept`
+header prefers `text/html` over `text/plain`, with an HTML page rendered from the same text; everything
+else, including `curl` and a HealthLog server, gets the plain text byte for byte, and both carry
+`Vary: Accept`. `/privacy.txt` and `/terms.txt` always answer the plain text, for a reader in a browser who
+wants it. Any other path, a known path with another method and any non-canonical path answer a
 signed `404 not_found`.

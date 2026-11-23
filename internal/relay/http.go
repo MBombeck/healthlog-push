@@ -48,10 +48,12 @@ func (r *Relay) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/status", r.handleStatus)
 	mux.HandleFunc("GET /healthz", r.handleHealthz)
 	mux.HandleFunc("GET /version", r.handleVersion)
-	mux.HandleFunc("GET /privacy", textPage(notice.Privacy))
-	mux.HandleFunc("GET /terms", textPage(notice.Terms))
+	mux.HandleFunc("GET /privacy", humanPage(notice.Privacy, mustPage(notice.MarkdownPage(notice.Privacy, "/privacy.txt", r.cfg.Version))))
+	mux.HandleFunc("GET /terms", humanPage(notice.Terms, mustPage(notice.MarkdownPage(notice.Terms, "/terms.txt", r.cfg.Version))))
+	mux.HandleFunc("GET /privacy.txt", textPage(notice.Privacy))
+	mux.HandleFunc("GET /terms.txt", textPage(notice.Terms))
 	mux.HandleFunc("GET /.well-known/security.txt", textPage(notice.SecurityTxt))
-	mux.HandleFunc("GET /{$}", textPage(notice.Index))
+	mux.HandleFunc("GET /{$}", humanPage(notice.Index, notice.IndexPage(r.cfg.Version)))
 	return r.edge(mux)
 }
 

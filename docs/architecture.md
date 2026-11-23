@@ -106,7 +106,7 @@ internal/limits/       token buckets, windows, registration and connection limit
 internal/queue/        fair, bounded in-memory send queue
 internal/logx/         the only logger: JSON lines with a closed set of keys
 internal/metrics/      coarse Prometheus counters without instance labels
-internal/notice/       the texts served at /privacy, /terms, /.well-known/security.txt and /
+internal/notice/       the texts served at /privacy, /terms, /.well-known/security.txt and /, and their HTML
 internal/admin/        operator command line over the admin socket
 spec/                  protocol specification, test vectors and their tools
 deploy/compose/        compose file for relay and signer

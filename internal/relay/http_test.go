@@ -145,7 +145,7 @@ func TestForgedSignaturesCannotLockOutAnInstance(t *testing.T) {
 
 func TestPublicEndpoints(t *testing.T) {
 	h := newHarness(t)
-	for _, p := range []string{"/healthz", "/version", "/privacy", "/terms", "/.well-known/security.txt", "/", "/nope"} {
+	for _, p := range []string{"/healthz", "/version", "/privacy", "/terms", "/privacy.txt", "/terms.txt", "/.well-known/security.txt", "/", "/nope"} {
 		req, _ := http.NewRequest(http.MethodGet, h.srv.URL+p, http.NoBody)
 		resp, err := h.client.Do(req)
 		if err != nil {

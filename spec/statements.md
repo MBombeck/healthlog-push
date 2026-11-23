@@ -144,7 +144,8 @@ verify), and for the `400 nonce_required` refusal itself.
   direct calls, against the pinned relay identity keys.
 - A response replayed onto another request (other nonce, method or path), a changed status or a changed body
   fails.
-- The plain-text pages `/`, `/privacy`, `/terms` and `/.well-known/security.txt` are not signed.
+- The pages `/`, `/privacy`, `/terms`, `/privacy.txt`, `/terms.txt` and `/.well-known/security.txt` are not
+  signed, in either form.
 - **Vectors:** `response` (`POST /v1/push`, status 200, body `{"items":[]}`), `responseAppEndpoint`
   (`DELETE /v1/bindings/self`, status 204, empty body), `responseWithoutNonce` (`GET /healthz`, status 200).
   Negative: `responseOtherNonce`, `responseOtherStatus`, `responseOtherMethod`, `responseOtherPath`,

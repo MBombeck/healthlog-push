@@ -6,6 +6,25 @@ All notable changes to this project are documented in this file. The format foll
 
 ## [Unreleased]
 
+## [1.0.5] - 2026-11-23
+
+### Changed
+
+- `/privacy`, `/terms` and `/` answer a browser with a readable HTML page: a short header, the text, and a
+  footer with the relay version, a link to the plain text and the source repository; light and dark follow
+  the system setting. Every other client, `curl` and HealthLog servers included, gets the plain text byte
+  for byte as before. The choice follows the `Accept` header: only a client that prefers `text/html` over
+  `text/plain` gets HTML, and both answers carry `Vary: Accept`. `/privacy.txt` and `/terms.txt` always
+  answer the plain text.
+- The HTML is rendered from the same embedded text when the relay starts, by a small renderer in
+  `internal/notice` for the markdown the notices use. It escapes every character, links only https and
+  mailto targets, and refuses anything outside that subset, so a new construct in a notice fails the tests
+  rather than rendering as something the text does not say. No dependency is added.
+- The HTML pages run no script and load nothing. Their Content-Security-Policy is `default-src 'none'` plus
+  their one inline style, allowed by its SHA-256 hash, with `base-uri`, `form-action` and `frame-ancestors`
+  set to `'none'`; they also carry `X-Frame-Options: DENY` and `Referrer-Policy: no-referrer`. HSTS,
+  `nosniff` and `no-store` stay as on every other response.
+
 ## [1.0.4] - 2026-11-22
 
 ### Added
