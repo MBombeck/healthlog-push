@@ -76,6 +76,7 @@ The operator's monitoring keeps the scraped values for **6 months**, then delete
 | `hlp_push_total` | push items by outcome | `class` (alert, silent, liveactivity), `result` (accepted, a refusal or an Apple outcome) | whether pushes get through, and which limit or answer stops them | every 5 min |
 | `hlp_apns_requests_total` | requests the relay sends to Apple, every kind together | none | whether and when pushes go to Apple, without saying which kind | live |
 | `hlp_apns_sends_total` | requests the relay sends to Apple | `kind` (alert, silent_sync, silent_wake, la_start, la_update, la_end) | which kind of push the load comes from; `silent_wake` is the relay's own challenge push, `silent_sync` a background push an instance sends | every 5 min |
+| `hlp_apns_connections_total` | requests the relay sends to Apple, by whether the request opened a new connection or went over one already open | `connection` (new, reused) | how often a push pays for a new TCP and TLS setup to Apple (two or three extra round trips); the share of `reused` is the connection reuse ratio | every 5 min |
 | `hlp_delivery_latency_seconds` | time from the relay accepting an item to Apple's answer, in nine coarse buckets (0.05 s to 10 s) | none | how long delivery takes, and whether it is slowing down | live |
 | `hlp_apns_rejections_total` | Apple's refusals | `reason` (Apple's documented reason codes, anything else as `other`) | telling a relay defect from a token problem | live |
 | `hlp_liveactivity_priority_total` | Live Activity pushes | `priority` (10, 5) | checking that only due doses use the device's priority 10 budget | every 5 min |
@@ -108,6 +109,22 @@ The operator's monitoring keeps the scraped values for **6 months**, then delete
 | `hlp_usage_outcomes_yesterday` | outcomes of the last completed day | `outcome` (accepted, soft_failed, unregistered) | usage figures | every 5 min |
 | `hlp_usage_registrations_last_week` | registrations in the last completed week | none | usage figures | every 5 min |
 | `hlp_usage_opt_outs_last_week` | direct opt-outs in the last completed week | none | usage figures | every 5 min |
+
+### Reading the numbers
+
+The questions the metrics answer, as Prometheus queries over a day (`[1d]`) or a week (`[7d]`):
+
+| Question | Query |
+|---|---|
+| How fast does Apple answer? (median, 90th and 99th percentile) | `histogram_quantile(0.5, sum by (le) (rate(hlp_delivery_latency_seconds_bucket[1d])))`, likewise with `0.9` and `0.99` |
+| How many pushes get through? | `sum(rate(hlp_push_total{result="accepted"}[1d])) / sum(rate(hlp_push_total[1d]))` |
+| How often does Apple refuse? | `sum(rate(hlp_apns_rejections_total[1d])) / sum(rate(hlp_apns_requests_total[1d]))` |
+| How often is a connection to Apple reused? | `sum(rate(hlp_apns_connections_total{connection="reused"}[7d])) / sum(rate(hlp_apns_connections_total[7d]))` |
+| Is the relay refusing work for capacity? | `rate(hlp_queue_dropped_total[1d])`, `hlp_queue_depth`, `rate(hlp_connections_rejected_total[1d])` |
+| Is something wrong right now? | `hlp_breaker_open`, `hlp_apns_misconfigured`, `hlp_db_writable` |
+
+The latency buckets are coarse on purpose, so a percentile is the upper bound of the bucket it falls in,
+not an exact time.
 
 ## Rotations and deprecations
 

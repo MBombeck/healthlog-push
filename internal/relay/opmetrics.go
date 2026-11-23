@@ -108,6 +108,23 @@ func (r *Relay) observeSend(kind string, accepted time.Time, res apns.Result) {
 	r.Metrics.Inc("hlp_apns_rejections_total", "reason", apns.ReasonLabel(res.Reason))
 }
 
+// Connection kinds of hlp_apns_connections_total.
+const (
+	connNew    = "new"
+	connReused = "reused"
+)
+
+// observeConn counts one request to Apple by whether it opened a new connection or reused one. The share
+// of reused ones says whether the client keeps its connections warm; every new one costs extra round trips
+// to Apple before the push goes out.
+func (r *Relay) observeConn(reused bool) {
+	c := connNew
+	if reused {
+		c = connReused
+	}
+	r.Metrics.Inc("hlp_apns_connections_total", "connection", c)
+}
+
 // observePriority counts a Live Activity push by the Apple priority it goes with.
 func (r *Relay) observePriority(urgent bool) {
 	p := "5"
@@ -125,6 +142,7 @@ func (r *Relay) describeOperational() {
 	m := r.Metrics
 	m.Help("hlp_apns_requests_total", "Requests to Apple, every kind together.")
 	m.Help("hlp_apns_sends_total", "Requests to Apple by push kind.")
+	m.Help("hlp_apns_connections_total", "Requests to Apple by connection: new (opened for it) or reused.")
 	m.Help("hlp_delivery_latency_seconds", "Time from the relay accepting an item to Apple's answer.")
 	m.Help("hlp_apns_rejections_total", "Apple refusals by Apple's reason code; unknown reasons are other.")
 	m.Help("hlp_push_retries_total", "Items an instance sent again under a ref the relay still remembers.")
@@ -140,6 +158,9 @@ func (r *Relay) describeOperational() {
 	m.Add("hlp_apns_requests_total", 0)
 	for _, k := range pushKinds {
 		m.Add("hlp_apns_sends_total", 0, "kind", k)
+	}
+	for _, c := range []string{connNew, connReused} {
+		m.Add("hlp_apns_connections_total", 0, "connection", c)
 	}
 	for _, reason := range apns.ReasonLabels() {
 		m.Add("hlp_apns_rejections_total", 0, "reason", reason)
