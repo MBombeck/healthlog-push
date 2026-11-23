@@ -140,6 +140,38 @@ jobs:
             VERSION=ci
             COMMIT=${{ github.sha }}
 
+  # The amd64 image as the Dockerfile builds it, scanned with Grype: base image packages and the Go binary
+  # (modules and standard library). Fails on a HIGH or CRITICAL finding that has a fix.
+  image-scan:
+    name: Image scan (Grype)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Build image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          push: false
+          provenance: false
+          tags: healthlog-push:scan
+          build-args: |
+            VERSION=ci
+            COMMIT=${{ github.sha }}
+      - name: Scan image
+        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
+        with:
+          image: healthlog-push:scan
+          only-fixed: true
+          severity-cutoff: high
+          fail-build: true
+          output-format: table
+
   text-rules:
     name: Text rules
     runs-on: ubuntu-24.04
