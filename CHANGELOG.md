@@ -6,6 +6,8 @@ All notable changes to this project are documented in this file. The format foll
 
 ## [Unreleased]
 
+## [1.0.6] - 2026-11-23
+
 ### Fixed
 
 - After a restart the per-device silent limit was halved to 3 per hour until the next UTC midnight, so a
@@ -423,6 +425,8 @@ First release.
   `HLP_MIN_CLIENT_VERSION`; the admin socket default follows `HLP_DATA_DIR` for server and client; a failing
   listener makes the process exit with an error.
 
+[1.0.6]: https://github.com/MBombeck/healthlog-push/releases/tag/v1.0.6
+[1.0.5]: https://github.com/MBombeck/healthlog-push/releases/tag/v1.0.5
 [1.0.4]: https://github.com/MBombeck/healthlog-push/releases/tag/v1.0.4
 [1.0.3]: https://github.com/MBombeck/healthlog-push/releases/tag/v1.0.3
 [1.0.2]: https://github.com/MBombeck/healthlog-push/releases/tag/v1.0.2
