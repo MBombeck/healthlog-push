@@ -48,6 +48,9 @@ func (r *Relay) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/status", r.handleStatus)
 	mux.HandleFunc("GET /healthz", r.handleHealthz)
 	mux.HandleFunc("GET /version", r.handleVersion)
+	if r.cfg.PublicStats {
+		mux.HandleFunc("GET /stats", r.handleStats)
+	}
 	mux.HandleFunc("GET /privacy", humanPage(notice.Privacy, mustPage(notice.MarkdownPage(notice.Privacy, "/privacy.txt", r.cfg.Version))))
 	mux.HandleFunc("GET /terms", humanPage(notice.Terms, mustPage(notice.MarkdownPage(notice.Terms, "/terms.txt", r.cfg.Version))))
 	mux.HandleFunc("GET /privacy.txt", textPage(notice.Privacy))

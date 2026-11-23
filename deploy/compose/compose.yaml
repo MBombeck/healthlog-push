@@ -100,6 +100,8 @@ services:
       HLP_MIN_CLIENT_VERSION: ${HLP_MIN_CLIENT_VERSION:-}
       # Mode of a store that has none yet: invite (default) or closed; open only on purpose.
       HLP_REGISTRATION_MODE: ${HLP_REGISTRATION_MODE:-invite}
+      # Public day aggregates at /stats (docs/api.md); off unless set to true.
+      HLP_PUBLIC_STATS: ${HLP_PUBLIC_STATS:-false}
       # Keep the Go heap below the container limit so the runtime collects before the kernel kills.
       GOMEMLIMIT: 220MiB
       HLP_LISTEN: ${HLP_LISTEN:-:8443}

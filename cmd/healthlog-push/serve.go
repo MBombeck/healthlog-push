@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/signal"
 	"regexp"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -107,10 +108,17 @@ func relayConfig(host string, id ed25519.PrivateKey, macKeys [][]byte, exportDir
 	if reg != "" && reg != relay.RegOpen && reg != relay.RegInvite && reg != relay.RegClosed {
 		return relay.Config{}, fmt.Errorf("HLP_REGISTRATION_MODE: %q is not open, invite or closed", reg)
 	}
+	publicStats := false
+	if v := os.Getenv("HLP_PUBLIC_STATS"); v != "" {
+		var err error
+		if publicStats, err = strconv.ParseBool(v); err != nil {
+			return relay.Config{}, fmt.Errorf("HLP_PUBLIC_STATS: %q is not true or false", v)
+		}
+	}
 	return relay.Config{
 		Host: host, Identity: id, IdentitySlot: keys.Slot(host, ed25519.PublicKey(id[32:])), MACKeys: macKeys, Environments: envs, ExportDir: exportDir, MinClient: minClient,
 		Version: buildinfo.Version, Commit: buildinfo.Commit, ImageDigest: os.Getenv("HLP_IMAGE_DIGEST"), Registration: reg,
-		BinarySHA256: executableHash(),
+		BinarySHA256: executableHash(), PublicStats: publicStats,
 	}, nil
 }
 

@@ -124,7 +124,9 @@ The questions the metrics answer, as Prometheus queries over a day (`[1d]`) or a
 | Is something wrong right now? | `hlp_breaker_open`, `hlp_apns_misconfigured`, `hlp_db_writable` |
 
 The latency buckets are coarse on purpose, so a percentile is the upper bound of the bucket it falls in,
-not an exact time.
+not an exact time. The same figures can be published as day aggregates at `/stats`, only while three or
+more servers use the relay ([api.md](api.md#get-stats)); the hosted relay does not serve them yet, and
+this page will say so before it does.
 
 ## Rotations and deprecations
 

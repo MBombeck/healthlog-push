@@ -52,6 +52,9 @@ type Relay struct {
 	sender  Sender
 	q       *queue.Queue
 	started time.Time
+	// latDays and statsCache serve GET /stats (publicstats.go); each has its own lock.
+	latDays    latencyDays
+	statsCache statsCache
 
 	// Metrics is the coarse metrics registry served on the metrics listener.
 	Metrics *metrics.Registry

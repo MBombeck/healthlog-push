@@ -18,6 +18,11 @@ All notable changes to this project are documented in this file. The format foll
   opened a new connection or reused one. The share of `reused` shows whether slow deliveries come from new
   connections to Apple. `docs/transparency.md` lists it and has a short table of queries for the figures
   that matter.
+- `GET /stats`, public day aggregates (items to Apple, delivered, failed, token gone and throttled
+  shares, latency percentiles, uptime) over the last 7 and 30 completed days. Off unless
+  `HLP_PUBLIC_STATS=true`. No figure is shown while fewer than three servers are registered, and no window
+  unless three or more had a push accepted on a completed day in it; no instance, tier, count or time of
+  day appears, and the answer is cached for 15 minutes. `docs/api.md` has the rules.
 - Benchmarks of the push path (envelope frame check, batch parse and validation, request signature,
   binding statement, queue, the send to Apple, and a whole push through the handler) and a load test in
   the test binary (`-tags load`), with the method and the figures of a run in `docs/performance.md`. CI

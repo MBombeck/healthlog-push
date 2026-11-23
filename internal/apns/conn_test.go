@@ -12,9 +12,8 @@ import (
 	"time"
 )
 
-// TestOnConnTellsNewFromReused: the first request opens a connection, the next ones reuse it, and after
-// the idle connections are closed the next request opens a new one again. OnConn sees exactly that, once
-// per request.
+// TestOnConnTellsNewFromReused: the first request opens a connection, the next ones reuse it, and the
+// first request of a fresh client opens a new one again. OnConn sees exactly that, once per request.
 func TestOnConnTellsNewFromReused(t *testing.T) {
 	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }))
 	srv.EnableHTTP2 = true
@@ -35,7 +34,10 @@ func TestOnConnTellsNewFromReused(t *testing.T) {
 	send()
 	send()
 	send()
+	// A fresh client has no connection yet, so its first request opens one again.
 	hc.CloseIdleConnections()
+	c.HTTP = NewHTTPClient(&tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12})
+	defer c.HTTP.CloseIdleConnections()
 	send()
 	mu.Lock()
 	defer mu.Unlock()
