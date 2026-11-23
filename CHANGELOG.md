@@ -23,6 +23,10 @@ All notable changes to this project are documented in this file. The format foll
   `HLP_PUBLIC_STATS=true`. No figure is shown while fewer than three servers are registered, and no window
   unless three or more had a push accepted on a completed day in it; no instance, tier, count or time of
   day appears, and the answer is cached for 15 minutes. `docs/api.md` has the rules.
+- The README is shorter and says what matters first: a diagram of the path of a push (light and dark
+  variants in `docs/images/`), what the relay can and cannot see, how the relay is restricted to the
+  HealthLog app, the measured figures on speed with their sources, the one-command verification, and how
+  to use the hosted relay or run your own.
 - Benchmarks of the push path (envelope frame check, batch parse and validation, request signature,
   binding statement, queue, the send to Apple, and a whole push through the handler) and a load test in
   the test binary (`-tags load`), with the method and the figures of a run in `docs/performance.md`. CI

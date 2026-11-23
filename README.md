@@ -1,132 +1,105 @@
 # HealthLog Push Relay
 
-An APNs relay written in Go that carries end-to-end encrypted push notifications, sealed with HPKE, from a
-self-hosted [HealthLog](https://healthlog.dev) server to the HealthLog iOS app.
+Carries end-to-end encrypted push notifications from a self-hosted [HealthLog](https://healthlog.dev)
+server to the HealthLog iOS app, without being able to read them.
 
-[![Build](https://github.com/MBombeck/healthlog-push/actions/workflows/ci.yml/badge.svg)](https://github.com/MBombeck/healthlog-push/actions/workflows/ci.yml)
-[![Lint](https://github.com/MBombeck/healthlog-push/actions/workflows/lint.yml/badge.svg)](https://github.com/MBombeck/healthlog-push/actions/workflows/lint.yml)
-[![CodeQL](https://github.com/MBombeck/healthlog-push/actions/workflows/codeql.yml/badge.svg)](https://github.com/MBombeck/healthlog-push/actions/workflows/codeql.yml)
+[![CI](https://github.com/MBombeck/healthlog-push/actions/workflows/ci.yml/badge.svg)](https://github.com/MBombeck/healthlog-push/actions/workflows/ci.yml)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/MBombeck/healthlog-push/badge)](https://scorecard.dev/viewer/?uri=github.com/MBombeck/healthlog-push)
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/17008/badge)](https://www.bestpractices.dev/projects/17008)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/relay-dark.svg">
+  <img alt="A HealthLog server seals an envelope per device and sends a signed request to the relay; the relay sends a fixed payload with the same envelope to Apple, and the HealthLog app on the iPhone opens it. The app signs the binding and holds the only key." src="docs/images/relay-light.svg">
+</picture>
+
 ## What it is
 
-An APNs key belongs to one Apple developer team, so a self-hosted HealthLog server cannot push to the App
-Store app by itself. The relay holds that key and passes on what registered servers send to their own
-devices, and a self-hoster needs no Apple developer account. It is one Go binary that runs as two processes:
-`relay` serves the API and talks to Apple, `signer` holds the APNs key and has no network access. It is not a
-medical service: reminders scheduled on the device stay authoritative, and a relayed notification can be
-late or lost.
+Apple lets only the holder of an app's APNs key push to that app, so a self-hosted server cannot reach the
+App Store app on its own. The relay holds that key and forwards what registered servers send to devices
+that agreed to it. It is one Go binary in two processes: `relay` serves the API and talks to Apple,
+`signer` holds the Apple key and has no network access.
 
-## How privacy works
+## What the relay can and cannot see
 
-```mermaid
-flowchart LR
-  I["Self-hosted HealthLog server<br/>seals one envelope per device"]
-  R["relay<br/>forwards what it cannot open"]
-  S["signer<br/>APNs key, no network"]
-  A["Apple Push Notification service"]
-  D["iPhone<br/>the app opens the envelope"]
-  D -- "consent, device key" --> I
-  I -- "signed requests" --> R
-  S -- "provider token" --> R
-  R -- "fixed payload" --> A
-  A --> D
+| The relay sees | The relay never sees |
+|---|---|
+| a keyed hash of each device token; the token itself only while a request is processed | the text of a notification, medication names, doses, readings, notes |
+| a random id and public key for each HealthLog server | names, accounts, e-mail addresses, the host name of your server |
+| the class, lifetime and fixed size of each notification, and when it passed | the key that opens an envelope: it exists only on the device |
+| IP addresses, in memory for rate limits only | any stored or logged IP address, and any time of day in its database |
+
+Time patterns can still say something about health, which the [privacy notice](docs/privacy.md) states
+openly together with every stored field and how long it is kept. Every metric the operator sees is listed
+in [transparency.md](docs/transparency.md), and tests fail when code and lists drift apart.
+
+## Only for HealthLog
+
+The Apple topic is fixed when the relay starts and every payload is built from constants, so no server can
+make the relay deliver to another app or show text of its own. A server can reach a device only after the
+HealthLog app on that device has signed a binding with its own key, and the app can leave a server
+directly, without that server.
+
+## Fast from anywhere, hosted in Germany
+
+As far as can be seen from outside, Apple's push API answers from North America, so every push crosses the
+Atlantic once, wherever a relay stands. On the hosted relay Apple answered in about 0.13 s at the median
+and 0.23 s at the 90th percentile over the week to 2026-11-24 (`hlp_delivery_latency_seconds`, a small
+sample). The relay's own work on a push is about 0.3 ms (`BenchmarkPushEndToEnd`, one CPU), and one relay
+handles about 1,900 push items per second with Apple at 130 ms (load test; the hosted relay caps itself at
+100). Adding the round trip to Frankfurt ([WonderNetwork](https://wondernetwork.com/pings/Frankfurt)), a
+HealthLog server in New York gets Apple's answer after about 0.22 s on a warm connection, one in Sydney
+after about 0.38 s. Method, commands and every figure: [docs/performance.md](docs/performance.md).
+
+## Verify it yourself
+
+```sh
+git clone https://github.com/MBombeck/healthlog-push && cd healthlog-push && scripts/verify-release.sh
 ```
 
-- **Sealed envelopes.** The server encrypts each notification for one device with HPKE (RFC 9180). The app
-  opens it on the device. The relay holds no key that could.
-- **Fixed payloads.** The relay builds every APNs payload from constants. A server cannot set visible text.
-- **Signed both ways.** Servers sign every request with Ed25519, and the relay signs every response. Servers
-  and the app pin the relay's keys at build time.
-- **Bindings need the device.** A server that only knows a device token cannot bind it. The app has to sign.
-- **Leaving needs nobody.** The app can leave a server directly, and the pair stays blocked for 12 months.
-
-The relay still sees metadata, and time patterns can reveal behaviour. More in
-[docs/architecture.md](docs/architecture.md) and [docs/threat-model.md](docs/threat-model.md).
-
-## What the operator sees
-
-The operator never sees medication names, doses, readings, notes, account data or the text of a
-notification. What the relay does see and store is published in full, and tests fail when the code and the
-lists drift apart: every metric and every request from authorities in
-[docs/transparency.md](docs/transparency.md), every stored field and retention period in
-[docs/privacy.md](docs/privacy.md).
+This asks `https://push.healthlog.dev/version` what it runs, checks the cosign signature on the release
+checksums and on the image, its SLSA provenance, rebuilds both binaries from the tagged source, and
+compares them byte for byte with the release, with the binary inside the image and with the hash the relay
+reports of its own executable. [docs/verify.md](docs/verify.md) explains each step and what it cannot
+prove; [docs/release-verification.md](docs/release-verification.md) covers SBOMs and the pipeline.
 
 ## Use the hosted relay
 
 `https://push.healthlog.dev` serves the HealthLog app from the App Store. It is free, run by one person on a
 best-effort basis, and meant for households. The operator of a HealthLog server switches it on, then each
-person consents in their own app. Limits, identity keys and contact addresses are in
-[docs/hosted-relay.md](docs/hosted-relay.md), the terms in [docs/terms.md](docs/terms.md).
+person consents in their own app. Limits, identity keys and contacts: [docs/hosted-relay.md](docs/hosted-relay.md),
+terms: [docs/terms.md](docs/terms.md).
 
-## Self-host
+## Run your own
 
-A relay of your own works only with an app you build and sign under your own Apple developer account. It
-cannot serve the App Store app.
+A relay of your own works only with an app you build and sign under your own Apple developer account.
 
 ```sh
-IMAGE=ghcr.io/mbombeck/healthlog-push@sha256:<digest>    # verify it first, see below
+IMAGE=ghcr.io/mbombeck/healthlog-push@sha256:<digest>    # verify it first, see above
 docker run --rm "$IMAGE" keygen relay-id                 # pin the publicKey in your app and servers
 docker run --rm "$IMAGE" keygen token-mac
 docker run --rm "$IMAGE" keygen acme-account
-
 # Put the three keys and your APNs .p8 under /srv/healthlog-push/secrets, then:
 cp deploy/compose/compose.yaml /srv/healthlog-push/compose/
 cp deploy/compose/.env.example /srv/healthlog-push/compose/.env    # image, host name, APNs topic and ids
 cd /srv/healthlog-push/compose && docker compose up -d
-docker compose exec relay /healthlog-push healthcheck && echo healthy
 ```
 
-The relay listens on 8443, so redirect 443 to it. File layout, firewall rules and every setting are in
-[docs/self-hosting.md](docs/self-hosting.md), Ansible roles for the host in [deploy/ansible](deploy/ansible/README.md).
-
-## Verify a release
-
-Every release is built from a `vX.Y.Z` tag by the release workflow and signed keyless with cosign. The image
-carries an SBOM and SLSA provenance, the binaries a signed checksum file, provenance of their own and, from
-the release after v1.0.3 on, an SBOM each.
-
-```sh
-TAG=vX.Y.Z
-IMAGE=ghcr.io/mbombeck/healthlog-push@sha256:<digest>
-WORKFLOWS=https://github.com/MBombeck/healthlog-push/.github/workflows
-ISSUER=https://token.actions.githubusercontent.com
-
-cosign verify "$IMAGE" \
-  --certificate-identity "$WORKFLOWS/release.yml@refs/tags/$TAG" --certificate-oidc-issuer "$ISSUER"
-cosign verify-attestation "$IMAGE" --type slsaprovenance1 \
-  --certificate-identity "$WORKFLOWS/provenance.yml@refs/tags/$TAG" --certificate-oidc-issuer "$ISSUER" \
-  --certificate-github-workflow-repository MBombeck/healthlog-push > /dev/null
-cosign verify-blob SHA256SUMS --bundle SHA256SUMS.sigstore.json \
-  --certificate-identity "$WORKFLOWS/release.yml@refs/tags/$TAG" --certificate-oidc-issuer "$ISSUER"
-```
-
-The SBOM check, the binary provenance and how the pipeline is protected are in
-[docs/release-verification.md](docs/release-verification.md).
+The relay listens on 8443, so redirect 443 to it. Keys, file layout, firewall, AppArmor and every setting: [docs/self-hosting.md](docs/self-hosting.md),
+Ansible roles: [deploy/ansible](deploy/ansible/README.md), day-to-day: [docs/operations.md](docs/operations.md).
 
 ## Documentation
 
-- [Architecture](docs/architecture.md): the two processes, the privacy properties in full, the code layout
-- [Hosted relay](docs/hosted-relay.md): limits, identity keys, contact
-- [Self-hosting](docs/self-hosting.md), [operations](docs/operations.md) and [migration](docs/migration.md)
-- [API reference](docs/api.md) and the [protocol specification](spec/README.md)
-- [Privacy notice](docs/privacy.md), [terms](docs/terms.md) and [transparency](docs/transparency.md)
-- [Threat model](docs/threat-model.md), [security invariants](docs/security-invariants.md) and [assurance case](docs/assurance-case.md)
-- [Key ceremony](docs/key-ceremony.md), [host hardening](docs/hardening.md) and [release verification](docs/release-verification.md)
-- [Governance](GOVERNANCE.md), [maintainers](MAINTAINERS.md), [roadmap](docs/roadmap.md), [continuity](docs/continuity.md), [dependencies](docs/dependencies.md) and [changelog](CHANGELOG.md)
+- [Architecture](docs/architecture.md), [API](docs/api.md) and the [protocol](spec/README.md)
+- [Threat model](docs/threat-model.md), [security invariants](docs/security-invariants.md), [assurance case](docs/assurance-case.md) and [host hardening](docs/hardening.md)
+- [Privacy notice](docs/privacy.md), [transparency](docs/transparency.md) and [performance](docs/performance.md)
+- [Verify a release](docs/verify.md), [key ceremony](docs/key-ceremony.md) and [migration](docs/migration.md)
+- [Governance](GOVERNANCE.md), [roadmap](docs/roadmap.md), [continuity](docs/continuity.md), [dependencies](docs/dependencies.md) and [changelog](CHANGELOG.md)
 
-## Security
+## Security, contributing, license
 
-Report a vulnerability privately, as described in [SECURITY.md](SECURITY.md).
-
-## Contributing
-
-[CONTRIBUTING.md](CONTRIBUTING.md) covers building, tests, the sign-off and the text rules.
-
-## License
-
-[Apache-2.0](LICENSE) for the code. Everything under `spec/` is public domain under CC0 1.0 ([spec/LICENSE](spec/LICENSE)).
+Report a vulnerability privately as [SECURITY.md](SECURITY.md) describes. [CONTRIBUTING.md](CONTRIBUTING.md)
+covers building, tests, the sign-off and the text rules. The code is [Apache-2.0](LICENSE); everything under
+`spec/` is public domain under CC0 1.0 ([spec/LICENSE](spec/LICENSE)).
 
 Support the project: [♥ Sponsor on GitHub](https://github.com/sponsors/MBombeck) or [buy me a coffee](https://buymeacoffee.com/mbombeck)
