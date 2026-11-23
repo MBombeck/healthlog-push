@@ -249,20 +249,21 @@ func labelValues() map[string][]string {
 		"created", "limited", "bound", "opt_out_lifted", "unbound_instance", "unbound_self", "conflict", "challenge_resolved",
 		"liveactivity_consent", "liveactivity_consent_withdrawn"}, outcomes...)
 	return map[string][]string{
-		"class":    {"alert", "silent", "liveactivity", "unknown"},
-		"result":   results,
-		"status":   statusClasses,
-		"reason":   append(append([]string{"bad_signature"}, apns.ReasonLabels()...), registrationRejections...),
-		"tier":     append(slices.Clone(stateTiers), tierOther),
-		"state":    stateBindings,
-		"window":   {"7d", "30d"},
-		"outcome":  {"accepted", "soft_failed", "unregistered"},
-		"kind":     append(slices.Clone(pushKinds), "sync", "wake"),
-		"answer":   {"replayed", "joined"},
-		"priority": {"5", "10"},
-		"slot":     identitySlots,
-		"surface":  rateSurfaces,
-		"le":       {"0.05", "0.1", "0.15", "0.25", "0.5", "1", "2.5", "5", "10", "+Inf"},
+		"class":      {"alert", "silent", "liveactivity", "unknown"},
+		"result":     results,
+		"status":     statusClasses,
+		"reason":     append(append([]string{"bad_signature"}, apns.ReasonLabels()...), registrationRejections...),
+		"tier":       append(slices.Clone(stateTiers), tierOther),
+		"state":      stateBindings,
+		"window":     {"7d", "30d"},
+		"outcome":    {"accepted", "soft_failed", "unregistered"},
+		"kind":       append(slices.Clone(pushKinds), "sync", "wake"),
+		"answer":     {"replayed", "joined"},
+		"priority":   {"5", "10"},
+		"slot":       identitySlots,
+		"surface":    rateSurfaces,
+		"connection": {connNew, connReused},
+		"le":         {"0.05", "0.1", "0.15", "0.25", "0.5", "1", "2.5", "5", "10", "+Inf"},
 	}
 }
 
@@ -509,5 +510,32 @@ func TestKindSplitIsHeldNotLost(t *testing.T) {
 	h.clk.Add(heldRefresh)
 	if m = scrape(); sendsByKind(m) != m["hlp_apns_requests_total"] {
 		t.Fatalf("after the next copy: requests %g, kinds %g", m["hlp_apns_requests_total"], sendsByKind(m))
+	}
+}
+
+// TestAPNsConnectionReuseIsCounted: every request to Apple counts once as new or reused, the first one on a
+// fresh client as new and the following ones over the same HTTP/2 connection as reused, so the share of
+// reused requests can be read off the two series.
+func TestAPNsConnectionReuseIsCounted(t *testing.T) {
+	h := newHarness(t)
+	i := h.register()
+	d := newDevice(0xc7)
+	m0 := live(t, h)
+	if m0[`hlp_apns_connections_total{connection="new"}`] != 0 || m0[`hlp_apns_connections_total{connection="reused"}`] != 0 {
+		t.Fatalf("connections counted before any send: %v", m0)
+	}
+	i.activate(d)
+	for n := range 3 {
+		if res := i.push1(alertItem("cr"+strconv.Itoa(n), d)); res.Result != "accepted" {
+			t.Fatalf("push: %+v", res)
+		}
+	}
+	m1 := live(t, h)
+	fresh, reused := m1[`hlp_apns_connections_total{connection="new"}`], m1[`hlp_apns_connections_total{connection="reused"}`]
+	if fresh != 1 || reused != 3 {
+		t.Fatalf("new %g reused %g, want 1 and 3", fresh, reused)
+	}
+	if sent := m1[`hlp_apns_requests_total`] - m0[`hlp_apns_requests_total`]; fresh+reused != sent {
+		t.Fatalf("%g connection counts for %g requests to Apple", fresh+reused, sent)
 	}
 }

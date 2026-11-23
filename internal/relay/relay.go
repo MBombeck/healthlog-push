@@ -191,6 +191,10 @@ func New(cfg Config, st *store.Store, sender Sender) (*Relay, error) {
 	r.q = queue.New(cfg.Workers, queue.DefaultCapacity, queue.DefaultPerInstance, queue.DefaultMaxWait)
 	r.q.OnDrop = func() { r.Metrics.Inc("hlp_queue_dropped_total") }
 	r.describeMetrics()
+	// The production client reports how each request to Apple got its connection.
+	if c, ok := sender.(*apns.Client); ok {
+		c.OnConn = r.observeConn
+	}
 	return r, nil
 }
 

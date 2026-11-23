@@ -14,6 +14,10 @@ All notable changes to this project are documented in this file. The format foll
 - `/version` also reports `binarySha256`, the SHA-256 of the running executable that the relay hashes at
   start, `platform` and `goVersion`, so the answer can be matched to a line of the release's `SHA256SUMS`.
   No field describes the host, the configuration or anyone using the relay.
+- Metric `hlp_apns_connections_total{connection="new"|"reused"}`: every request to Apple, by whether it
+  opened a new connection or reused one. The share of `reused` shows whether slow deliveries come from new
+  connections to Apple. `docs/transparency.md` lists it and has a short table of queries for the figures
+  that matter.
 
 ### Fixed
 
