@@ -147,11 +147,23 @@ type Client struct {
 	warm   atomic.Bool
 }
 
+// A connection silent for PingAfterIdle gets an HTTP/2 PING; one whose PING is unanswered after PingTimeout
+// is closed, so the next push dials anew instead of timing out on a half-dead connection. Two minutes stays
+// below common NAT and firewall idle timeouts, and four PINGs per two minutes are no load for Apple.
+const (
+	PingAfterIdle = 2 * time.Minute
+	PingTimeout   = 15 * time.Second
+)
+
 // NewHTTPClient returns the shared HTTP/2 client: TLS 1.2+ (Apple's minimum), at most four connections,
-// a new connection when the server's stream limit is reached, and a PING after an hour without traffic.
-// No proxy is taken from the environment and idle connections are kept open. tlsCfg replaces the default
-// TLS configuration when not nil (tests pass their own roots).
+// a new connection when the server's stream limit is reached, and the PING check above. No proxy is taken
+// from the environment and idle connections are kept open. tlsCfg replaces the default TLS configuration
+// when not nil (tests pass their own roots).
 func NewHTTPClient(tlsCfg *tls.Config) *http.Client {
+	return newHTTPClient(tlsCfg, PingAfterIdle, PingTimeout)
+}
+
+func newHTTPClient(tlsCfg *tls.Config, pingAfterIdle, pingTimeout time.Duration) *http.Client {
 	tr := &http.Transport{
 		ForceAttemptHTTP2:   true,
 		MaxConnsPerHost:     4,
@@ -160,8 +172,8 @@ func NewHTTPClient(tlsCfg *tls.Config) *http.Client {
 		DialContext:         (&net.Dialer{Timeout: 3 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
 		TLSClientConfig:     &tls.Config{MinVersion: tls.VersionTLS12},
 		HTTP2: &http.HTTP2Config{
-			SendPingTimeout: time.Hour,
-			PingTimeout:     15 * time.Second,
+			SendPingTimeout: pingAfterIdle,
+			PingTimeout:     pingTimeout,
 		},
 		Protocols: protocolsHTTP2(),
 	}

@@ -740,7 +740,7 @@ with `retryAfter` about 30 s. Its send may still complete, and that result is th
 
 Every push is one HTTP/2 `POST` to `https://api.push.apple.com/3/device/<hex token>` (sandbox:
 `https://api.sandbox.push.apple.com`), using one shared client with at most four connections, a ping after
-an hour without traffic, and one request in flight at a time until the first attempt ends, whatever its
+two minutes without traffic (a connection whose ping is not answered within 15 s is closed), and one request in flight at a time until the first attempt ends, whatever its
 outcome (a warm-up, so that the first connection is set up once). Each request to Apple
 times out after 3 s and is never retried by the relay; the instance owns retries and deadlines.
 

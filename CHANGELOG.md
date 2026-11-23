@@ -12,6 +12,10 @@ All notable changes to this project are documented in this file. The format foll
   exits the relay (log `relay.watchdog`, status 2) when the core lock cannot be taken for 60 seconds or
   the maintenance loop has not finished a pass for 3 minutes, and the signer exits after six failed token
   writes in a row instead of logging `signer.write_failed` forever. The restart policy brings either back.
+- A connection to Apple that went silent (TCP up, HTTP/2 not answering) was found only by the next push,
+  which then failed with `apns_unavailable` after 3 seconds. The client now sends an HTTP/2 PING after two
+  minutes without traffic instead of an hour and closes a connection whose PING is not answered within
+  15 seconds, so the next push opens a fresh one. `spec/protocol.md` says so.
 
 ## [1.0.6] - 2026-11-23
 
