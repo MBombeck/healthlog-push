@@ -6,6 +6,8 @@ All notable changes to this project are documented in this file. The format foll
 
 ## [Unreleased]
 
+## [1.0.9] - 2026-11-25
+
 ### Added
 
 - Blind signing of Apple Wallet passes for registered HealthLog servers (`spec/wallet.md`), off until a
@@ -60,7 +62,6 @@ All notable changes to this project are documented in this file. The format foll
   holds the two together.
 - Privacy notice 1.4 says that the hosted relay keeps its log lines in the host's journal for at most 14
   days and in the operator's monitoring for 30 days.
-||||||| parent of 25ea87d (Carry the item's ref as the start id of a Live Activity start)
 - Every response carries `X-Frame-Options: DENY` and `Referrer-Policy: no-referrer`, not only the HTML
   notices. A JSON reply has nothing to frame or to refer from; the headers state that for scanners and
   for any client that renders a reply.
@@ -563,6 +564,7 @@ First release.
   `HLP_MIN_CLIENT_VERSION`; the admin socket default follows `HLP_DATA_DIR` for server and client; a failing
   listener makes the process exit with an error.
 
+[1.0.9]: https://github.com/MBombeck/healthlog-push/releases/tag/v1.0.9
 [1.0.8]: https://github.com/MBombeck/healthlog-push/releases/tag/v1.0.8
 [1.0.7]: https://github.com/MBombeck/healthlog-push/releases/tag/v1.0.7
 [1.0.6]: https://github.com/MBombeck/healthlog-push/releases/tag/v1.0.6
