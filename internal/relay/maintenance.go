@@ -66,6 +66,7 @@ func (r *Relay) Run(ctx context.Context) {
 	r.loopBeat.Store(time.Now().UnixNano())
 	go newWatchdog().run(ctx, r)
 	r.Daily()
+	r.PollWallet(ctx)
 	r.loopBeat.Store(time.Now().UnixNano())
 	t := time.NewTicker(time.Minute)
 	defer t.Stop()
@@ -75,6 +76,7 @@ func (r *Relay) Run(ctx context.Context) {
 			return
 		case <-t.C:
 			r.Tick()
+			r.PollWallet(ctx)
 			r.loopBeat.Store(time.Now().UnixNano())
 		}
 	}
@@ -90,9 +92,11 @@ func (r *Relay) Tick() {
 			delete(r.conflicts, ch)
 		}
 	}
-	if newDay := store.Day(now); newDay != store.Day(r.lastTick) {
+	tickDay := store.Day(now) != store.Day(r.lastTick)
+	if tickDay {
 		r.activities = map[string]*activityQuota{} // per-activity update windows never span more than a day
 	}
+	r.pruneWalletLocked(now, tickDay)
 	r.lastTick = now
 	for k, t := range r.recentOptOuts {
 		if now.Unix()-t > 2*wire.ClockSkew {

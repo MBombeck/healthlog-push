@@ -40,6 +40,9 @@ const Usage = `usage: healthlog-push admin <command> [args] [--flag value]
   breaker open|close|reset-apns
   status-file                             print the signed status document
   delivery <id> <ref>                     Apple's apns-unique-id of that push (development only, 72 h)
+  wallet status                           the pass certificate the wallet process reported, and when
+  wallet lookup <sha256>                  which server had this manifest.json signed, and on which day
+  wallet block <id> | wallet unblock <id> stop or allow Wallet signing and pass pushes for one server
 `
 
 // Parse turns command-line words into a request. "--k v" and "k=v" both become params.

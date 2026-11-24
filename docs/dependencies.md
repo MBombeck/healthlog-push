@@ -8,7 +8,11 @@ there, and the tools that build and check the code.
 
 The Go version is pinned in `go.mod` (`go 1.27.4`). Everything else comes from the standard library:
 HTTP/1.1 and HTTP/2 server and client (`net/http`), TLS, Ed25519, ECDSA, HMAC, SHA-256, JSON and the
-Prometheus text output, which is written by hand in `internal/metrics`.
+Prometheus text output, which is written by hand in `internal/metrics`. Wallet signing adds no module
+either: the CMS SignedData is written by hand in `internal/wallet` (a few lines of DER over `encoding/asn1`,
+`crypto/rsa` and `crypto/x509`), and the binary embeds one public file, Apple's WWDR G4 intermediate
+certificate (`internal/wallet/AppleWWDRCAG4.cer`), pinned by its SHA-256 and checked against the Apple
+Root CA in a test.
 
 ### Direct
 

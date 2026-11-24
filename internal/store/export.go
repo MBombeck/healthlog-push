@@ -61,6 +61,7 @@ type ExportedInst struct {
 	DeviceLimit      int    `json:"deviceLimit"`
 	FirstDeliveryDay int    `json:"firstDeliveryDay,omitempty"`
 	ReasonDay        int    `json:"reasonDay,omitempty"`
+	WalletBlocked    bool   `json:"walletBlocked,omitempty"` // an operator's Wallet block, kept like a suspension
 }
 
 // BuildExport assembles the unsigned export from the store.
@@ -104,7 +105,7 @@ func (s *Store) BuildExport(host string, today int) (*Export, error) {
 		}
 		ex.Instances = append(ex.Instances, ExportedInst{
 			ID: in.ID, PublicKey: in.PublicKey, Tier: in.Tier, Reason: in.Reason, CreatedDay: in.CreatedDay,
-			DeviceLimit: in.DeviceLimit, FirstDeliveryDay: in.FirstDeliveryDay, ReasonDay: in.ReasonDay,
+			DeviceLimit: in.DeviceLimit, FirstDeliveryDay: in.FirstDeliveryDay, ReasonDay: in.ReasonDay, WalletBlocked: in.WalletBlocked,
 		})
 	}
 	return ex, nil
@@ -240,6 +241,7 @@ func (s *Store) Import(ex *Export, today, maxDevices int) (int, error) {
 		in := &Instance{
 			ID: e.ID, PublicKey: e.PublicKey, Tier: e.Tier, Reason: e.Reason, CreatedDay: e.CreatedDay,
 			LastSeenWeek: Week(today), DeviceLimit: e.DeviceLimit, FirstDeliveryDay: e.FirstDeliveryDay, ReasonDay: e.ReasonDay,
+			WalletBlocked: e.WalletBlocked,
 		}
 		if err := s.PutInstance(in); err != nil {
 			return n, err

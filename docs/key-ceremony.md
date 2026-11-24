@@ -13,6 +13,7 @@ follow the same steps with their own secret store. Day-to-day rotation commands 
 | Relay identity key (`emergency`) | Ed25519 | nobody; its public half is pinned by servers and apps | held separately from the relay host and from the operational keys; never deployed to the relay | as above once it is promoted; generate a new `emergency` |
 | APNs key (`.p8`) | ECDSA P-256 | signer only | `secrets/signer/apns.p8`, signer process memory | anyone can send notifications to tokens they know under the app's name; revoke in the Apple developer account |
 | Token MAC keys (current, previous) | 32 random bytes | relay | `secrets/relay/token_mac_key[_previous]` | together with a copy of the database, tokens someone already knows can be matched to bindings |
+| Wallet pass key and Pass Type ID certificate | RSA-2048, certificate from Apple's WWDR G4 | wallet process only, off unless configured | `secrets/wallet/pass.key` and `pass.crt`, wallet process memory | anyone can sign passes and send pass update pushes under the HealthLog Pass Type ID; no existing pass can be read with it; revoke the certificate in the Apple developer account and issue a new one |
 | ACME account key | ECDSA P-256 | relay (autocert) | `secrets/relay/acme_account_key` | certificates for the relay name can be requested through this account; the CAA record pins the account |
 
 No key is ever written to a backup, a log, a container image or the repository. The registry export is
@@ -105,6 +106,22 @@ switches to `emergency`, which clients already pin, so no client release is need
 Until those releases are out, clients pin the promoted key as `emergency` and nothing else changes for
 them. If `emergency` was lost as well, there is no pinned key left: a server and app release with new pins is
 the only way back.
+
+## Wallet pass certificate
+
+The key is made offline and never leaves the operator's machine except into the secret store:
+`healthlog-push keygen wallet-csr <pass type id> [organization]` (or `openssl req -new -newkey rsa:2048
+-nodes`) writes a PKCS#8 key and a certificate signing request. The request is uploaded for the Pass Type
+ID in the Apple developer account; the certificate Apple returns (DER) is converted with `openssl x509
+-inform DER -in pass.cer -out pass.crt`. `openssl x509 -in pass.crt -noout -subject -issuer -enddate` must
+show the Pass Type ID as `UID`, the team as `OU` and "Apple Worldwide Developer Relations Certification
+Authority" (G4) as issuer. The wallet process refuses to start otherwise, and with fewer than seven days of
+validity left.
+
+Apple issues the certificate for about a year. Renewal: a new key and request, the new certificate into the
+secret store, deploy, and only then revoke the old certificate. Installed passes keep receiving updates
+because they are bound to the Pass Type ID, not to one certificate. `hlp_wallet_cert_days_left` falls
+below 30 a month ahead; the operator's monitoring alerts on it.
 
 ## Revocation
 

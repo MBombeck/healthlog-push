@@ -69,6 +69,11 @@ func runRelay() error {
 		return err
 	}
 	cfg.ProviderTokenOK = func() bool { _, _, ok := tokens.Token(); return ok }
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
+	defer stop()
+	if cfg.Wallet, err = startWalletTunnel(ctx, walletDir()); err != nil {
+		return err
+	}
 	r, err := relay.New(cfg, st, client)
 	if err != nil {
 		return err
@@ -78,8 +83,6 @@ func runRelay() error {
 			return err
 		}
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
-	defer stop()
 	tlsCfg, err := tlsConfig(host)
 	if err != nil {
 		return err

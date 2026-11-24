@@ -15,8 +15,8 @@ const (
 	UndeliveredInstDays = 30 // an instance that never delivered is removed once it was also silent this long
 )
 
-// Prune applies the retention rules for blocks, opt-out pins and counters for the given day. Bindings and
-// instances are pruned by the relay, which owns their in-memory copies.
+// Prune applies the retention rules for blocks, opt-out pins, counters and the wallet ledger for the given
+// day. Bindings and instances are pruned by the relay, which owns their in-memory copies.
 func (s *Store) Prune(today int) error {
 	steps := []struct {
 		bucket []byte
@@ -25,6 +25,7 @@ func (s *Store) Prune(today int) error {
 	}{
 		{bBlockedPairs, RetainBlocks, pairBlockDay}, {bBlockedTokens, RetainBlocks, tokenBlockDay},
 		{bOptOutPins, RetainBlocks, pinDay}, {bCounters, RetainCounters, keyDay}, {bGlobal, RetainGlobal, keyDay},
+		{bWalletSigns, RetainWalletSigns, walletSignDay},
 	}
 	return s.update(func(tx *bolt.Tx) error {
 		for _, step := range steps {

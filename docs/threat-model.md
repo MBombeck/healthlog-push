@@ -204,6 +204,50 @@ that holds the binding can replace it with a new key directly, and only after th
 accepted push for seven days (a restored app whose challenge did not arrive). A former instance that kept
 the token and the old binding key can never take over a binding that went quiet.
 
+## Wallet signing
+
+The relay's `wallet` process signs Apple Wallet passes under the HealthLog Pass Type ID for registered
+servers ([spec/wallet.md](../spec/wallet.md)). It is off until the operator configures a certificate.
+
+**What it protects.** The content of a pass (name, health data, QR link, serial number, authentication
+token) never reaches the relay: the server sends only `manifest.json`, file names with SHA-1 hashes.
+`pass.json` contains the pass's secret authentication token and every `pass.strings` starts with a random
+line, so the hashes cannot confirm guessed content. A thief of the pass key can sign passes, but cannot read
+any existing one, and cannot reach the instances.
+
+**Threat: a registered server signs a misleading pass.** The server writes `pass.json` itself, so a pass it
+has signed can carry any text, organisation name or QR code under the HealthLog Pass Type ID, for example a
+fake card in someone else's name or a link to a phishing page.
+- Countermeasures: the manifest is a closed file set, and the icon, logo and artwork must be the HealthLog
+  images, pinned by hash and checked twice (relay and wallet process), so a pass can never carry another
+  brand; images in locale folders, which would replace them on a device in that language, are refused.
+  Registration is by invitation; signatures are limited per server (10 a minute and 200 a day in probation)
+  and relay-wide. Every signature is in the ledger (manifest hash, server, day; 400 days), so a reported
+  pass leads to the server that had it signed (`shasum -a 256 manifest.json`, `admin wallet lookup`), and
+  `admin wallet block` stops that server's Wallet use without touching its pushes; suspension and
+  revocation stop it too.
+- Residual risk: within those limits a registered server can sign passes with texts of its choosing. Apple
+  shows the pass as issued under the HealthLog team; that is the same trust as for the server's own users,
+  who chose to use it.
+
+**Threat: the relay process is compromised.** It never holds the pass key: the wallet process has no
+network, its key and certificate are mounted only there, and the relay only dials its socket. A compromised
+relay can ask the wallet process to sign manifests, and the wallet process still refuses every manifest
+outside the closed set or with a foreign brand image, because it checks the pins itself with its own
+compiled set. It can send pass pushes ({} only, to tokens it has seen). The tunnel carries TLS from the
+wallet process to Apple; the relay cannot use the client certificate for anything else, because the TLS
+keys stay in the wallet process. The relay does not offer a signing oracle for TLS or for arbitrary data.
+
+**Threat: the wallet process is compromised.** It has no network, no capability and a read-only root; it
+can reach only its two sockets. Through the tunnel it reaches only `api.push.apple.com:443`, at most twice
+at a time. Its key could be used to sign anything by whoever controls it; that is the same exposure as a
+leaked key (key-ceremony.md): revoke the certificate in the Apple developer account.
+
+**Threat: pass pushes as a nuisance or a tracking aid.** A server can push only to tokens Wallet registered
+with it; a push is `{}` and makes Wallet ask that server for the pass. Per-token limits (12 an hour, 48 a
+day) and per-server limits bound it. Pass push tokens are not stored; their MACs live in memory for the
+limit only. The time of a pass push can reveal that a card changed, never what changed.
+
 ## Mass registration and token spam
 
 - Registrations: 3 per day per IPv4 address or IPv6 /64, 10 per /48, 30 per hour and 200 per day globally,
@@ -292,6 +336,11 @@ app does not depend on the relay for anything else. Protections against a self-i
   may be off. The fallback then waits seven days without an accepted push, and only the instance that
   holds the binding may use it; a binding of an opted-out token waits for the device in every case.
 - **Time patterns stay visible** to the relay and to Apple at the moment of sending, as described above.
+- **Signed Wallet passes carry the server's text.** The pins bind the images, not the words; see "Wallet
+  signing". A pass signed before a server was blocked stays valid in Wallet until it expires or its server
+  voids it.
+- **Wallet limits start again after a restart.** The per-server signature and pass push windows are kept in
+  memory; a restart gives every server a fresh minute and day.
 - **Blocks depend on the configured MAC keys.** Opt-out blocks, opt-out pins and token blocks are looked up under the current and
   the previous token MAC key, so they survive one rotation. Once the previous key is removed from the
   secrets, blocks recorded under it no longer match (bindings have moved by then; blocks are not rewritten).
@@ -368,5 +417,8 @@ exists. In short, it covers:
 - **availability and fairness**: body budgets, per-instance, per-device and pool limits, registration and
   connection limits, health that depends only on the relay's own facts;
 - **data minimisation**: logs, metrics, the store and the signed export hold only what the protocol allows;
+- **Wallet passes**: the closed file set and the pins, checked in two processes; the pass key only in the
+  network-less wallet process; the tunnel only to Apple; the minimal ledger; byte-identical signatures in
+  Go and the reference;
 - **implementations and texts**: shared vectors, fuzzed parsers with a committed corpus, one source for the
   legal texts.

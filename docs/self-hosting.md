@@ -98,7 +98,8 @@ ones in `cmd/healthlog-push/main.go`.
 | `HLP_IMAGE_DIGEST` | empty | shown at `/version`; the compose file requires it |
 | `HLP_PUBLIC_STATS` | `false` | `true` serves the public day aggregates at `/stats` ([api.md](api.md#get-stats)); any value that is not true or false stops the relay at start |
 | `HLP_REGISTRATION_MODE` | `invite` | registration mode of a store that has none yet: `invite`, `closed` or `open`; applied and stored before the first request is accepted. A mode set later with `admin registration` is stored and wins (see [Registration](#registration)); any other value stops the relay at start |
-| `HLP_APPARMOR_RELAY`, `HLP_APPARMOR_SIGNER` | `docker-default` | AppArmor profile per container, read by the compose file only (see [AppArmor](#apparmor)) |
+| `HLP_APPARMOR_RELAY`, `HLP_APPARMOR_SIGNER`, `HLP_APPARMOR_WALLET` | `docker-default` | AppArmor profile per container, read by the compose file only (see [AppArmor](#apparmor)) |
+| `HLP_WALLET_DIR` | empty | `/run/wallet` switches Wallet passes on: the relay dials the wallet process there and serves its byte tunnel (see [Wallet passes](#wallet-passes)); empty leaves both Wallet endpoints at `503 wallet_unavailable` |
 
 ### Signer (`healthlog-push signer`)
 
@@ -114,6 +115,35 @@ this version. If one of the three listeners (public, metrics, admin socket) fail
 `relay.listener_failed` with the listener's name, shuts down and exits with an error, so the container
 restarts. So are Apple's endpoints (`api.push.apple.com` and `api.sandbox.push.apple.com`): no setting
 can send the provider token or device tokens to another host. Per-instance device limits can be raised with `admin limits`.
+
+### Wallet passes (`healthlog-push wallet`)
+
+Off by default, and nothing about the relay changes while it is off. A relay operator with an Apple
+developer account can sign Apple Wallet passes for the HealthLog servers registered with it
+([spec/wallet.md](../spec/wallet.md)). Most self-hosters do not need this: a HealthLog server uses the
+hosted relay, or signs with its own Pass Type ID certificate.
+
+1. Make a Pass Type ID in the Apple developer account, a key and a request with
+   `docker run --rm --network none <image> keygen wallet-csr pass.org.example.card "Your Name or Org"`
+   (key first, then the request; keep the key out of any shell history), upload the request, download the
+   certificate and convert it with `openssl x509 -inform DER -in pass.cer -out pass.crt`
+   ([key-ceremony.md](key-ceremony.md#wallet-pass-certificate)).
+2. Put `pass.key` and `pass.crt` into `/srv/healthlog-push/secrets/wallet/`, owned by uid 65534, mode 0400.
+3. In `.env`: `COMPOSE_PROFILES=wallet`, `HLP_WALLET_DIR=/run/wallet`, `HLP_WALLET_PASS_TYPE_ID` and
+   `HLP_WALLET_TEAM_ID`; then `docker compose up -d`.
+4. `docker compose exec relay /healthlog-push admin wallet status` shows the certificate the wallet process
+   reported.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `HLP_WALLET_DIR` | required | the shared socket directory (`/run/wallet`) |
+| `HLP_WALLET_KEY_FILE`, `HLP_WALLET_CERT_FILE` | `/run/secrets/wallet/pass.key`, `pass.crt` | PEM key (PKCS#8 or PKCS#1, RSA of at least 2048 bits, no passphrase) and certificate |
+| `HLP_WALLET_PASS_TYPE_ID`, `HLP_WALLET_TEAM_ID` | required | must equal the certificate's `UID` and `OU` |
+
+The process does not start when the certificate was not issued by Apple's WWDR G4 intermediate (embedded
+in the binary), when fewer than seven days of validity are left, or while the compiled brand image pins are
+empty. The pins name the HealthLog artwork, so a relay signs only passes that look like HealthLog's; a
+fork for another app changes them in `internal/wallet/pinned.go` and `spec/wallet-manifest-v1.json`.
 
 ### Serving development builds (sandbox)
 
@@ -161,7 +191,9 @@ The stored mode survives restarts and updates; `HLP_REGISTRATION_MODE` only deci
 `deploy/apparmor/` holds one profile per container. They allow what the relay and the signer do and nothing
 else: the relay reads its own secrets but not the APNs key, writes only `/data`, `/acme`, `/export` and the
 refresh marker, and has no capability; the signer has no network rule at all and writes only the provider
-token. Without them Docker applies its own `docker-default` profile. To use them on an AppArmor host:
+token. With Wallet on, load `healthlog-push-wallet` as well and set `HLP_APPARMOR_WALLET`: the wallet and
+relay profiles name each other as the only peers on the two sockets in `/run/wallet`, so use both or
+neither. Without them Docker applies its own `docker-default` profile. To use them on an AppArmor host:
 
 ```sh
 install -m 0644 deploy/apparmor/healthlog-push-relay deploy/apparmor/healthlog-push-signer /etc/apparmor.d/

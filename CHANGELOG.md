@@ -6,6 +6,25 @@ All notable changes to this project are documented in this file. The format foll
 
 ## [Unreleased]
 
+### Added
+
+- Blind signing of Apple Wallet passes for registered HealthLog servers (`spec/wallet.md`), off until a
+  Pass Type ID certificate is configured. `POST /v1/wallet/apple/sign` takes only `manifest.json`, the
+  list of file hashes, checks it against a closed file set with the HealthLog brand images pinned by hash,
+  and answers a detached CMS SignedData; `POST /v1/wallet/apple/notify` sends pass update pushes. `GET
+  /v1/status` carries a `wallet` block. Limits per server, relay-wide and per pass push token; a ledger of
+  manifest hash, server and day for 400 days, readable only with `admin wallet lookup`; `admin wallet
+  block` and `unblock`; metrics `hlp_wallet_requests_total` and `hlp_wallet_cert_days_left`.
+- A third process, `healthlog-push wallet`: holds the pass key, has no network, checks the manifest and the
+  pins again itself, signs, and reaches Apple only through a byte tunnel of the relay that dials
+  `api.push.apple.com:443` and nothing else, with TLS from the wallet process to Apple. Compose service
+  `wallet` behind the profile `wallet`, AppArmor profile `healthlog-push-wallet`, health check
+  `healthcheck --wallet`, `keygen wallet-csr`. Apple's WWDR G4 intermediate is embedded and pinned by
+  SHA-256; no new module.
+- Test vectors `spec/vectors/wallet-v1.json` (manifest answers and byte-identical signatures from keys
+  derived from public seeds) with a reference implementation on `node:crypto`, checked in CI against Go and
+  `openssl smime -verify`. Privacy notice 1.4 describes what Wallet signing sees and keeps.
+
 ## [1.0.8] - 2026-11-24
 
 ### Fixed

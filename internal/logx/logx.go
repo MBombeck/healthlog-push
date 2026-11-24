@@ -30,6 +30,10 @@ const (
 	KPushes  Key = "pushes"  // integer
 	KPeriod  Key = "period"  // "minute" or "hour"
 	KEvents  Key = "events"  // map of event name to count
+	// Keys of the wallet process (one line per request, internal/wallet).
+	KOp       Key = "op"       // sign, notify, info
+	KResult   Key = "result"   // closed enumeration
+	KDuration Key = "duration" // coarse bucket: lt_100ms, lt_1s, ge_1s
 )
 
 // Field is one key and value.

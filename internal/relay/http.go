@@ -45,6 +45,8 @@ func (r *Relay) Handler() http.Handler {
 	mux.HandleFunc("DELETE /v1/bindings/self/liveactivity", r.handleLAWithdrawSelf)
 	mux.HandleFunc("POST /v1/push", r.handlePush)
 	mux.HandleFunc("POST /v1/receipts", r.handleReceipts)
+	mux.HandleFunc("POST /v1/wallet/apple/sign", r.handleWalletSign)
+	mux.HandleFunc("POST /v1/wallet/apple/notify", r.handleWalletNotify)
 	mux.HandleFunc("GET /v1/status", r.handleStatus)
 	mux.HandleFunc("GET /healthz", r.handleHealthz)
 	mux.HandleFunc("GET /version", r.handleVersion)
