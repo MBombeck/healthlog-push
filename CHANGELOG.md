@@ -6,6 +6,8 @@ All notable changes to this project are documented in this file. The format foll
 
 ## [Unreleased]
 
+## [1.0.8] - 2026-11-24
+
 ### Fixed
 
 - The release job that compares the image with the release binaries pulled the image index once per
@@ -494,6 +496,7 @@ First release.
   `HLP_MIN_CLIENT_VERSION`; the admin socket default follows `HLP_DATA_DIR` for server and client; a failing
   listener makes the process exit with an error.
 
+[1.0.8]: https://github.com/MBombeck/healthlog-push/releases/tag/v1.0.8
 [1.0.7]: https://github.com/MBombeck/healthlog-push/releases/tag/v1.0.7
 [1.0.6]: https://github.com/MBombeck/healthlog-push/releases/tag/v1.0.6
 [1.0.5]: https://github.com/MBombeck/healthlog-push/releases/tag/v1.0.5
