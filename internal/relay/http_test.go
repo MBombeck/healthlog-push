@@ -153,7 +153,8 @@ func TestPublicEndpoints(t *testing.T) {
 			t.Fatal(err)
 		}
 		_ = resp.Body.Close()
-		if resp.Header.Get("Strict-Transport-Security") == "" || resp.Header.Get("Cache-Control") != "no-store" {
+		if resp.Header.Get("Strict-Transport-Security") == "" || resp.Header.Get("Cache-Control") != "no-store" ||
+			resp.Header.Get("X-Frame-Options") != "DENY" || resp.Header.Get("Referrer-Policy") != "no-referrer" {
 			t.Errorf("%s: security headers missing", p)
 		}
 		if strings.HasPrefix(p, "/nope") != (resp.StatusCode == http.StatusNotFound) {

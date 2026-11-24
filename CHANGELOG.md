@@ -25,6 +25,12 @@ All notable changes to this project are documented in this file. The format foll
   derived from public seeds) with a reference implementation on `node:crypto`, checked in CI against Go and
   `openssl smime -verify`. Privacy notice 1.4 describes what Wallet signing sees and keeps.
 
+### Changed
+
+- Every response carries `X-Frame-Options: DENY` and `Referrer-Policy: no-referrer`, not only the HTML
+  notices. A JSON reply has nothing to frame or to refer from; the headers state that for scanners and
+  for any client that renders a reply.
+
 ## [1.0.8] - 2026-11-24
 
 ### Fixed
