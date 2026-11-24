@@ -22,7 +22,7 @@ jobs:
           git fetch -q --depth 1 origin tag v1.0.7
           git worktree add -q ../v107 v1.0.7
           mkdir -p dist
-          c=$(git rev-parse v1.0.7^{commit})
+          c=$(git rev-parse "v1.0.7^{commit}")
           for arch in amd64 arm64; do (cd ../v107 && scripts/build.sh v1.0.7 "$c" "$arch" "$GITHUB_WORKSPACE/dist/healthlog-push_v1.0.7_linux_${arch}"); done
       - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
