@@ -6,6 +6,13 @@ All notable changes to this project are documented in this file. The format foll
 
 ## [Unreleased]
 
+### Fixed
+
+- The release job that compares the image with the release binaries pulled the image index once per
+  platform; the second pull fails with `cannot overwrite digest`, so v1.0.7 got a signed image but no
+  GitHub release. The job now pulls each platform manifest by its own digest. Both v1.0.7 image binaries
+  match the release binaries (checked by hand with `crane export`).
+
 ## [1.0.7] - 2026-11-24
 
 ### Added

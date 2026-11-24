@@ -251,8 +251,13 @@ jobs:
         run: |
           set -euo pipefail
           for arch in amd64 arm64; do
-            docker pull -q --platform "linux/$arch" "$REF" > /dev/null
-            id=$(docker create --platform "linux/$arch" "$REF")
+            # Pull the platform manifest by its own digest: a second pull of the index for another platform
+            # fails with "cannot overwrite digest" in the containerd image store.
+            pdigest=$(docker buildx imagetools inspect --raw "$REF" \
+              | jq -r --arg a "$arch" '.manifests[] | select(.platform.os == "linux" and .platform.architecture == $a) | .digest')
+            [ -n "$pdigest" ] || { echo "::error::no linux/$arch manifest in $REF"; exit 1; }
+            docker pull -q "$IMAGE@$pdigest" > /dev/null
+            id=$(docker create "$IMAGE@$pdigest")
             docker cp -q "$id:/healthlog-push" "image_$arch"
             docker rm "$id" > /dev/null
             want=$(sha256sum "dist/healthlog-push_${GITHUB_REF_NAME}_linux_${arch}" | cut -d' ' -f1)
