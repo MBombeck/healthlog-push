@@ -27,8 +27,12 @@ jobs:
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.10.0 ./...
 
   image-scan:
-    name: Image scan of the published release (Grype)
+    name: Image scan of the published release (Grype, linux/${{ matrix.arch }})
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
     timeout-minutes: 15
     permissions:
       packages: read
@@ -39,6 +43,8 @@ jobs:
           GRYPE_REGISTRY_AUTH_AUTHORITY: ghcr.io
           GRYPE_REGISTRY_AUTH_USERNAME: ${{ github.actor }}
           GRYPE_REGISTRY_AUTH_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+          # An index is otherwise scanned for the runner's platform only.
+          GRYPE_PLATFORM: linux/${{ matrix.arch }}
         with:
           image: ghcr.io/mbombeck/healthlog-push:latest
           only-fixed: true
