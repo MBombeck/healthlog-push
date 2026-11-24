@@ -32,6 +32,12 @@ import (
 // with the connection limits it bounds the request bodies that can be in flight.
 const maxStreams = 16
 
+// idleTimeout is how long the relay keeps an idle client connection. A HealthLog server keeps its connection
+// for a little less, so a push a minute or two after the last one reuses it instead of paying for a new TCP
+// and TLS handshake; the server's own timeout must stay below this one, or it may send on a connection the
+// relay is closing. The connection caps bound what idle connections can hold.
+const idleTimeout = 120 * time.Second
+
 func runRelay() error {
 	host := os.Getenv("HLP_PUBLIC_HOST")
 	if err := checkPublicHost(host); err != nil {
@@ -158,7 +164,7 @@ func serve(ctx context.Context, r *relay.Relay, tlsCfg *tls.Config) error {
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      15 * time.Second,
-		IdleTimeout:       60 * time.Second,
+		IdleTimeout:       idleTimeout,
 		MaxHeaderBytes:    8 << 10,
 		ErrorLog:          log.New(r.ErrLog, "", 0),
 		HTTP2:             &http.HTTP2Config{MaxConcurrentStreams: maxStreams},
@@ -180,7 +186,7 @@ func serve(ctx context.Context, r *relay.Relay, tlsCfg *tls.Config) error {
 	case <-ctx.Done():
 	case e := <-errc:
 		if !errors.Is(e.err, http.ErrServerClosed) {
-			logx.Event("relay.listener_failed", logx.Str(logx.KState, e.name))
+			logx.Alert("relay.listener_failed", logx.Str(logx.KState, e.name))
 			exitErr = fmt.Errorf("%s listener stopped: %w", e.name, e.err)
 		}
 	}

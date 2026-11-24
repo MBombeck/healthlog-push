@@ -144,7 +144,7 @@ func (r *Relay) applyTokenFailureLocked(p *sent, res apns.Result, established bo
 	}
 	if established && r.breaker.Record(now, p.instID, false, true) {
 		r.Metrics.Set("hlp_breaker_open", 1)
-		logx.Event("breaker.opened", logx.Str(logx.KState, BreakerOpen))
+		logx.Alert("breaker.opened", logx.Str(logx.KState, BreakerOpen))
 	}
 	marking := r.breaker.Marking(now)
 	// The invalid-token budget is charged for every token that never delivered, even while the breaker is
@@ -206,7 +206,7 @@ func (r *Relay) providerInvalidLocked(iat int64) {
 		if !r.misconfigured {
 			r.misconfigured = true
 			r.Metrics.Set("hlp_apns_misconfigured", 1)
-			logx.Event("apns.provider_token_rejected", logx.Str(logx.KState, "stopped"))
+			logx.Alert("apns.provider_token_rejected", logx.Str(logx.KState, "stopped"))
 		}
 	case r.providerBadIat == 0:
 		r.providerBadIat = iat

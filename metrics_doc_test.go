@@ -94,3 +94,52 @@ func TestMetricCadenceMatchesTheTransparencyTable(t *testing.T) {
 		}
 	}
 }
+
+// TestAlertLogLinesMatchTheOperationsTable: every event the code writes with logx.Alert is named in the
+// first column of the alert table of docs/operations.md, and every log line that column names is written
+// somewhere in the code, with logx.Alert or logx.Event. A log pipeline that alerts on level "alert" or on
+// the event names then has a table that says what each one means and what to do.
+func TestAlertLogLinesMatchTheOperationsTable(t *testing.T) {
+	call := regexp.MustCompile(`logx\.(Alert|Event)\("([a-z_]+\.[a-z_]+)"`)
+	alerts, written := map[string]bool{}, map[string]bool{}
+	for _, f := range goFiles(t) {
+		for _, m := range call.FindAllStringSubmatch(f.src, -1) {
+			written[m[2]] = true
+			if m[1] == "Alert" {
+				alerts[m[2]] = true
+			}
+		}
+	}
+	if len(alerts) < 10 || len(written) < 30 {
+		t.Fatalf("found %d alert and %d log events in the code; the matcher is broken", len(alerts), len(written))
+	}
+	raw, err := os.ReadFile("docs/operations.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, sec, ok := strings.Cut(string(raw), "\n## Alerts worth acting on\n")
+	if !ok {
+		t.Fatal("docs/operations.md has no section Alerts worth acting on")
+	}
+	sec, _, _ = strings.Cut(sec, "\n## ")
+	event := regexp.MustCompile("`([a-z_]+\\.[a-z_]+)`")
+	inTable := map[string]bool{}
+	for _, line := range strings.Split(sec, "\n") {
+		if !strings.HasPrefix(line, "| ") {
+			continue
+		}
+		for _, m := range event.FindAllStringSubmatch(strings.Split(line, " | ")[0], -1) {
+			inTable[m[1]] = true
+		}
+	}
+	for _, a := range slices.Sorted(maps.Keys(alerts)) {
+		if !inTable[a] {
+			t.Errorf("the code writes alert %s, which the alert table of docs/operations.md does not list", a)
+		}
+	}
+	for _, e := range slices.Sorted(maps.Keys(inTable)) {
+		if !written[e] {
+			t.Errorf("the alert table of docs/operations.md names log line %s, which the code never writes", e)
+		}
+	}
+}

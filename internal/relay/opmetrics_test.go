@@ -347,7 +347,7 @@ func TestOnlyTheNarrowSetIsLive(t *testing.T) {
 		`hlp_deliveries_by_key_slot_total{slot="unpinned"} 0`, `hlp_bindings{state="active"} 0`} {
 		has(next, line, "held until the refresh")
 	}
-	if strings.Contains(next, `hlp_push_total{class="silent"`) {
+	if strings.Contains(next, `hlp_push_total{class="silent",result="accepted"}`) {
 		t.Errorf("the class of the push shows before the refresh:\n%s", next)
 	}
 	h.clk.Add(heldRefresh)

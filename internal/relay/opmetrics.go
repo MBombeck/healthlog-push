@@ -187,4 +187,44 @@ func (r *Relay) describeOperational() {
 		m.Add("hlp_rate_limited_total", 0, "surface", s)
 	}
 	m.Set("hlp_queue_depth", 0)
+	r.describeAlertSeries()
+}
+
+// Results of hlp_push_total that the alert table of docs/operations.md watches; with the three classes they
+// exist from the start.
+var alertPushResults = []string{"apns_unavailable", "relay_misconfigured", "apns_rejected", "queue_full"}
+
+// bindingResults are the values of hlp_bindings_total.
+var bindingResults = []string{"bound", "conflict", "challenge_resolved", "opt_out_lifted", "unbound_instance",
+	"unbound_self", "liveactivity_consent", "liveactivity_consent_withdrawn"}
+
+// describeAlertSeries creates, at zero, every series an alert in docs/operations.md watches that would
+// otherwise appear only with its first event. Prometheus' increase() cannot see the step from no series to
+// 1, so without this the first flood, the first wrong signature or the first dropped job would never fire
+// an alert. TestAlertTableSeriesExistOnAFreshRelay holds the table and this list together.
+func (r *Relay) describeAlertSeries() {
+	m := r.Metrics
+	for _, c := range []string{"2xx", "4xx", "5xx"} {
+		m.Add("hlp_requests_total", 0, "status", c)
+	}
+	for _, c := range []string{string(wire.ClassAlert), string(wire.ClassSilent), string(wire.ClassLiveActivity)} {
+		for _, res := range alertPushResults {
+			m.Add("hlp_push_total", 0, "class", c, "result", res)
+		}
+	}
+	for _, res := range []string{"created", "limited"} {
+		m.Add("hlp_registrations_total", 0, "result", res)
+	}
+	for _, res := range bindingResults {
+		m.Add("hlp_bindings_total", 0, "result", res)
+	}
+	for _, o := range apns.Outcomes() {
+		m.Add("hlp_challenges_total", 0, "result", string(o))
+	}
+	m.Add("hlp_auth_failures_total", 0, "reason", "bad_signature")
+	for _, name := range []string{"hlp_invalid_budget_exceeded_total", "hlp_body_budget_refused_total",
+		"hlp_queue_dropped_total", "hlp_silent_paused_total", "hlp_connections_rejected_total"} {
+		m.Add(name, 0)
+	}
+	m.Set("hlp_http_errors_total", 0)
 }

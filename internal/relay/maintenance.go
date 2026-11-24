@@ -187,13 +187,13 @@ func (r *Relay) Daily() {
 	}
 	if err := r.st.Check(); err != nil {
 		r.setDBError(err)
-		logx.Event("store.check_failed")
+		logx.Alert("store.check_failed")
 	}
 	r.pruneMemoryLocked(today)
 	r.mu.Unlock()
 	if r.cfg.ExportDir != "" {
 		if err := r.ExportNow(); err != nil {
-			logx.Event("export.failed")
+			logx.Alert("export.failed")
 		} else {
 			logx.Event("export.written")
 		}

@@ -58,7 +58,7 @@ and excluded from backups.
 | `/srv/healthlog-push/acme` | 65532:65530 | 0700 | TLS certificate and key | never, never copied |
 | `/srv/healthlog-push/secrets/relay` | 65532 | 0500, files 0400 | relay keys | no |
 | `/srv/healthlog-push/secrets/signer` | 65533 | 0500, file 0400 | `apns.p8` | no |
-| `/srv/healthlog-push/compose` | root | 0750 | `compose.yaml`, `.env` (0600) | no |
+| `/srv/healthlog-push/compose` | root | 0750 | `compose.yaml`, `compose.journald.yaml` (used with `healthlog_push_log_driver: journald`), `.env` (0600) | no |
 | `/srv/healthlog-push/deployed-digest` | root | 0644 | image of the last healthy deploy | no |
 | `/etc/healthlog-push/backup-include.list` | root | 0644 | for your backup tool | n/a |
 | `/etc/healthlog-push/backup-exclude.list` | root | 0644 | for your backup tool | n/a |

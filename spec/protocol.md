@@ -37,7 +37,7 @@ What each party learns:
   is a handshake whose only offered ALPN protocol is `acme-tls/1`; a handshake that offers `acme-tls/1`
   next to anything else gets the TLS 1.3 configuration.
 - HTTP/1.1 and HTTP/2; at most 16 concurrent streams per HTTP/2 connection.
-- Server timeouts: read header 5 s, read 10 s, write 15 s, idle 60 s. Request headers at most 8 KiB.
+- Server timeouts: read header 5 s, read 10 s, write 15 s, idle 120 s. Request headers at most 8 KiB.
 - At most 2000 concurrent connections in total, 8 per IPv4 address or IPv6 /64 and 64 per IPv6 /48. A
   HealthLog server needs one connection. Connections over a limit are closed at accept, without a response.
 - Every response carries `Cache-Control: no-store`, `X-Content-Type-Options: nosniff`,

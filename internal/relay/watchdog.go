@@ -30,7 +30,7 @@ type watchdog struct {
 func newWatchdog() *watchdog {
 	return &watchdog{every: WatchdogEvery, lockLimit: WatchdogLockLimit, loopLimit: WatchdogLoopLimit,
 		exit: func(reason string) {
-			logx.Event("relay.watchdog", logx.Str(logx.KReason, reason))
+			logx.Alert("relay.watchdog", logx.Str(logx.KReason, reason))
 			os.Exit(2)
 		}}
 }

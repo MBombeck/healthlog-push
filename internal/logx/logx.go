@@ -34,6 +34,8 @@ const (
 	KOp       Key = "op"       // sign, notify, info
 	KResult   Key = "result"   // closed enumeration
 	KDuration Key = "duration" // coarse bucket: lt_100ms, lt_1s, ge_1s
+	// KLevel is set by Alert only, always to "alert".
+	KLevel Key = "level"
 )
 
 // Field is one key and value.
@@ -52,16 +54,28 @@ func Int(k Key, v int64) Field { return Field{k, v} }
 func Counts(k Key, v map[string]int64) Field { return Field{k, v} }
 
 var (
-	mu  sync.Mutex
-	out io.Writer = os.Stdout
-	now           = time.Now
+	mu     sync.Mutex
+	out    io.Writer = os.Stdout
+	errOut io.Writer = os.Stderr
+	now              = time.Now
 )
 
-// SetOutput redirects the log, for tests.
-func SetOutput(w io.Writer) { mu.Lock(); out = w; mu.Unlock() }
+// SetOutput redirects the log, alert lines included, for tests.
+func SetOutput(w io.Writer) { mu.Lock(); out, errOut = w, w; mu.Unlock() }
 
-// Event writes one line. The timestamp is truncated to the second.
-func Event(action string, fields ...Field) {
+// Event writes one line to standard output. The timestamp is truncated to the second.
+func Event(action string, fields ...Field) { write(false, action, fields) }
+
+// Alert writes one line for an event the operator should act on: the same JSON with "level":"alert" added,
+// to standard error. A log pipeline can select every such line by that one key without knowing the event
+// names, and Docker's journald driver gives standard error the journal priority err, so `journalctl -p err`
+// shows them too. docs/operations.md lists every alert in its table of alerts, and a test holds the two
+// together.
+func Alert(action string, fields ...Field) {
+	write(true, action, append(fields, Str(KLevel, "alert")))
+}
+
+func write(alert bool, action string, fields []Field) {
 	m := make(map[string]any, len(fields)+2)
 	m["ts"] = now().UTC().Truncate(time.Second).Format(time.RFC3339)
 	m[string(KAction)] = action
@@ -74,7 +88,11 @@ func Event(action string, fields ...Field) {
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	_, _ = out.Write(append(b, '\n'))
+	w := out
+	if alert {
+		w = errOut
+	}
+	_, _ = w.Write(append(b, '\n'))
 }
 
 // CountingWriter is used as http.Server.ErrorLog: it counts and discards, because the standard library

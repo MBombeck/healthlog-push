@@ -53,7 +53,7 @@ func openStore(dataDir, exportDir string, trust exportTrust) (*store.Store, bool
 	if rerr := os.Rename(path, aside); rerr != nil {
 		return nil, false, fmt.Errorf("database unusable and cannot be moved aside: %w", rerr)
 	}
-	logx.Event("store.damaged_moved_aside")
+	logx.Alert("store.damaged_moved_aside")
 	st, err = store.Open(path)
 	if err != nil {
 		return nil, false, err

@@ -451,12 +451,22 @@ at once. Every other metric, every split by class or kind (`hlp_push_total`, `hl
 from the live state. Alert on the live `/healthz` from outside the host as well: it does not depend on the
 metrics pipeline, and its `status` covers only the relay's own facts, so also alert on the `breaker` field of
 the body when it is not `closed`.
-Metrics are served on `127.0.0.1:9464/metrics` and carry no instance, device or address labels.
+Metrics are served on `127.0.0.1:9464/metrics` and carry no instance, device or address labels. Every series
+the table below watches exists from the first scrape, at zero until its first event, so an alert on
+`increase()` fires on the first incident and not only on the second; a test fails when a row names a series a
+fresh relay does not have.
+
+The log lines the table names carry `"level":"alert"` and go to standard error, except `store.imported_export`,
+which reports the recovery that follows `store.damaged_moved_aside`; every other line goes to standard output
+and has no `level`. A log pipeline can therefore alert on that one key (in Loki, for example
+`| json | level="alert"`) and keep working when a release adds an alert. With the journald log driver ([self-hosting.md](self-hosting.md#logs)) these lines get the
+journal priority `err`, so `journalctl -p err` lists them. A test fails when the code writes an alert line the
+table does not list, or when the table names a log line the code does not write.
 
 | Signal | Means | Act |
 |---|---|---|
 | `hlp_wallet_cert_days_left` below 30 | the Pass Type ID certificate expires within a month (at fewer than 7 days Wallet stops signing) | renew it ([key-ceremony.md](key-ceremony.md#wallet-pass-certificate)) |
-| `hlp_wallet_cert_days_left` at -1 | the wallet process does not answer | `docker compose ps wallet` and the `wallet.*` log lines; the relay logs `wallet.unreachable` once per outage |
+| `hlp_wallet_cert_days_left` at -1, log `wallet.unreachable` | the wallet process does not answer; the relay logs it once per outage | `docker compose ps wallet` and the `wallet.*` log lines |
 | `/healthz` `status` `down` for more than a few minutes | no fresh provider token, or Apple rejected the key | check `docker compose ps signer` and the `signer.*` log lines; check key id, team id, topic and whether the key was revoked |
 | `hlp_apns_misconfigured == 1`, log `apns.provider_token_rejected` | a renewed provider token was rejected; the relay stopped sending | fix the key or the ids, then restart or `admin breaker reset-apns` |
 | `hlp_breaker_open == 1`, log `breaker.opened` | more than 30 % of at least 20 sends to established bindings (bindings that had a push accepted) failed with token errors, from at least three instances | look for a wrong topic, environment or key, or a bad image; roll back if a deploy preceded it; do not close by hand before the cause is fixed |
@@ -478,6 +488,9 @@ Metrics are served on `127.0.0.1:9464/metrics` and carry no instance, device or 
 | rising `hlp_silent_budget_refused_total{kind="sync"}` | instances send more background pushes than the device budgets allow | an instance flooding silent pushes; the budgets work as intended |
 | rising `hlp_rate_limited_total{surface}` or `hlp_registrations_rejected_total{reason}` | a limit refuses requests; the surface or reason says which | abuse runbook; `bad_signature` and `no_invite` are usually misconfigured servers |
 | log `export.failed` | the daily export was not written | check `/export` permissions and space; the export is your only backup |
+| log `relay.listener_failed` (`state` `public`, `metrics` or `admin`) | a listener of the relay stopped; the relay exits and the restart policy starts it again | if it repeats, check the port, the admin socket path and the host's file descriptors |
+| log `relay.wallet_tunnel_failed` | the byte tunnel from the wallet process to Apple stopped; pass update pushes fail until the relay restarts | restart the relay; check the `wallet-sock` volume |
+| rising `hlp_requests_total{status="5xx"}` | the relay answered requests with a server error | the alert log lines above, then `/healthz` |
 | certificate valid for less than 14 days (external check) | renewal over TLS-ALPN-01 failed | check DNS, port 443 reachability and the CAA record |
 
 Other metrics: `hlp_requests_total{status="2xx"|"4xx"|"5xx"}`, `hlp_bindings_total{result}` (`bound`,

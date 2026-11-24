@@ -123,7 +123,7 @@ func (r *Relay) PollWallet(ctx context.Context) {
 		}
 		if !r.wallet.down {
 			r.wallet.down = true
-			logx.Event("wallet.unreachable")
+			logx.Alert("wallet.unreachable")
 		}
 		return
 	}

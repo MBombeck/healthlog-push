@@ -299,7 +299,7 @@ func (r *Relay) setDBError(err error) {
 	if err != nil && r.dbWritable {
 		r.dbWritable = false
 		r.Metrics.Set("hlp_db_writable", 0)
-		logx.Event("store.write_failed", logx.Str(logx.KState, "read_only"))
+		logx.Alert("store.write_failed", logx.Str(logx.KState, "read_only"))
 	}
 }
 
