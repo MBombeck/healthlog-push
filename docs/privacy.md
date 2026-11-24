@@ -189,6 +189,14 @@ by kind of notification and the figures about registered servers and bound devic
 five minutes, and a tier with fewer than three servers is counted together with the others. The monitoring
 keeps these values for 6 months.
 
+The relay also publishes day totals for everyone at https://push.healthlog.dev/stats: over the last 7 and
+30 completed UTC days, how many notifications went to Apple, the shares Apple accepted, that failed, whose
+token was no longer valid or that Apple throttled, how long Apple took to answer (as coarse upper bounds),
+and how long the relay has been running. Nothing is shown while fewer than three servers are registered,
+and a period stays empty unless at least three servers had a notification accepted on a completed day in
+it. The totals name no server, no device, no class of notification, no number of servers and no time of
+day.
+
 
 ## 7. Logs
 

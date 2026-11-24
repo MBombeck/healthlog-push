@@ -126,9 +126,10 @@ The questions the metrics answer, as Prometheus queries over a day (`[1d]`) or a
 | Is something wrong right now? | `hlp_breaker_open`, `hlp_apns_misconfigured`, `hlp_db_writable` |
 
 The latency buckets are coarse on purpose, so a percentile is the upper bound of the bucket it falls in,
-not an exact time. The same figures can be published as day aggregates at `/stats`, only while three or
-more servers use the relay ([api.md](api.md#get-stats)); the hosted relay does not serve them yet, and
-this page will say so before it does.
+not an exact time. The same figures are published as day aggregates at `/stats`, only while three or
+more servers use the relay ([api.md](api.md#get-stats)). The hosted relay serves them since 2026-11-24
+(v1.0.8): https://push.healthlog.dev/stats. A window stays `null` until three or more servers had a push
+accepted on a completed day inside it.
 
 ## Rotations and deprecations
 
@@ -141,11 +142,36 @@ listed here and announced through the relay notice the same day. A rotation of t
 key or the ACME account key is not visible to clients and is listed here after it happened.
 
 Deprecations of an endpoint, a field or a behaviour that clients rely on are listed here with the release
-that announces them and the release that removes them, before the removal. A shutdown of the hosted relay
-is announced at least 90 days ahead (privacy.md section 12).
+that announces them and the release that removes them, before the removal. The removal comes at least 30
+days after the announcement, and not before a HealthLog release that no longer needs the deprecated part
+has been out for that long. A shutdown of the hosted relay is announced at least 90 days ahead (privacy.md
+section 12).
+
+Every release of the relay has an entry below that says whether it rotates a key, whether it announces or
+removes a deprecation, and what changes for clients. A test fails while a release in `CHANGELOG.md` has no
+entry here.
 
 Newest first:
 
+- **2026-11-24** Correction. The hosted relay serves `/stats` since the v1.0.8 deploy on 2026-11-24, while
+  this page and [api.md](api.md#get-stats) still said it did not and that this page would say so first. The
+  entries for v1.0.5 to v1.0.8 below were also missing until today. Both windows of `/stats` were `null` the
+  whole time, so no figure was published before this page said so. The privacy notice describes `/stats`
+  from version 1.4. A test now fails while a release has no entry here.
+- **2026-11-24** Relay v1.0.8, deployed to the hosted relay on 2026-11-24. No key rotation and no
+  deprecation. It is the release of the changes of v1.0.7 with a fixed release job. For clients: `/version`
+  also reports `binarySha256`, `platform` and `goVersion`, so the running binary can be matched to the
+  signed `SHA256SUMS` of the release ([verify.md](verify.md)); `/stats` exists and the hosted relay serves
+  it (see the correction above); a connection to Apple that goes silent is noticed after two minutes and
+  replaced, instead of failing the next push. Nothing changes in the protocol.
+- **2026-11-24** Relay v1.0.7, tagged but never deployed: its release run stopped before the GitHub release
+  and the signed `SHA256SUMS`. No key rotation and no deprecation. Its changes shipped as v1.0.8.
+- **2026-11-24** Relay v1.0.6, deployed on 2026-11-23. No key rotation and no deprecation. For clients:
+  after a restart of the relay a device's silent pushes were limited to 3 per hour until midnight UTC; the
+  limit is back to 6 per hour from the next full hour. Nothing changes in the protocol.
+- **2026-11-24** Relay v1.0.5, deployed on 2026-11-23. No key rotation and no deprecation. For clients:
+  nothing. A browser now gets `/privacy`, `/terms` and `/` as a readable HTML page; every other client,
+  HealthLog servers and `curl` included, gets the plain text byte for byte as before.
 - **2026-11-22** Relay v1.0.4. No key rotation and no deprecation. Seven metrics are now current at every
   scrape and every other metric is refreshed every five minutes, as the table above says; until now every
   metric was refreshed hourly while fewer than 20 instances were active. Privacy notice version 1.3 says so,

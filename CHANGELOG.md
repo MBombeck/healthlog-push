@@ -30,6 +30,14 @@ All notable changes to this project are documented in this file. The format foll
 - Every response carries `X-Frame-Options: DENY` and `Referrer-Policy: no-referrer`, not only the HTML
   notices. A JSON reply has nothing to frame or to refer from; the headers state that for scanners and
   for any client that renders a reply.
+- Privacy notice 1.4 also describes the public day totals at `/stats`, which the hosted relay serves
+  since v1.0.8. `docs/transparency.md` and `docs/api.md` said it did not serve them yet; the feed has a
+  correction and the missing entries for v1.0.5 to v1.0.8.
+- A test fails while a release in this changelog has no entry in the feed of `docs/transparency.md`, or
+  while an entry does not say whether the release rotates a key and whether it deprecates anything. The
+  feed states a minimum notice of 30 days for a deprecation.
+- `docs/hardening.md` explains why SSL Labs grades the relay A and not A+ (TLS 1.3 only), and
+  `docs/key-ceremony.md` says that the yearly drill has not been rehearsed yet and when it is planned.
 
 ## [1.0.8] - 2026-11-24
 
