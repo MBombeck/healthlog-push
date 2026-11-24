@@ -23,6 +23,14 @@ a connection on port 443 to any address. The cloud metadata endpoint is reachabl
 receivers accept writes only. The outbound limit is also enforced outside the machine, so it holds even if someone
 gains full control of the host.
 
+**Why SSL Labs grades the relay A, not A+.** Qualys SSL Labs grades the public port A with no warnings. Since the
+grading change of March 2025, a server that speaks only TLS 1.3 cannot be tested for downgrade protection
+(`TLS_FALLBACK_SCSV` needs two protocol versions), and SSL Labs then does not count the configuration as
+exceptional, which is what A+ means. HSTS, the CAA record and the certificate are not what holds it back. Offering
+TLS 1.2 as well would raise the grade and nothing else: HealthLog servers and the app speak TLS 1.3, and what clients
+trust is the relay's signed answers and the end-to-end encrypted envelopes, not the grade. A second protocol version
+for a scanner's grade would only add surface, so the relay stays at TLS 1.3 and at A.
+
 **No keys to anything else.** The host holds no credentials for our other systems: no deployment keys, no cloud or
 DNS tokens, no access to our password manager. The only credentials on it are the relay's own keys and a backup key
 that can write to one storage location reserved for this host.

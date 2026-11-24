@@ -21,12 +21,22 @@ can read all of it.
 - SLSA provenance for the release binaries ([release-verification.md](release-verification.md)).
 - A stricter golangci-lint configuration.
 
+## Done in v1.0.4 to v1.0.8
+
+- Public day aggregates at `/stats` with a floor of three servers ([api.md](api.md#get-stats)), served by
+  the hosted relay since 2026-11-24.
+- One build recipe for the release binaries and the image, a CI job that builds every change both ways and
+  compares the results, and `scripts/verify-release.sh`, which checks a release from public sources
+  ([verify.md](verify.md)).
+- A watchdog that ends a hung relay or signer so the restart policy brings it back, and a PING that finds
+  a silent connection to Apple within two minutes.
+
 ## Next
 
 - Wallet passes in service: the pinned hashes of the final HealthLog artwork, the Pass Type ID certificate
   of the hosted relay and the deployment of the `wallet` process. Until then the code is in place and off.
-- A scheduled rotation drill for the `next` identity key
-  ([key-ceremony.md](key-ceremony.md#drill)).
+- The first full drill of the emergency path (throwaway APNs key, `next` identity key, restore from a signed
+  registry export) by 2027-01-31, then once a year ([key-ceremony.md](key-ceremony.md#drill)).
 
 ## Ongoing
 

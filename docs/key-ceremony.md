@@ -141,3 +141,9 @@ Once a year, and before the first public launch, the full emergency path is rehe
 relay: revoke a throwaway APNs key and watch the relay fail closed, promote a throwaway `next` identity key
 and watch a pinned client accept it and reject the old key once unpinned, restore the relay from a signed
 registry export. The drill is recorded like a rotation.
+
+Status: the drill has not been rehearsed yet. It was due before the hosted relay started on 2026-11-21 and
+did not happen then. It is planned by 2027-01-31 and will be recorded in the transparency feed
+([transparency.md](transparency.md#rotations-and-deprecations)) when it has taken place, with how long the
+restore took. Until then the restore from a signed registry export is covered only by the automated tests and by
+a check that the off-host backup of the export can be read back byte for byte.

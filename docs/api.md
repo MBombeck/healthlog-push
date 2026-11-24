@@ -707,8 +707,8 @@ host, the configuration or anyone using the relay.
 Public day aggregates of the relay's work, for anyone: how many push items went to Apple, how many it
 accepted, the shares that failed, had a token that is gone or were throttled by Apple, and the time to
 Apple's answer. Off unless the operator sets `HLP_PUBLIC_STATS=true`; otherwise the path answers the signed
-`404 not_found` of any unknown path. The hosted relay does not serve it yet; when it does, the
-[transparency](transparency.md) feed and the privacy notice will say so first.
+`404 not_found` of any unknown path. The hosted relay serves it since 2026-11-24 (v1.0.8); the
+[transparency](transparency.md) feed records it, and the privacy notice describes it from version 1.4.
 
 Signed; `HL-Nonce` is optional.
 
