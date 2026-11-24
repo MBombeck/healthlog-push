@@ -796,11 +796,15 @@ Live Activity payloads, with `<now>` the relay clock in unix seconds. In `start`
 of `content-state` are those of the item's `activity.state` after the template check, written in this key
 order; nothing else of the item reaches the payload.
 
-`start` (to the push-to-start token; the attributes type and the attributes are fixed, so nothing about the
-dose travels in them, and the alert is a fixed pair of localization keys):
+`start` (to the push-to-start token; the attributes type is fixed and the attributes hold the version `1`
+and, as `s`, the item's `ref`, so nothing about the dose travels in them, and the alert is a fixed pair of
+localization keys). The `ref` passed the ref check above; the relay copies it as the start id, 1 to 64
+printable ASCII characters, and reads nothing into it. HealthLog chooses it as an opaque random id per start,
+so the app can tell which start an activity it reports belongs to; an instance must not put anything about the
+dose, the person or the time into it, because Apple and the relay see it in the clear:
 
 ```
-{"aps":{"timestamp":<now>,"event":"start","content-state":{"status":"<status>","countdownTarget":<countdownTarget>,"confirmed":<confirmed>,"pendingConfirm":<pendingConfirm>,"isOverdue":<isOverdue>,"timeFormatRaw":"<timeFormatRaw>"},"attributes-type":"HealthLogDoseAttributes","attributes":{"v":1},"alert":{"title":{"loc-key":"HL_LA_START_TITLE"},"body":{"loc-key":"HL_LA_START_BODY"}}}}
+{"aps":{"timestamp":<now>,"event":"start","content-state":{"status":"<status>","countdownTarget":<countdownTarget>,"confirmed":<confirmed>,"pendingConfirm":<pendingConfirm>,"isOverdue":<isOverdue>,"timeFormatRaw":"<timeFormatRaw>"},"attributes-type":"HealthLogDoseAttributes","attributes":{"v":1,"s":"<ref>"},"alert":{"title":{"loc-key":"HL_LA_START_TITLE"},"body":{"loc-key":"HL_LA_START_BODY"}}}}
 ```
 
 `update` (to the activity's update token):

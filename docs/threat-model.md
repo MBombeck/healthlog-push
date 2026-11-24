@@ -62,8 +62,10 @@ The relay sends them only for a binding whose device gave the second, separate L
 - **The template is the control.** The relay forwards exactly six keys with fixed types, closed enumerations
   and a `countdownTarget` of `0` or within one day back to two days ahead of the relay clock; an unknown key
   or a wrong type refuses the whole request, a value outside its range the item. The start attributes are
-  fixed (`HealthLogDoseAttributes`, `{"v":1}`) and the start alert is a fixed pair of localization keys, so
-  an instance cannot place text anywhere in a Live Activity.
+  fixed (`HealthLogDoseAttributes`, `{"v":1,"s":"<ref>"}`) except `s`, the item's ref (at most 40 characters
+  of `A-Z a-z 0-9 . _ : -`), which HealthLog fills with a random id per start and the app never shows; the start
+  alert is a fixed pair of localization keys, so an instance cannot place text anywhere in a Live Activity
+  that is shown.
 - **Statements are not interchangeable.** A start needs `hl-la-start-v1` over the push-to-start token (at
   most 30 days old); an update or end needs `hl-activity-v1` over the update token (at most 12 hours old).
   Neither starts what the other covers, and without the consent no start or update leaves the relay

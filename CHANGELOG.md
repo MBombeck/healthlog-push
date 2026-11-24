@@ -33,6 +33,13 @@ All notable changes to this project are documented in this file. The format foll
 
 ### Changed
 
+- A Live Activity start carries the item's `ref` as the start id: the attributes are
+  `{"v":1,"s":"<ref>"}` instead of `{"v":1}`. HealthLog chooses the ref as a random id per start, and the
+  app reads it back to tell which start an activity belongs to, so more than one dose can run as a Live
+  Activity on a device. The relay copies a value it already validates (1 to 40 characters of
+  `A-Z a-z 0-9 . _ : -`, written only when it is 1 to 64 printable ASCII characters) and reads nothing into
+  it; no wire field is added. App builds that decode only `v` ignore `s`. `spec/protocol.md`, `docs/api.md`,
+  the threat model, invariant B8 and privacy notice 1.4 say so.
 - Every counter and label value the alert table of `docs/operations.md` watches exists from the first
   scrape at zero: `hlp_connections_rejected_total`, `hlp_auth_failures_total`,
   `hlp_invalid_budget_exceeded_total`, `hlp_body_budget_refused_total`, `hlp_queue_dropped_total`,
@@ -53,6 +60,7 @@ All notable changes to this project are documented in this file. The format foll
   holds the two together.
 - Privacy notice 1.4 says that the hosted relay keeps its log lines in the host's journal for at most 14
   days and in the operator's monitoring for 30 days.
+||||||| parent of 25ea87d (Carry the item's ref as the start id of a Live Activity start)
 - Every response carries `X-Frame-Options: DENY` and `Referrer-Policy: no-referrer`, not only the HTML
   notices. A JSON reply has nothing to frame or to refer from; the headers state that for scanners and
   for any client that renders a reply.

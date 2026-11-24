@@ -7,13 +7,33 @@ import (
 	"github.com/MBombeck/healthlog-push/internal/wire"
 )
 
-// AttributesType is the ActivityKit attributes type a relay start names. The app defines it with the single
-// field of StartAttributes, so nothing about the dose, in particular no medication name, ever travels.
+// AttributesType is the ActivityKit attributes type a relay start names. The app defines it with the fields
+// of startAttributes only, so nothing about the dose, in particular no medication name, ever travels.
 const AttributesType = "HealthLogDoseAttributes"
 
-// startAttributes is the fixed attributes object of a relay start.
+// startAttributes is the attributes object of a relay start: the fixed version, and the start id S, which is
+// the item's ref. The instance chooses the ref as an opaque random id per start; the app reads it back to tell
+// which start an activity belongs to and never shows it. The relay copies it and reads nothing into it.
 type startAttributes struct {
-	V int `json:"v"`
+	V int    `json:"v"`
+	S string `json:"s,omitempty"`
+}
+
+// maxStartID bounds the start id; the ref check of the wire format is stricter still.
+const maxStartID = 64
+
+// startID returns ref as the start id when it is 1 to 64 printable ASCII characters without a quote or a
+// backslash, and "" otherwise, so that the attributes then carry the version alone.
+func startID(ref string) string {
+	if ref == "" || len(ref) > maxStartID {
+		return ""
+	}
+	for i := 0; i < len(ref); i++ {
+		if c := ref[i]; c < 0x21 || c > 0x7e || c == '"' || c == '\\' {
+			return ""
+		}
+	}
+	return ref
 }
 
 // laState is the content state as Apple receives it: exactly the six fields of the closed template.
@@ -65,10 +85,10 @@ func LiveActivityEndPayload(now time.Time) []byte {
 }
 
 // LiveActivityStartPayload starts an activity through a push-to-start token: the checked content state,
-// the fixed attributes and a fixed localized alert.
-func LiveActivityStartPayload(now time.Time, c *wire.ContentState) []byte {
+// the attributes (the version and ref as the start id) and a fixed localized alert.
+func LiveActivityStartPayload(now time.Time, ref string, c *wire.ContentState) []byte {
 	return laPayload(laAPS{Timestamp: now.Unix(), Event: "start", ContentState: stateOf(c),
-		AttributesType: AttributesType, Attributes: &startAttributes{V: 1},
+		AttributesType: AttributesType, Attributes: &startAttributes{V: 1, S: startID(ref)},
 		Alert: &laAlert{Title: locKey{"HL_LA_START_TITLE"}, Body: locKey{"HL_LA_START_BODY"}}})
 }
 

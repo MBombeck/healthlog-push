@@ -545,7 +545,7 @@ HL-Signature: <86 base64url>
 What Apple receives for the start (`<now>` is the relay clock):
 
 ```
-{"aps":{"timestamp":<now>,"event":"start","content-state":{"status":"due","countdownTarget":1795000600,"confirmed":false,"pendingConfirm":false,"isOverdue":false,"timeFormatRaw":"AUTO"},"attributes-type":"HealthLogDoseAttributes","attributes":{"v":1},"alert":{"title":{"loc-key":"HL_LA_START_TITLE"},"body":{"loc-key":"HL_LA_START_BODY"}}}}
+{"aps":{"timestamp":<now>,"event":"start","content-state":{"status":"due","countdownTarget":1795000600,"confirmed":false,"pendingConfirm":false,"isOverdue":false,"timeFormatRaw":"AUTO"},"attributes-type":"HealthLogDoseAttributes","attributes":{"v":1,"s":"ls1"},"alert":{"title":{"loc-key":"HL_LA_START_TITLE"},"body":{"loc-key":"HL_LA_START_BODY"}}}}
 ```
 
 and for an update:

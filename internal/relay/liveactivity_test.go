@@ -74,7 +74,7 @@ func TestLiveActivityStartNeedsItsOwnConsent(t *testing.T) {
 	var cs map[string]any
 	_ = json.Unmarshal(p.APS["content-state"], &cs)
 	if r.Token != hex.EncodeToString(start) || string(p.APS["event"]) != `"start"` || string(p.APS["attributes-type"]) != `"HealthLogDoseAttributes"` ||
-		string(p.APS["attributes"]) != `{"v":1}` || len(cs) != 6 || cs["status"] != "due" || r.Header.Get("apns-push-type") != "liveactivity" {
+		string(p.APS["attributes"]) != `{"v":1,"s":"s2"}` || len(cs) != 6 || cs["status"] != "due" || r.Header.Get("apns-push-type") != "liveactivity" {
 		t.Fatalf("start payload: %s %v", r.Body, r.Header)
 	}
 	// The device withdraws directly; start is refused again.

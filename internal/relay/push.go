@@ -251,7 +251,7 @@ func (r *Relay) buildPush(it *wire.Item, now time.Time) *apns.Push {
 		p.Urgent = apns.LiveActivityUrgent(it.Event, it.State)
 		switch it.Event {
 		case wire.EventStart:
-			p.Payload = apns.LiveActivityStartPayload(now, it.State)
+			p.Payload = apns.LiveActivityStartPayload(now, it.Ref, it.State)
 		case wire.EventUpdate:
 			p.Payload = apns.LiveActivityUpdatePayload(now, it.State)
 		default:

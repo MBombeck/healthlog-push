@@ -72,7 +72,8 @@ travels in the clear. With this consent the relay and Apple see that content sta
 its state (pending, due, overdue, snoozed, taken or skipped), whether it is overdue, confirmed or waiting for
 confirmation, the countdown time and the time format of the display. They never see a medication name, a
 dose or any free text: the relay forwards only this fixed set of six fields with fixed values and refuses
-anything else. With this consent the relay also sees the token your app uses to start Live Activities and
+anything else. Each start also carries a random identifier your server chooses for it, so that the app can
+tell its activities apart; it says nothing about the dose or the time. With this consent the relay also sees the token your app uses to start Live Activities and
 the token of each running activity, while it sends to them. Without this consent nothing changes: your
 server can only end an activity, and the relay sees nothing of its content. You can withdraw this consent at
 any time in the app; the app then tells the relay directly, without your HealthLog server, and starts and
