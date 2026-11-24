@@ -22,7 +22,8 @@ All notable changes to this project are documented in this file. The format foll
   shares, latency percentiles, uptime) over the last 7 and 30 completed days. Off unless
   `HLP_PUBLIC_STATS=true`. No figure is shown while fewer than three servers are registered, and no window
   unless three or more had a push accepted on a completed day in it; no instance, tier, count or time of
-  day appears, and the answer is cached for 15 minutes. `docs/api.md` has the rules.
+  day appears, and the answer is cached for 15 minutes. `docs/api.md` has the rules. The Ansible role sets it from
+  `healthlog_push_public_stats` (default `false`).
 - The README is shorter and says what matters first: a diagram of the path of a push (light and dark
   variants in `docs/images/`), what the relay can and cannot see, how the relay is restricted to the
   HealthLog app, the measured figures on speed with their sources, the one-command verification, and how

@@ -53,6 +53,8 @@ healthlog_push_apns_team_id: FGHIJ67890
 
 # Registration mode of a new store (invite is the default; open only on purpose).
 healthlog_push_registration_mode: invite
+# Public day aggregates at /stats (off by default; shown only from three registered servers on).
+# healthlog_push_public_stats: true
 # AppArmor (docs/self-hosting.md, "AppArmor"): the role installs and loads deploy/apparmor/ when asked.
 # healthlog_push_apparmor_install: true
 # healthlog_push_apparmor_relay: healthlog-push-relay
