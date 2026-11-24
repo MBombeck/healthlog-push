@@ -153,6 +153,13 @@ entry here.
 
 Newest first:
 
+- **2026-11-25** Relay v1.0.9, deployed to the hosted relay on 2026-11-25. No key rotation and no
+  deprecation. For clients: a Live Activity start carries the item's `ref` as the start id `s` in its
+  attributes beside `v`, and app builds that decode only `v` ignore it; every response carries
+  `X-Frame-Options` and `Referrer-Policy`; an idle connection is kept for 120 seconds instead of 60. Blind
+  signing of Wallet passes is in the release and stays off until a Pass Type ID certificate is configured.
+  The hosted relay keeps its log lines in the host's journal for at most 14 days (privacy notice 1.4).
+  Nothing else changes in the protocol.
 - **2026-11-24** Correction. The hosted relay serves `/stats` since the v1.0.8 deploy on 2026-11-24, while
   this page and [api.md](api.md#get-stats) still said it did not and that this page would say so first. The
   entries for v1.0.5 to v1.0.8 below were also missing until today. Both windows of `/stats` were `null` the
