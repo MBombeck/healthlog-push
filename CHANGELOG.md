@@ -9,9 +9,14 @@ All notable changes to this project are documented in this file. The format foll
 ### Fixed
 
 - The release job that compares the image with the release binaries pulled the image index once per
-  platform; the second pull fails with `cannot overwrite digest`, so v1.0.7 got a signed image but no
-  GitHub release. The job now pulls each platform manifest by its own digest. Both v1.0.7 image binaries
-  match the release binaries (checked by hand with `crane export`).
+  platform; the second pull fails with `cannot overwrite digest`, so the v1.0.7 run stopped before the
+  GitHub release. `scripts/compare-image-binaries.sh` now resolves each platform manifest from the index and
+  pulls it by its own digest; the release workflow runs it. Both v1.0.7 image binaries match the release
+  binaries of that run.
+- Grype scanned only the runner's platform of the multi-platform image, in the release workflow and in the
+  weekly scan of the latest release. Both now scan linux/amd64 and linux/arm64.
+- v1.0.7 was never deployed: its release run was incomplete (signed image, but no GitHub release and no
+  signed `SHA256SUMS`). Its tag stays as it is; 1.0.8 is the release of the same changes.
 
 ## [1.0.7] - 2026-11-24
 

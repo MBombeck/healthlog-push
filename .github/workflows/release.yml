@@ -105,9 +105,13 @@ jobs:
   # The pushed image, by digest, scanned with Grype. A HIGH or CRITICAL finding that has a fix stops the
   # GitHub release; the image is already in the registry, so fix and tag again.
   scan:
-    name: Image scan (Grype)
+    name: Image scan (Grype, linux/${{ matrix.arch }})
     needs: image
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
     timeout-minutes: 15
     permissions:
       packages: read
@@ -118,6 +122,8 @@ jobs:
           GRYPE_REGISTRY_AUTH_AUTHORITY: ghcr.io
           GRYPE_REGISTRY_AUTH_USERNAME: ${{ github.actor }}
           GRYPE_REGISTRY_AUTH_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+          # An index is otherwise scanned for the runner's platform only.
+          GRYPE_PLATFORM: linux/${{ matrix.arch }}
         with:
           image: ${{ needs.image.outputs.image }}@${{ needs.image.outputs.digest }}
           only-fixed: true
@@ -234,8 +240,12 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
+      contents: read
       packages: read
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: binaries
@@ -248,26 +258,7 @@ jobs:
       - name: Compare
         env:
           REF: ${{ needs.image.outputs.image }}@${{ needs.image.outputs.digest }}
-        run: |
-          set -euo pipefail
-          for arch in amd64 arm64; do
-            # Pull the platform manifest by its own digest: a second pull of the index for another platform
-            # fails with "cannot overwrite digest" in the containerd image store.
-            pdigest=$(docker buildx imagetools inspect --raw "$REF" \
-              | jq -r --arg a "$arch" '.manifests[] | select(.platform.os == "linux" and .platform.architecture == $a) | .digest')
-            [ -n "$pdigest" ] || { echo "::error::no linux/$arch manifest in $REF"; exit 1; }
-            docker pull -q "$IMAGE@$pdigest" > /dev/null
-            id=$(docker create "$IMAGE@$pdigest")
-            docker cp -q "$id:/healthlog-push" "image_$arch"
-            docker rm "$id" > /dev/null
-            want=$(sha256sum "dist/healthlog-push_${GITHUB_REF_NAME}_linux_${arch}" | cut -d' ' -f1)
-            got=$(sha256sum "image_$arch" | cut -d' ' -f1)
-            echo "linux/$arch image $got release $want" | tee -a "$GITHUB_STEP_SUMMARY"
-            if [ "$got" != "$want" ]; then
-              echo "::error::linux/$arch: the binary in the image differs from the release binary"
-              exit 1
-            fi
-          done
+        run: scripts/compare-image-binaries.sh "$REF" "$GITHUB_REF_NAME" dist | tee -a "$GITHUB_STEP_SUMMARY"
 
   github-release:
     name: Checksums, signature and GitHub release
