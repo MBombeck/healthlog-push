@@ -100,6 +100,8 @@ The operator's monitoring keeps the scraped values for **6 months**, then delete
 | `hlp_breaker_open` | 1 while the token-failure breaker is open or half-open | none | an alarm | live |
 | `hlp_apns_misconfigured` | 1 while Apple rejects the relay's provider token | none | an alarm | live |
 | `hlp_db_writable` | 1 while the store accepts writes | none | an alarm | live |
+| `hlp_wallet_requests_total` | Wallet signatures (per request) and pass pushes (per item), only when Wallet is on | `op` (sign, notify), `result` (ok, invalid, rate, quota, global, blocked, maintenance, unavailable, storage, unknown_instance, accepted, unregistered, rejected, token_quota) | whether Wallet works and how often it is refused | every 5 min |
+| `hlp_wallet_cert_days_left` | days the Pass Type ID certificate is still valid; -1 while the wallet process does not answer; absent while Wallet is off | none | an alarm a month before the certificate expires | every 5 min |
 | `hlp_instances` | instances | `tier` (probation, standard, suspended, revoked, other: every tier with fewer than three instances, so that no value names the tier of a single instance) | growth and the tiers, as in `admin stats` | every 5 min |
 | `hlp_bindings` | bindings | `state` (provisional, active, soft_invalid) | the same sum as `admin stats` | every 5 min |
 | `hlp_usage_active_instances` | probation and standard instances | none | the usage figures of [privacy.md](privacy.md) section 6 | every 5 min |

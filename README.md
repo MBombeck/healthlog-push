@@ -18,7 +18,9 @@ server to the HealthLog iOS app, without being able to read them.
 Apple lets only the holder of an app's APNs key push to that app, so a self-hosted server cannot reach the
 App Store app on its own. The relay holds that key and forwards what registered servers send to devices
 that agreed to it. It is one Go binary in two processes: `relay` serves the API and talks to Apple,
-`signer` holds the Apple key and has no network access.
+`signer` holds the Apple key and has no network access. A third, `wallet`, off until a certificate is
+configured, signs Apple Wallet passes of a server's emergency card without seeing them: the server sends
+only the list of file hashes ([spec/wallet.md](spec/wallet.md)).
 
 ## What the relay can and cannot see
 
@@ -38,7 +40,9 @@ in [transparency.md](docs/transparency.md), and tests fail when code and lists d
 The Apple topic is fixed when the relay starts and every payload is built from constants, so no server can
 make the relay deliver to another app or show text of its own. A server can reach a device only after the
 HealthLog app on that device has signed a binding with its own key, and the app can leave a server
-directly, without that server.
+directly, without that server. A Wallet pass the relay signs carries the HealthLog icon and logo, pinned
+by hash; its texts come from the server that built it, which the relay records by manifest hash for 400
+days and can block from Wallet.
 
 ## Fast from anywhere, hosted in Germany
 

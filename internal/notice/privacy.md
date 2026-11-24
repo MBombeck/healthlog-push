@@ -1,6 +1,6 @@
 # Privacy notice of the HealthLog push relay
 
-Version 1.3, 2026-11-22 (consent text version `2026-11-21`). Served by the relay itself at https://push.healthlog.dev/privacy; this text is the
+Version 1.4, 2026-11-24 (consent text version `2026-11-21`). Served by the relay itself at https://push.healthlog.dev/privacy; this text is the
 authoritative one. Earlier versions are kept in the source repository
 (https://github.com/MBombeck/healthlog-push, file internal/notice/privacy.md).
 
@@ -78,6 +78,15 @@ server can only end an activity, and the relay sees nothing of its content. You 
 any time in the app; the app then tells the relay directly, without your HealthLog server, and starts and
 updates over the relay stop at once.
 
+**Apple Wallet passes.** Your HealthLog server can offer your emergency card as an Apple Wallet pass. The
+pass must be signed with the HealthLog project's Apple certificate, so your server asks the relay for that
+signature. It sends only the list of the pass's files with a hash of each (`manifest.json`), never a file:
+the relay does not see your name, your health data, the link in the QR code or the pass's serial number.
+The relay sees which server asked and when. When your pass changes, your server asks the relay to tell
+Wallet on your devices; the relay then sees the pass push token Wallet gave your server for that device and
+the time, forwards an empty message to Apple and keeps nothing of it except, in memory, a count per token
+for the push limit. This service is offered only once the relay operator has set it up.
+
 To be open about it: the relay cannot read content, but time patterns can say something about health. The
 time of a notification, and its class, can reveal for example that a dose was recorded on another of your
 devices at that moment. The relay is designed to keep as little of this as possible, as described below.
@@ -125,6 +134,10 @@ All times in the relay's database are day or week numbers (UTC), never a time of
   Kept for 400 days.
 - Operator state: pauses, registration mode, the current notice, the recovery window and one-time
   registration codes (as hashes). No personal data.
+- Wallet signing ledger: for every pass signature, a SHA-256 hash of the file list, the instance id of the
+  server that asked and the day. Kept for 400 days, so that a misused pass can be traced to the server that
+  had it signed. It is not in the backup, not in any log or metric, and only the operator can look it up.
+  It cannot be turned back into the file list or into anything about you.
 
 Kept in memory only, gone at the latest on restart: the device token during a request, the nonces of recent
 requests, recent push results for retries (for the lifetime of the notification, at least 10 minutes and at
@@ -135,7 +148,10 @@ direct opt-out (10 minutes), and delivery traces (72 hours). A delivery trace is
 assigns to one notification (`apns-unique-id`) with its result, keyed by the instance id and the
 notification's reference chosen by your server; it lets the operator look up a single lost notification in
 Apple's delivery log. Apple sends this identifier only for development builds of the app, so notifications
-to the App Store and TestFlight app leave no trace. Traces are never stored, backed up or logged.
+to the App Store and TestFlight app leave no trace. Traces are never stored, backed up or logged. For
+Wallet passes, also in memory only: the pass push token while a push is processed, a count per token
+(keyed by an HMAC of it, cleared at the end of each UTC day) and the result of each pass push for 10 minutes,
+so that a repeated request is not sent twice.
 
 The daily backup contains only the list of registered servers and the blocks: instance id, public key,
 tier, reason and its day, day of registration, device limit and day of first delivery; for each opt-out
@@ -190,8 +206,9 @@ discarded. On the relay host, logs are limited to three files of 10 MB each.
 
 - Apple. APNs delivers every notification. Apple receives the device token, the time, the type of push and
   the app's topic, and can link the token to an Apple account. With the Live Activity consent, Apple also
-  receives the content state of each Live Activity start and update in the clear (section 4). Apple acts as an independent controller; see
-  Apple's own privacy policy.
+  receives the content state of each Live Activity start and update in the clear (section 4). For a Wallet
+  pass update, Apple receives the pass push token, the time and an empty message. Apple acts as an
+  independent controller; see Apple's own privacy policy.
 - Hosting: Hetzner Online GmbH, Germany, as processor under a data processing agreement (Art. 28 GDPR). The
   relay runs on a dedicated cloud server in a data centre in Falkenstein, Germany. Hetzner sees network
   connections to the server, not their content.

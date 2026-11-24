@@ -37,6 +37,7 @@ type instState struct {
 	blockNewUntil time.Time
 	lastReceipt   time.Time
 	pending       store.DayCounters // not yet flushed
+	wallet        walletWindows     // Wallet limits, in memory
 }
 
 type idemEntry struct {
@@ -92,6 +93,7 @@ type Relay struct {
 	summary       summary
 	global        map[store.GlobalKey]int64 // pending for counters_global
 	traces        traces                    // apns-unique-id per instance and ref, 72 hours, memory only
+	wallet        walletState               // the wallet process as last seen, and the Wallet limits
 
 	apnsState
 	pools
@@ -165,6 +167,7 @@ func New(cfg Config, st *store.Store, sender Sender) (*Relay, error) {
 		lastDay: store.Day(now), summary: newSummary(now), global: map[store.GlobalKey]int64{},
 		pools: pools{probationMin: limits.Window{Size: time.Minute}, standardMin: limits.Window{Size: time.Minute},
 			minuteAll: limits.Window{Size: time.Minute}},
+		wallet: walletState{signMin: limits.Window{Size: time.Minute}, passToks: map[string]*passTokenQuota{}, walletIdm: map[string]walletIdem{}},
 	}
 	if err := st.GetControl(&r.control); err != nil && !errors.Is(err, store.ErrNotFound) {
 		return nil, err
@@ -209,7 +212,7 @@ func (r *Relay) addInstance(in *store.Instance) {
 	now := r.cfg.Now()
 	s := &instState{
 		rec: in, reqMin: limits.Window{Size: time.Minute}, pushMin: limits.Window{Size: time.Minute},
-		pushDay: limits.Window{Size: fullDay}, nonces: map[string]int64{}, day: store.Day(now),
+		pushDay: limits.Window{Size: fullDay}, nonces: map[string]int64{}, day: store.Day(now), wallet: newWalletWindows(),
 	}
 	tl := r.tierLimits(in)
 	s.badSig = limits.NewBucket(float64(tl.BadSignatureBurst), float64(tl.BadSignatureBurst)/60, now)
@@ -322,6 +325,7 @@ func (r *Relay) describeMetrics() {
 	r.Metrics.Set("hlp_db_writable", 1)
 	r.Metrics.Set("hlp_breaker_open", 0)
 	r.Metrics.Set("hlp_apns_misconfigured", 0)
+	r.describeWallet()
 	r.Metrics.Live(liveMetrics...)
 	r.describeOperational()
 }

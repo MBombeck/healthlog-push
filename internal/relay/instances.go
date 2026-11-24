@@ -187,14 +187,15 @@ func (r *Relay) dropInstanceLocked(id string) {
 }
 
 type statusResp struct {
-	State         string     `json:"state"`
-	Tier          string     `json:"tier"`
-	Limits        TierLimits `json:"limits"`
-	Devices       devCounts  `json:"devices"`
-	Notice        *Notice    `json:"notice"`
-	KeyRotatedDay string     `json:"keyRotatedDay,omitempty"`
-	RelayTime     int64      `json:"relayTime"`
-	Registration  string     `json:"registration"`
+	State         string       `json:"state"`
+	Tier          string       `json:"tier"`
+	Limits        TierLimits   `json:"limits"`
+	Devices       devCounts    `json:"devices"`
+	Notice        *Notice      `json:"notice"`
+	KeyRotatedDay string       `json:"keyRotatedDay,omitempty"`
+	RelayTime     int64        `json:"relayTime"`
+	Registration  string       `json:"registration"`
+	Wallet        walletStatus `json:"wallet"`
 }
 
 type devCounts struct {
@@ -218,7 +219,7 @@ func (r *Relay) handleStatus(w http.ResponseWriter, req *http.Request) {
 	tl := r.tierLimits(s.rec)
 	a, p := r.counts(s.rec.ID)
 	resp := statusResp{State: r.serviceStateLocked(now), Tier: s.rec.Tier, Limits: tl, Devices: devCounts{a, p, tl.Devices},
-		Notice: r.currentNotice(now), RelayTime: now.Unix(), Registration: r.control.Registration}
+		Notice: r.currentNotice(now), RelayTime: now.Unix(), Registration: r.control.Registration, Wallet: r.walletStatusLocked(s, now)}
 	if s.rec.RotatedDay != 0 && store.Day(now)-s.rec.RotatedDay <= 7 {
 		resp.KeyRotatedDay = store.DayString(s.rec.RotatedDay)
 	}

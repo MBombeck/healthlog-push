@@ -123,5 +123,5 @@ func keygen(kind string, out io.Writer) error {
 		}
 		return pem.Encode(out, &pem.Block{Type: "EC PRIVATE KEY", Bytes: der})
 	}
-	return errors.New("keygen relay-id|token-mac|acme-account")
+	return errors.New("keygen relay-id|token-mac|acme-account|wallet-csr <pass type id> [organization]")
 }

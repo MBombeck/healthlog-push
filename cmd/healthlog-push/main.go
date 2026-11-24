@@ -1,5 +1,6 @@
-// Command healthlog-push is the HealthLog push relay. One binary, two processes: "relay" serves the API and
-// talks to Apple; "signer" holds the APNs key without network access and writes short-lived JWTs.
+// Command healthlog-push is the HealthLog push relay. One binary, three processes: "relay" serves the API and
+// talks to Apple; "signer" holds the APNs key without network access and writes short-lived JWTs; "wallet",
+// off unless configured, holds the Wallet pass key without network access and signs pass manifests.
 package main
 
 import (
@@ -25,6 +26,8 @@ func main() {
 		err = runRelay()
 	case "signer":
 		err = runSigner()
+	case "wallet":
+		err = runWallet()
 	case "admin":
 		if len(args) == 1 {
 			fmt.Print(admin.Usage)
@@ -35,13 +38,21 @@ func main() {
 			err = admin.Run(adminSocketPath(), ar, os.Stdout)
 		}
 	case "keygen":
-		err = keygen(arg(args, 1), os.Stdout)
+		if arg(args, 1) == "wallet-csr" {
+			err = walletCSR(arg(args, 2), arg(args, 3), os.Stdout)
+		} else {
+			err = keygen(arg(args, 1), os.Stdout)
+		}
 	case "healthcheck":
-		err = healthcheck(slices.Contains(args, "--signer"))
+		if slices.Contains(args, "--wallet") {
+			err = walletHealthcheck(walletDir())
+		} else {
+			err = healthcheck(slices.Contains(args, "--signer"))
+		}
 	case "version":
 		fmt.Println(buildinfo.Version, buildinfo.Commit)
 	default:
-		err = fmt.Errorf("unknown command %q (relay, signer, admin, keygen, healthcheck, version)", args[0])
+		err = fmt.Errorf("unknown command %q (relay, signer, wallet, admin, keygen, healthcheck, version)", args[0])
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "healthlog-push:", err)

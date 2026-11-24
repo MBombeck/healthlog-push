@@ -22,6 +22,9 @@ type Instance struct {
 	LastPushDay      int    `json:"lastPushDay,omitempty"` // day of the last accepted push, for usage counts
 	ReasonDay        int    `json:"reasonDay,omitempty"`   // day of the suspension or revocation
 	FlaggedDay       int    `json:"flaggedDay,omitempty"`  // last day with a challenge or an exceeded invalid-token budget
+	// WalletBlocked stops Wallet signing and pass pushes for the instance (admin wallet block); pushes to the
+	// app are not affected.
+	WalletBlocked bool `json:"walletBlocked,omitempty"`
 }
 
 // Binding binds a device token (by MAC) to one instance with a device-held key.

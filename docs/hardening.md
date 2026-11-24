@@ -31,7 +31,11 @@ that can write to one storage location reserved for this host.
 unprivileged users, with a read-only root filesystem, all Linux capabilities dropped (the relay listens on an unprivileged port and the host firewall
 forwards port 443 to it), no privilege escalation, the default seccomp filter and an AppArmor profile of its own for each container (`deploy/apparmor/`). The small in-memory volumes the two
 containers share are mounted `noexec`, `nosuid` and `nodev`. The signing component
-has no network access at all; the relay never sees the signing key, only short-lived tokens.
+has no network access at all; the relay never sees the signing key, only short-lived tokens. The Wallet
+component, once switched on, runs the same way in a third container (its own user, no network, read-only
+root, no capabilities, 64 MiB, its own AppArmor profile): it holds the Wallet pass key, which the relay
+never reads, and reaches Apple only through a tunnel of the relay that dials Apple's push host and nothing
+else, with TLS from the Wallet component to Apple.
 
 **Kernel.** Kernel lockdown (integrity mode), restricted kernel pointers and logs, unprivileged BPF disabled, no IP
 forwarding, strict reverse-path filtering, core dumps disabled, unused filesystems and USB storage blocked.
@@ -55,7 +59,7 @@ and are not part of the published Ansible roles, so they cannot be verified from
 **Backups.** Only a daily export of registered instances (suspended and revoked ones with their tier and reason) and
 the blocks (device opt-outs, opt-out key pins and operator token blocks, as keyed hashes) is backed up, encrypted, to a
 separate storage account in Germany. The export is signed with the relay's identity key, and the relay refuses to
-import an export that was changed. Device bindings, counters, TLS keys and the signing key are never backed up. The server is
+import an export that was changed. Device bindings, counters, the Wallet signing ledger, TLS keys and the signing keys are never backed up. The server is
 not snapshotted; it is rebuilt from code.
 
 **What is not guaranteed.** Anyone with full control of the host could read the relay's keys and the metadata passing

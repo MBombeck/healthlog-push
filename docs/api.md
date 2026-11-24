@@ -22,8 +22,8 @@ characters), public keys 32 bytes (43 characters).
 - Only canonical paths are routed: a path that `path.Clean` would change (`/v1//push`, `/v1/push/`) gets a
   signed `404 not_found`. The relay never redirects.
 - `POST` and `DELETE` must declare their body length in `Content-Length` (`0` for no body); a body of unknown
-  length gets `411 length_required`. Bodies are limited to 128 KiB for `POST /v1/push` and 4 KiB for
-  everything else (`413 too_large`, checked against the declared length before the body is read). When the
+  length gets `411 length_required`. Bodies are limited to 128 KiB for `POST /v1/push`, 16 KiB for the two
+  Wallet endpoints and 4 KiB for everything else (`413 too_large`, checked against the declared length before the body is read). When the
   bodies in flight across all connections would exceed 32 MiB, the relay answers `503 overloaded`.
 - Response bodies are at most 64 KiB (65,536 bytes; a body that would be longer is answered `500 internal`).
   A client refuses a response body over 256 KiB without reading on.
@@ -204,12 +204,14 @@ HL-Signature: <86 base64url>
 ```
 
 ```json
-{"state":"ok","tier":"probation","limits":{"devices":20,"provisional":10,"newBindingsPerDay":20,"requestsPerMinute":20,"pushesPerDay":500,"pushesPerMinute":30,"invalidTokensPerDay":20,"challengesPerDay":20,"badSignatureBurst":30},"devices":{"active":2,"provisional":0,"limit":20},"notice":null,"relayTime":1795000000,"registration":"open"}
+{"state":"ok","tier":"probation","limits":{"devices":20,"provisional":10,"newBindingsPerDay":20,"requestsPerMinute":20,"pushesPerDay":500,"pushesPerMinute":30,"invalidTokensPerDay":20,"challengesPerDay":20,"badSignatureBurst":30},"devices":{"active":2,"provisional":0,"limit":20},"notice":null,"relayTime":1795000000,"registration":"open","wallet":{"sign":false,"notify":false}}
 ```
 
 `keyRotatedDay` appears for seven days after a rotation. A suspended instance gets
 `403 instance_suspended` with `reason` instead of a status. A notice looks like
-`{"id":"planned_maintenance","level":"planned","until":1795259200}`.
+`{"id":"planned_maintenance","level":"planned","until":1795259200}`. `wallet` says whether the instance can
+have Wallet passes signed now; with Wallet on it reads
+`{"sign":true,"notify":true,"passTypeIdentifier":"pass.dev.healthlog.emergency","teamIdentifier":"ABCDE12345","certNotAfterDay":20800}`.
 
 ## Bindings
 
@@ -617,6 +619,59 @@ HTTP/1.1 204 No Content
 ```
 
 Refusal: `429 instance_rate` when sent again within 45 minutes.
+
+## Wallet
+
+Blind signing of Apple Wallet passes for a HealthLog server's emergency card, and the pushes that tell
+Wallet a pass changed. The server builds the whole pass itself and sends only `manifest.json`, the list of
+file hashes. Normative: [spec/wallet.md](../spec/wallet.md); vectors:
+[spec/vectors/wallet-v1.json](../spec/vectors/wallet-v1.json). Both endpoints answer
+`503 wallet_unavailable` while the relay runs without a wallet process.
+
+### POST /v1/wallet/apple/sign
+
+```http
+POST /v1/wallet/apple/sign HTTP/1.1
+Content-Type: application/json
+HL-Instance: 6f1c2a4e-8b3d-4c5e-9a7f-0d1e2f3a4b5c
+HL-Timestamp: 1795000000
+HL-Nonce: q8Jr2mXc0Lw7Vd1sT5yNbA
+HL-Signature: <86 base64url>
+
+{"v":1,"manifest":"eyJwYXNzLmpzb24iOiI1ZjM2Li4uIiwiaWNvbi5wbmciOiIxYjdkLi4uIn0"}
+```
+
+```json
+{"signature":"MIIH...","passTypeIdentifier":"pass.dev.healthlog.emergency","teamIdentifier":"ABCDE12345","signerSubjectO":"HealthLog","certNotAfterDay":20800}
+```
+
+Put the decoded `signature` into the pass archive as the file `signature`. The manifest may name only
+`pass.json`, `<locale>.lproj/pass.strings` and the HealthLog brand images, which must carry their pinned
+hashes ([spec/wallet-manifest-v1.json](../spec/wallet-manifest-v1.json)). Refusals: `422
+wallet_manifest_invalid` with `reason` (`shape`, `unknown_file`, `foreign_asset`, `missing_file`,
+`too_many`), `403 wallet_blocked`, `429 wallet_rate` (10 a minute in probation, 30 in standard),
+`429 wallet_quota` (200 a day, 2000), `429 global`, `503 wallet_unavailable`.
+
+### POST /v1/wallet/apple/notify
+
+```http
+POST /v1/wallet/apple/notify HTTP/1.1
+Content-Type: application/json
+HL-Instance: 6f1c2a4e-8b3d-4c5e-9a7f-0d1e2f3a4b5c
+HL-Timestamp: 1795000000
+HL-Nonce: q8Jr2mXc0Lw7Vd1sT5yNbA
+HL-Signature: <86 base64url>
+
+{"items":[{"ref":"reg-1","token":"<pass push token, hex>"}]}
+```
+
+```json
+{"results":[{"ref":"reg-1","result":"accepted"}]}
+```
+
+Results per item: `accepted`, `unregistered` (drop that registration), `rejected`, `token_quota` (12 an hour
+and 48 a day per token), `unavailable` (try later). At most 50 items; 60 pass pushes a minute and 300 a day
+per instance in probation, 3000 a day in standard (`429 wallet_rate`, `429 wallet_quota`).
 
 ## Public pages
 

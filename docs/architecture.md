@@ -13,10 +13,15 @@ relay holds the APNs key for that app and passes on what registered servers send
 The relay is not a medical service. Reminders that the app schedules on the device stay the authoritative
 reminder path. A notification sent through the relay can be late or lost.
 
-## Two processes
+## Two processes, and a third for Wallet
 
 It is one Go binary that runs as two processes. `relay` serves the API and talks to Apple. `signer` holds the
 APNs key, has no network access, and hands the relay a short-lived provider token through a shared tmpfs.
+
+A third process, `wallet`, runs only when the operator configured a Pass Type ID certificate. It holds that
+certificate's key, has no network access, signs pass manifests the relay hands it over a unix socket after
+checking them itself, and sends pass update pushes to Apple through a byte tunnel of the relay, with TLS
+from the wallet process to Apple ([spec/wallet.md](../spec/wallet.md)).
 
 ```mermaid
 flowchart LR
@@ -96,11 +101,12 @@ Requests from authorities, how they are handled, and every key rotation and depr
 ## Code layout
 
 ```
-cmd/healthlog-push/    entry point: relay, signer, admin, keygen, healthcheck, version
+cmd/healthlog-push/    entry point: relay, signer, wallet, admin, keygen, healthcheck, version
 internal/relay/        HTTP API, bindings, push path, limits, breaker, maintenance, admin socket
 internal/wire/         every parser and every signed text of the protocol (fuzzed)
 internal/apns/         APNs client and the fixed payload templates
 internal/signer/       the network-less signer that writes provider JWTs
+internal/wallet/       the network-less Wallet signer: manifest check, pins, CMS, socket, pass pushes
 internal/store/        bbolt persistence, retention, registry export
 internal/limits/       token buckets, windows, registration and connection limiters
 internal/queue/        fair, bounded in-memory send queue
@@ -109,7 +115,7 @@ internal/metrics/      coarse Prometheus counters without instance labels
 internal/notice/       the texts served at /privacy, /terms, /.well-known/security.txt and /, and their HTML
 internal/admin/        operator command line over the admin socket
 spec/                  protocol specification, test vectors and their tools
-deploy/compose/        compose file for relay and signer
+deploy/compose/        compose file for relay, signer and the optional wallet process
 deploy/ansible/        host provisioning and verified deployment
 keys/                  the published identity keys of the hosted relay, checked by a test
 docs/                  everything else: operations, privacy, terms, threat model, self-hosting, API

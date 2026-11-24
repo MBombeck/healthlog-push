@@ -101,6 +101,8 @@ func (r *Relay) admin(ar *AdminRequest) (any, error) {
 		return r.StatusFile(), nil
 	case "delivery":
 		return r.DeliveryTrace(arg(a, 0), arg(a, 1))
+	case "wallet":
+		return r.adminWallet(a)
 	}
 	return nil, adminError("unknown command")
 }

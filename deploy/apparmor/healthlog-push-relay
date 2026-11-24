@@ -30,6 +30,8 @@ profile healthlog-push-relay flags=(attach_disconnected,mediate_deleted) {
   # The admin socket: the relay listens, `docker compose exec relay /healthlog-push admin` connects.
   unix (create, bind, listen, accept, getattr, setattr, getopt, setopt, shutdown) type=stream,
   unix (connect, send, receive) type=stream peer=(label=healthlog-push-relay),
+  # Wallet, only when switched on: the relay dials wallet.sock and serves the byte tunnel apns.sock.
+  unix (connect, send, receive) type=stream peer=(label=healthlog-push-wallet),
 
   /healthlog-push mrix,
 
@@ -44,6 +46,7 @@ profile healthlog-push-relay flags=(attach_disconnected,mediate_deleted) {
   /run/secrets/relay/ r,
   /run/secrets/relay/* r,
   deny /run/secrets/signer/** rwklx,
+  deny /run/secrets/wallet/** rwklx,
 
   /data/ r,
   /data/** rwk,
@@ -55,6 +58,9 @@ profile healthlog-push-relay flags=(attach_disconnected,mediate_deleted) {
   /run/jwt/token r,
   /run/jwt-refresh/ r,
   /run/jwt-refresh/refresh rw,
+  /run/wallet/ r,
+  /run/wallet/wallet.sock rw,
+  /run/wallet/apns.sock rw,
 
   @{PROC}/sys/net/core/somaxconn r,
   @{PROC}/@{pid}/cgroup r,

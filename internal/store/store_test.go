@@ -29,7 +29,7 @@ func TestStoreBucketsAreClosed(t *testing.T) {
 		return tx.ForEach(func(name []byte, _ *bolt.Bucket) error { got = append(got, string(name)); return nil })
 	})
 	slices.Sort(got)
-	want := []string{"bindings", "blocked_pairs", "blocked_tokens", "control", "counters", "counters_global", "instance_keys", "instances", "optout_pins"}
+	want := []string{"bindings", "blocked_pairs", "blocked_tokens", "control", "counters", "counters_global", "instance_keys", "instances", "optout_pins", "walletsign"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("buckets %v", got)
 	}

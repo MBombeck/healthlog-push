@@ -1,0 +1,61 @@
+# AppArmor profile for the wallet container (deploy/compose/compose.yaml, service wallet).
+#
+# Paths are those inside the container. Load on the host with
+#   apparmor_parser -r -W /etc/apparmor.d/healthlog-push-wallet
+# and set HLP_APPARMOR_WALLET=healthlog-push-wallet (docs/self-hosting.md, "AppArmor"). Load it together
+# with the relay profile: each one names the other as the only peer on the wallet sockets.
+#
+# The wallet process has no network (compose: network_mode none; here: no inet rule at all). It reads the
+# pass key and certificate and the CA roots, serves wallet.sock and dials the relay's byte tunnel apns.sock
+# in /run/wallet. It needs no capability.
+abi <abi/3.0>,
+
+#include <tunables/global>
+
+profile healthlog-push-wallet flags=(attach_disconnected,mediate_deleted) {
+  #include <abstractions/base>
+
+  network unix stream,
+  deny network inet,
+  deny network inet6,
+  deny network raw,
+  deny network packet,
+
+  signal (receive) peer=unconfined,
+  signal (send, receive) peer=healthlog-push-wallet,
+  unix (create, bind, listen, accept, getattr, setattr, getopt, setopt, shutdown) type=stream,
+  unix (connect, send, receive) type=stream peer=(label=healthlog-push-relay),
+  unix (connect, send, receive) type=stream peer=(label=healthlog-push-wallet),
+
+  /healthlog-push mrix,
+
+  /etc/ssl/certs/ r,
+  /etc/ssl/certs/** r,
+  /etc/localtime r,
+  /usr/share/zoneinfo/** r,
+
+  /run/secrets/wallet/ r,
+  /run/secrets/wallet/pass.key r,
+  /run/secrets/wallet/pass.crt r,
+  deny /run/secrets/relay/** rwklx,
+  deny /run/secrets/signer/** rwklx,
+  /run/wallet/ r,
+  /run/wallet/wallet.sock rw,
+  /run/wallet/apns.sock rw,
+
+  @{PROC}/@{pid}/cgroup r,
+  @{PROC}/@{pid}/mountinfo r,
+  @{PROC}/@{pid}/stat r,
+  /sys/kernel/mm/transparent_hugepage/hpage_pmd_size r,
+  /sys/fs/cgroup/ r,
+  /sys/fs/cgroup/** r,
+
+  deny @{PROC}/@{pid}/mem rw,
+  deny @{PROC}/sysrq-trigger rw,
+  deny @{PROC}/kcore r,
+  deny /sys/firmware/** rw,
+  deny mount,
+  deny umount,
+  deny pivot_root,
+  deny ptrace,
+}

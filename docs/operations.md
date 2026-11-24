@@ -341,6 +341,24 @@ hours, at most 50,000 of them (the oldest go first), and is gone sooner when the
 instance is deleted. It is never written to the database, the export, a log line or a metric. A retry of
 the same `ref` replaces the trace. When nothing is found the command answers `{"error": "no trace: ..."}`.
 
+### wallet
+
+Only meaningful with Wallet on (`HLP_WALLET_DIR`, [self-hosting.md](self-hosting.md#wallet-passes-healthlog-push-wallet)).
+
+```sh
+docker compose exec relay /healthlog-push admin wallet status
+docker compose exec relay /healthlog-push admin wallet lookup <sha256 of manifest.json>
+docker compose exec relay /healthlog-push admin wallet block <instance id>
+docker compose exec relay /healthlog-push admin wallet unblock <instance id>
+```
+
+`status` shows the identity the wallet process last reported (Pass Type ID, team, `O=`, last day of
+validity, days left) and how many seconds ago it answered. `lookup` answers
+`[{"instanceId": "...", "day": 20791}]` for a reported pass: unzip the `.pkpass` and run
+`shasum -a 256 manifest.json`. The ledger keeps 400 days and is not in the export. `block` stops Wallet
+signing and pass pushes for one server (`403 wallet_blocked`) and leaves its pushes to the app alone; the
+block travels in the export. For abuse beyond Wallet, `suspend` stops everything.
+
 ## Key rotation
 
 Generate keys with the same image you run: `docker run --rm "$IMAGE" keygen relay-id|token-mac|acme-account`.
@@ -437,6 +455,8 @@ Metrics are served on `127.0.0.1:9464/metrics` and carry no instance, device or 
 
 | Signal | Means | Act |
 |---|---|---|
+| `hlp_wallet_cert_days_left` below 30 | the Pass Type ID certificate expires within a month (at fewer than 7 days Wallet stops signing) | renew it ([key-ceremony.md](key-ceremony.md#wallet-pass-certificate)) |
+| `hlp_wallet_cert_days_left` at -1 | the wallet process does not answer | `docker compose ps wallet` and the `wallet.*` log lines; the relay logs `wallet.unreachable` once per outage |
 | `/healthz` `status` `down` for more than a few minutes | no fresh provider token, or Apple rejected the key | check `docker compose ps signer` and the `signer.*` log lines; check key id, team id, topic and whether the key was revoked |
 | `hlp_apns_misconfigured == 1`, log `apns.provider_token_rejected` | a renewed provider token was rejected; the relay stopped sending | fix the key or the ids, then restart or `admin breaker reset-apns` |
 | `hlp_breaker_open == 1`, log `breaker.opened` | more than 30 % of at least 20 sends to established bindings (bindings that had a push accepted) failed with token errors, from at least three instances | look for a wrong topic, environment or key, or a bad image; roll back if a deploy preceded it; do not close by hand before the cause is fixed |

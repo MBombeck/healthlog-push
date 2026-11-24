@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/MBombeck/healthlog-push/internal/limits"
+	"github.com/MBombeck/healthlog-push/internal/wallet"
 )
 
 // TierLimits are the per-instance limits of one tier (spec/protocol.md, "Limits").
@@ -38,6 +39,24 @@ type DeviceLimits struct {
 	ActivityUpdateDay    int64 `json:"activityUpdatesPerDay"`
 }
 
+// WalletTierLimits are the per-instance Wallet limits of one tier (spec/wallet.md, "Limits").
+type WalletTierLimits struct {
+	SignsMinute  int64 `json:"signsPerMinute"`
+	SignsDay     int64 `json:"signsPerDay"`
+	NotifyMinute int64 `json:"passPushesPerMinute"`
+	NotifyDay    int64 `json:"passPushesPerDay"`
+}
+
+// WalletLimits are the Wallet limits: per tier, relay-wide signatures per minute, and pass pushes per pass
+// push token (by its MAC) per hour and per day.
+type WalletLimits struct {
+	Probation         WalletTierLimits `json:"probation"`
+	Standard          WalletTierLimits `json:"standard"`
+	GlobalSignsMinute int64            `json:"globalSignsPerMinute"`
+	TokenHour         int64            `json:"passPushesPerTokenHour"`
+	TokenDay          int64            `json:"passPushesPerTokenDay"`
+}
+
 // Limits is the full limit configuration.
 type Limits struct {
 	Probation          TierLimits   `json:"probation"`
@@ -48,6 +67,7 @@ type Limits struct {
 	GlobalMax          int64        `json:"globalMaxPerMinute"`
 	StandardDevicesUp  int          `json:"standardDevicesAuto"` // automatic raise after 30 quiet days
 	StandardDevicesMax int          `json:"standardDevicesMax"`  // highest value admin limits may set
+	Wallet             WalletLimits `json:"wallet"`
 }
 
 // DefaultLimits are the values of the hosted relay.
@@ -59,6 +79,11 @@ var DefaultLimits = Limits{
 	Device: DeviceLimits{AllDay: 300, AlertBurst: 20, AlertPerHour: 6, AlertDay: 100, SilentHour: 6, LiveActivityDay: 12,
 		LiveActivityStartDay: 12, ActivityUpdateHour: 12, ActivityUpdateDay: 48},
 	ProbationPoolMin: 600, GlobalMin: 600, GlobalMax: 6000, StandardDevicesUp: 80, StandardDevicesMax: 150,
+	Wallet: WalletLimits{
+		Probation:         WalletTierLimits{SignsMinute: 10, SignsDay: 200, NotifyMinute: 60, NotifyDay: 300},
+		Standard:          WalletTierLimits{SignsMinute: 30, SignsDay: 2000, NotifyMinute: 60, NotifyDay: 3000},
+		GlobalSignsMinute: 600, TokenHour: 12, TokenDay: 48,
+	},
 }
 
 // Config configures a Relay.
@@ -86,6 +111,12 @@ type Config struct {
 	Registrations limits.RegistrationLimits
 	// ProviderTokenOK reports whether the signer's JWT is available; nil means it is not checked.
 	ProviderTokenOK func() bool
+	// Wallet is the wallet process (internal/wallet, over its unix socket); nil means Wallet signing and pass
+	// pushes are off and both endpoints answer 503 wallet_unavailable.
+	Wallet WalletBackend
+	// WalletPins are the brand image hashes the relay checks before it asks the wallet process, which checks
+	// them again; nil means wallet.DefaultPins.
+	WalletPins wallet.Pins
 }
 
 func (c *Config) defaults() {
@@ -100,6 +131,9 @@ func (c *Config) defaults() {
 	}
 	if c.Registrations == (limits.RegistrationLimits{}) {
 		c.Registrations = limits.DefaultRegistrationLimits
+	}
+	if c.WalletPins == nil {
+		c.WalletPins = wallet.DefaultPins
 	}
 	if c.Environments == nil {
 		c.Environments = map[string]bool{"production": true}

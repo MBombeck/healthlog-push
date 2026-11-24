@@ -7,8 +7,11 @@ they do. It is reviewed at least once a year.
 ## Direction
 
 healthlog-push exists for one purpose: a self-hosted HealthLog server can send push notifications to the
-HealthLog iOS app without an Apple developer account, and the relay in between cannot read them. The relay
-should stay small enough that one person can read all of it.
+HealthLog iOS app without an Apple developer account, and the relay in between cannot read them. Since
+Wallet passes (spec/wallet.md), it also signs Apple Wallet passes of a HealthLog server's emergency card
+without seeing their content: the server sends a list of file hashes, the HealthLog brand images are
+pinned, and the pass itself never leaves the server. The relay should stay small enough that one person
+can read all of it.
 
 ## Done in v1.0.3
 
@@ -20,6 +23,8 @@ should stay small enough that one person can read all of it.
 
 ## Next
 
+- Wallet passes in service: the pinned hashes of the final HealthLog artwork, the Pass Type ID certificate
+  of the hosted relay and the deployment of the `wallet` process. Until then the code is in place and off.
 - A scheduled rotation drill for the `next` identity key
   ([key-ceremony.md](key-ceremony.md#drill)).
 
