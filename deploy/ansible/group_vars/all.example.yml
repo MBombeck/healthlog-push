@@ -59,6 +59,8 @@ healthlog_push_registration_mode: invite
 # healthlog_push_apparmor_install: true
 # healthlog_push_apparmor_relay: healthlog-push-relay
 # healthlog_push_apparmor_signer: healthlog-push-signer
+# Container logs in the host's systemd journal instead of json-file (docs/self-hosting.md, "Logs").
+# healthlog_push_log_driver: journald
 
 healthlog_push_export_timer_enabled: false
 healthlog_push_log_shipping_tasks: ""

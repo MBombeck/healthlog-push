@@ -30,3 +30,9 @@ func ReasonLabel(reason string) string {
 func ReasonLabels() []string {
 	return append(slices.Sorted(maps.Keys(knownReasons)), "other")
 }
+
+// Outcomes returns every Outcome, the closed set of the result label of hlp_challenges_total.
+func Outcomes() []Outcome {
+	return []Outcome{Accepted, Unregistered, SoftInvalid, DeviceThrottled, ProviderExpired, ProviderInvalid,
+		ProviderTooMany, Rejected, Unavailable, NoProviderToken}
+}

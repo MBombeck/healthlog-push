@@ -209,6 +209,27 @@ runs under its profile. A profile name the kernel has not loaded makes `docker c
 checks this before it touches the running containers. To try a change first, load it with `apparmor_parser -C -r` (complain) and
 look for `apparmor="ALLOWED"` lines in the audit log while you use the relay.
 
+### Logs
+
+Every process writes one JSON object per line with a fixed set of keys and no address, token or instance id
+([operations.md](operations.md#alerts-worth-acting-on)). Lines that call for action carry `"level":"alert"`
+and go to standard error, everything else to standard output. By default compose keeps them with Docker's
+json-file driver, three files of 10 MB per container. To keep them in the host's systemd journal instead,
+for example to ship them with a journal reader rather than with access to Docker's files, put the override
+next to the compose file and name both in `.env`, with absolute paths (compose reads relative paths from
+the directory it is started in):
+
+```sh
+cp deploy/compose/compose.journald.yaml /srv/healthlog-push/compose/
+echo 'COMPOSE_FILE=/srv/healthlog-push/compose/compose.yaml:/srv/healthlog-push/compose/compose.journald.yaml' \
+  >> /srv/healthlog-push/compose/.env
+docker compose --project-directory /srv/healthlog-push/compose up -d
+journalctl CONTAINER_NAME=healthlog-push-relay-1 -p err   # the alert lines only
+```
+
+The journal then keeps the lines as long as the host's journald settings allow (`SystemMaxUse`,
+`MaxRetentionSec`). With the Ansible role, `healthlog_push_log_driver: journald` does the same.
+
 ## Firewall
 
 The relay uses host networking and listens on 8443 without any capability. Redirect 443 to 8443 for IPv4

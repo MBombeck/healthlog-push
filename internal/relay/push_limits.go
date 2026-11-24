@@ -309,7 +309,7 @@ func (r *Relay) countApple429Locked(now time.Time, throttled bool) {
 	if sends >= 50 && float64(thr)/float64(sends) > 0.02 && !now.Before(r.silentOffUntil) {
 		r.silentOffUntil = now.Add(15 * time.Minute)
 		r.Metrics.Inc("hlp_silent_paused_total")
-		logx.Event("apns.throttled", logx.Str(logx.KClass, "silent"), logx.Str(logx.KState, "paused"))
+		logx.Alert("apns.throttled", logx.Str(logx.KClass, "silent"), logx.Str(logx.KState, "paused"))
 	}
 }
 

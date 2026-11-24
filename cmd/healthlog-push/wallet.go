@@ -92,7 +92,7 @@ func startWalletTunnel(ctx context.Context, dir string) (relay.WalletBackend, er
 	}
 	go func() {
 		if err := (&relay.Tunnel{}).Serve(ctx, ln); err != nil {
-			logx.Event("relay.wallet_tunnel_failed")
+			logx.Alert("relay.wallet_tunnel_failed")
 		}
 	}()
 	return wallet.NewClient(filepath.Join(dir, wallet.SocketName)), nil

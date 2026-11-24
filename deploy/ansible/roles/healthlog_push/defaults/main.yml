@@ -30,6 +30,11 @@ healthlog_push_config_dir: /etc/healthlog-push
 healthlog_push_project: healthlog-push
 # The compose file shipped in this repository is the only source.
 healthlog_push_compose_src: "{{ playbook_dir }}/../compose/compose.yaml"
+healthlog_push_compose_journald_src: "{{ playbook_dir }}/../compose/compose.journald.yaml"
+# Log driver of the containers: json-file (three files of 10 MB each per container, as compose.yaml sets) or
+# journald (the host's systemd journal, kept as long as the host's journald keeps it; the relay's alert lines
+# get priority err). journald adds compose.journald.yaml through COMPOSE_FILE in .env.
+healthlog_push_log_driver: json-file
 
 healthlog_push_public_host: push.example.org
 healthlog_push_listen: ":8443"

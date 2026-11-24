@@ -20,6 +20,12 @@ The compose file sets the `labels` log option, so `attrs` names the service
 (`relay` or `signer`). Read these files as root; do not give the shipper the
 Docker socket.
 
+With `healthlog_push_log_driver: journald` the lines go to the systemd journal
+instead (`deploy/compose/compose.journald.yaml`): read them with the shipper's
+journal source, filtered on `CONTAINER_NAME` or `COM_DOCKER_COMPOSE_SERVICE`.
+The relay's alert lines carry `"level":"alert"` and have the journal priority
+`err`. The address filter below applies to the journal `MESSAGE` the same way.
+
 ## Pipeline
 
 1. Parse the Docker JSON envelope and keep `log` as the line, `stream` and

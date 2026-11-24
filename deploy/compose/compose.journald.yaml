@@ -1,0 +1,23 @@
+---
+# Optional override: the containers log to the host's systemd journal instead of the json-file driver of
+# compose.yaml. Add it with COMPOSE_FILE=compose.yaml:compose.journald.yaml in the .env next to both files;
+# the Ansible role does that for healthlog_push_log_driver: journald (docs/self-hosting.md, "Logs").
+#
+# A logging block with another driver replaces the one of compose.yaml as a whole, so the json-file options
+# (max-size, max-file), which the journald driver refuses, do not reach it. How long the journal keeps the
+# lines is the host's journald setting. Lines written to standard error, the relay's alert lines among them,
+# get the journal priority err.
+
+x-journald: &journald
+  driver: journald
+  options:
+    tag: "{{.Name}}"
+    labels: com.docker.compose.service
+
+services:
+  signer:
+    logging: *journald
+  wallet:
+    logging: *journald
+  relay:
+    logging: *journald

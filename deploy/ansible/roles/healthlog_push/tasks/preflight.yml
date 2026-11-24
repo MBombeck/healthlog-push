@@ -42,7 +42,9 @@
       - healthlog_push_registration_mode in ['open', 'invite', 'closed']
       - healthlog_push_apparmor_relay is match('^[a-z0-9][a-z0-9._-]*$')
       - healthlog_push_apparmor_signer is match('^[a-z0-9][a-z0-9._-]*$')
+      - healthlog_push_log_driver in ['json-file', 'journald']
     fail_msg: >-
       healthlog_push_registration_mode must be open, invite or closed; the AppArmor
-      profile names must be plain profile names.
+      profile names must be plain profile names; healthlog_push_log_driver must be
+      json-file or journald.
     quiet: true

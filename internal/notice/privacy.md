@@ -207,7 +207,8 @@ conflicts get no log line of their own; they are counted in the periodic totals.
 notifications, errors by reason, these event counts, latency) are written every minute while at least 20
 servers are active, otherwise every hour.
 Error messages of the underlying HTTP and TLS libraries, which can contain addresses, are counted and
-discarded. On the relay host, logs are limited to three files of 10 MB each.
+discarded. On the hosted relay, the log lines are kept in the host's system journal for at most 14 days and
+copied to the operator's monitoring, which keeps them for 30 days.
 
 
 ## 8. Who else receives data

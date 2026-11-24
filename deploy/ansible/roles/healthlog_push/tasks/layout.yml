@@ -92,3 +92,11 @@
     owner: root
     group: root
     mode: "0640"
+
+- name: Install the journald override from the repository (used only with healthlog_push_log_driver journald)
+  ansible.builtin.copy:
+    src: "{{ healthlog_push_compose_journald_src }}"
+    dest: "{{ healthlog_push_root }}/compose/compose.journald.yaml"
+    owner: root
+    group: root
+    mode: "0640"

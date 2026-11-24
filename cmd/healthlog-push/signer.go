@@ -50,7 +50,7 @@ func signerLoop(ctx context.Context, step func() (bool, error), tick <-chan time
 	for {
 		if wrote, err := step(); err != nil {
 			failures++
-			logx.Event("signer.write_failed", logx.Int(logx.KCount, int64(failures)))
+			logx.Alert("signer.write_failed", logx.Int(logx.KCount, int64(failures)))
 			if failures >= maxFailures {
 				return fmt.Errorf("signer: %d steps in a row failed: %w", failures, err)
 			}

@@ -23,7 +23,7 @@ A push is synchronous: the HealthLog server's request returns when Apple has ans
 
 | Leg | Warm connection | New connection | Notes |
 |---|---|---|---|
-| HealthLog server to relay | 1 round trip | DNS, then TCP, TLS 1.3 and the request: 3 round trips | the relay keeps idle connections for 60 s |
+| HealthLog server to relay | 1 round trip | DNS, then TCP, TLS 1.3 and the request: 3 round trips | the relay keeps idle connections for 120 s |
 | Inside the relay | about 0.3 ms | the same | signature check, limits, queue, payload, signed answer |
 | Relay to Apple | 1 round trip | 2 or 3 more, and the first request waits for Apple's stream limit | `hlp_apns_connections_total` shows how often a new one is needed |
 | Apple to the device | Apple's own | | |

@@ -25,8 +25,34 @@ All notable changes to this project are documented in this file. The format foll
   derived from public seeds) with a reference implementation on `node:crypto`, checked in CI against Go and
   `openssl smime -verify`. Privacy notice 1.4 describes what Wallet signing sees and keeps.
 
+- `deploy/compose/compose.journald.yaml` and the role variable `healthlog_push_log_driver` (`json-file` or
+  `journald`, default `json-file`): the containers can log to the host's systemd journal instead of Docker's
+  json-file driver. The override replaces the whole logging block, because the journald driver refuses the
+  json-file size options; the role names it through `COMPOSE_FILE` in `.env`. `docs/self-hosting.md` has a
+  section "Logs".
+
 ### Changed
 
+- Every counter and label value the alert table of `docs/operations.md` watches exists from the first
+  scrape at zero: `hlp_connections_rejected_total`, `hlp_auth_failures_total`,
+  `hlp_invalid_budget_exceeded_total`, `hlp_body_budget_refused_total`, `hlp_queue_dropped_total`,
+  `hlp_silent_paused_total`, `hlp_challenges_total`, `hlp_requests_total` by status class,
+  `hlp_registrations_total`, `hlp_bindings_total`, `hlp_http_errors_total` and the watched results of
+  `hlp_push_total`. Until now they appeared only with their first event, which `increase()` cannot see, so an
+  alert missed exactly the first flood or the first dropped job. A test fails when a row of the table names a
+  series a fresh relay does not have.
+- The twelve log lines that call for action (`export.failed`, `relay.watchdog`, `relay.listener_failed`,
+  `relay.wallet_tunnel_failed`, `store.damaged_moved_aside`, `store.write_failed`, `store.check_failed`,
+  `signer.write_failed`, `apns.provider_token_rejected`, `breaker.opened`, `apns.throttled`,
+  `wallet.unreachable`) carry `"level":"alert"` and go to standard error; every other line stays on standard
+  output without a level. A pipeline can alert on that key, and the journald driver gives these lines the
+  priority `err`. A test fails when the code writes an alert the table of `docs/operations.md` does not list,
+  or when the table names a log line the code does not write.
+- The relay keeps an idle client connection for 120 seconds instead of 60, so a HealthLog server that keeps
+  its own connection for a little less can reuse it between pushes. `spec/protocol.md` says so, and a test
+  holds the two together.
+- Privacy notice 1.4 says that the hosted relay keeps its log lines in the host's journal for at most 14
+  days and in the operator's monitoring for 30 days.
 - Every response carries `X-Frame-Options: DENY` and `Referrer-Policy: no-referrer`, not only the HTML
   notices. A JSON reply has nothing to frame or to refer from; the headers state that for scanners and
   for any client that renders a reply.
