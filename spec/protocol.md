@@ -2,8 +2,8 @@
 
 This document specifies the HTTP protocol of the HealthLog push relay: who talks to it, every endpoint, the
 order of checks, the results, the limits and what the relay stores. The signed texts are in
-`spec/statements.md`, the end-to-end envelope in `spec/envelope.md`, the machine-readable endpoint
-description in `spec/relay-api.yaml`. Where this document and the Go code under `internal/` disagree, the
+`spec/statements.md`, the end-to-end envelope in `spec/envelope.md`, the Wallet pass signing in
+`spec/wallet.md`, the machine-readable endpoint description in `spec/relay-api.yaml`. Where this document and the Go code under `internal/` disagree, the
 code is the reference and this document gets fixed.
 
 Examples use the host `push.example.org`. The relay operated by the HealthLog project runs at
@@ -1163,7 +1163,9 @@ Instance-authenticated, empty body. `200`:
   "notice": { "id": "planned_maintenance", "level": "planned", "until": 1795600000 },
   "keyRotatedDay": "2026-11-21",
   "relayTime": 1795000000,
-  "registration": "open"
+  "registration": "open",
+  "wallet": { "sign": true, "notify": true, "passTypeIdentifier": "pass.dev.healthlog.emergency",
+              "teamIdentifier": "ABCDE12345", "certNotAfterDay": 20800 }
 }
 ```
 
@@ -1177,6 +1179,15 @@ Instance-authenticated, empty body. `200`:
 | `keyRotatedDay` | the day of the last key rotation, present for 7 days after it |
 | `relayTime` | the relay clock, unix seconds |
 | `registration` | registration mode: `open`, `invite` or `closed` |
+| `wallet` | whether this instance can have Wallet passes signed and pass pushes sent now, and the certificate's identifiers (`spec/wallet.md`, "Status"); `{"sign": false, "notify": false}` while Wallet is off |
+
+## Wallet passes
+
+`POST /v1/wallet/apple/sign` and `POST /v1/wallet/apple/notify` are specified in `spec/wallet.md`: request
+and answer bodies, the closed manifest file set and the pinned brand images, the CMS signature, the limits,
+the ledger and the vectors. Both are instance-signed like every `/v1` request (request signing, nonce,
+signed answer), with a body limit of 16 KiB. While no wallet process is configured both answer
+`503 wallet_unavailable`.
 
 ### Notice
 
@@ -1273,7 +1284,7 @@ no field for a raw device token, an address, or a push class per instance.
 
 | Record | Key | Fields |
 |---|---|---|
-| instance | instance id | Ed25519 public key, tier, reason of a suspension or revocation (closed set) and its day, creation day, last contact week, device limit, first delivery day, last rotation day, quiet-since day, last delivery day, flagged day |
+| instance | instance id | Ed25519 public key, tier, reason of a suspension or revocation (closed set) and its day, creation day, last contact week, device limit, first delivery day, last rotation day, quiet-since day, last delivery day, flagged day, Wallet block |
 | instance key index | hex public key | instance id |
 | binding | HMAC-SHA256 of the raw token under the token MAC key | instance id, SHA-256 of the binding key, `seq`, environment, state (`provisional`, `active`, `soft_invalid`), binding day, last-used week, last success day, soft-invalid day, consent text version, consent day, alerts today and their day, Live Activity consent text version and day (empty without that consent) |
 | blocked pair (`blocked_pairs`) | SHA-256("hl-blocked-pair\n" ‖ token MAC ‖ "\n" ‖ instance id) | JSON: day of the opt-out, SHA-256 of the binding key that opted out, the `seq` of the binding it left |
@@ -1282,6 +1293,7 @@ no field for a raw device token, an address, or a push class per instance.
 | instance day counters | day and instance id | pushes accepted, invalid tokens, rebinds; no class |
 | global day counters | day, class or category, result | count, without any instance |
 | operator control | fixed | pauses, registration mode, notice, recovery window, invite codes (as hashes) |
+| wallet ledger (`walletsign`) | SHA-256 of the manifest bytes, then the instance id | day of the signature; read only by `admin wallet lookup`, never exported, logged or counted (`spec/wallet.md`) |
 
 Only in memory: nonces, idempotency entries, per-device counters (except the alert count), pending
 challenges, the per token, instance and day challenge record, the per-instance counts of new bindings and
@@ -1291,7 +1303,9 @@ registration counters (keyed by salted prefix hashes), receipts, Apple throttlin
 traces: Apple's `apns-unique-id` of a push, which Apple sends only in the development environment, with the
 item result, keyed by instance id and `ref`, for 72 hours and at most 50,000 entries, so that the operator
 can look up one lost push in Apple's delivery log. Traces are never stored, exported, logged or counted, and
-go with the instance.
+go with the instance. For Wallet, also only in memory: the identity the wallet process last reported, the
+Wallet windows per instance and relay-wide, the pass push counts per pass push token (keyed by its MAC,
+cleared daily) and the results of pass pushes by instance and reference for ten minutes.
 
 Suspension and revocation live in the instance record (tier, reason, reason day); there is no separate
 list. A revocation writes the record and deletes the bindings in one transaction. A suspension of a revoked
@@ -1327,7 +1341,7 @@ The relay writes `registry.json` once a day (format `healthlog-push-registry-v2`
 | `format` | `healthlog-push-registry-v2` |
 | `host` | the relay's public host name |
 | `day` | `YYYY-MM-DD` of the export |
-| `instances` | `{id, publicKey, tier, reason, createdDay, deviceLimit, firstDeliveryDay, reasonDay}` per instance; suspended and revoked ones only while their reason day is at most 365 days old |
+| `instances` | `{id, publicKey, tier, reason, createdDay, deviceLimit, firstDeliveryDay, reasonDay, walletBlocked}` per instance (`walletBlocked` only when set); suspended and revoked ones only while their reason day is at most 365 days old |
 | `blockedPairs` | `{pair, reason: "device_opt_out", expiresDay}` per device opt-out |
 | `blockedTokens` | `{pair, reason: "operator_block", expiresDay}` per operator token block |
 | `optOutPins` | `{pair, reason: "device_opt_out_pin", expiresDay}` per opt-out pin |
@@ -1362,6 +1376,7 @@ already exists are skipped.
 | suspended and revoked instance records | 365 days after the reason day, with their bindings |
 | instance day counters | 7 days |
 | global day counters | 400 days |
+| wallet ledger entries | 400 days |
 | pending challenges | 30 minutes |
 | nonces | 600 s |
 | idempotency entries | the item's lifetime after clamping, at least 10 minutes |

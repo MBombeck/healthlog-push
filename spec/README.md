@@ -13,10 +13,15 @@ another implementation that follows these documents and passes the vectors.
 | `statements.md` | every signed text, byte for byte, with its signer, verifier and vector |
 | `envelope.md` | the end-to-end envelope: HPKE suite, binary layout, AAD, padding, plaintext schema, open order, replay store |
 | `relay-api.yaml` | OpenAPI 3.1 description of every public endpoint, its headers and its JSON schemas |
+| `wallet.md` | blind signing of Apple Wallet pass manifests and pass update pushes: endpoints, manifest rules, CMS, limits, ledger |
+| `wallet-manifest-v1.json` | the closed file set of a pass manifest and the pinned brand image hashes |
+| `vectors/wallet-v1.json` | test vectors for the manifest check and the detached signature; normative |
+| `tools/wallet.mjs` | reference manifest check and SignedData on `node:crypto` only, and the seed-based test keys |
+| `tools/gen-wallet-vectors.mjs` | generator of `vectors/wallet-v1.json` from the reference |
 | `vectors/v1.json` | test vectors for the envelope and the statements; normative |
 | `tools/envelope.mjs` | reference seal and open on `node:crypto` only |
 | `tools/gen-vectors.mjs` | generator of `vectors/v1.json` from the reference |
-| `tools/check-vectors.mjs` | independent check of `vectors/v1.json` against the reference |
+| `tools/check-vectors.mjs` | independent check of `vectors/v1.json` and `vectors/wallet-v1.json` against the references |
 | `tools/reference/hpke-proof.mjs` | the design proof the reference functions come from, including RFC 9180 checks |
 | `LICENSE` | CC0 1.0 Universal |
 

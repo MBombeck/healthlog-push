@@ -48,6 +48,8 @@ tags:
     description: Direct calls from the app, signed with the device binding key.
   - name: push
     description: Sending pushes and reporting delivery.
+  - name: wallet
+    description: Blind signing of Apple Wallet pass manifests and pass update pushes (spec/wallet.md).
   - name: public
     description: Unauthenticated information endpoints.
 security:
@@ -511,6 +513,74 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "413": { $ref: "#/components/responses/TooLarge" }
+        "426": { $ref: "#/components/responses/UpgradeRequired" }
+        "429": { $ref: "#/components/responses/TooMany" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+  /v1/wallet/apple/sign:
+    post:
+      tags: [wallet]
+      operationId: signWalletManifest
+      summary: Sign the manifest of an Apple Wallet pass (file hashes only)
+      description: |
+        Body at most 16 KiB. The manifest must name only files of the closed set and carry the pinned
+        hashes for the brand images (`spec/wallet.md`, "Manifest"); the answer is a detached CMS SignedData
+        over the exact manifest bytes. Errors besides request signing: `422 wallet_manifest_invalid` with a
+        `reason` (shape, unknown_file, foreign_asset, missing_file, too_many), `403 wallet_blocked`,
+        `429 wallet_rate`, `429 wallet_quota`, `429 global`, `503 wallet_unavailable`, `503 maintenance`,
+        `503 storage_unavailable`.
+      parameters:
+        - $ref: "#/components/parameters/HL-Client"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WalletSignBody" }
+      responses:
+        "200":
+          description: The signature and the identifiers of the certificate.
+          headers: { HL-Relay-Signature: { $ref: "#/components/headers/HL-Relay-Signature" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WalletSignResponse" }
+        "400": { $ref: "#/components/responses/NonceRequired" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "411": { $ref: "#/components/responses/LengthRequired" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+        "422": { $ref: "#/components/responses/Invalid" }
+        "426": { $ref: "#/components/responses/UpgradeRequired" }
+        "429": { $ref: "#/components/responses/TooMany" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+  /v1/wallet/apple/notify:
+    post:
+      tags: [wallet]
+      operationId: notifyWalletPasses
+      summary: Send pass update pushes to Wallet
+      description: |
+        Body at most 16 KiB, 1 to 50 items with unique references. Each token gets an empty push with the
+        Pass Type ID as topic. A reference repeated within ten minutes gets its first result again, except
+        `unavailable`. Errors besides request signing: `422 invalid_item`, `403 wallet_blocked`,
+        `429 wallet_rate`, `429 wallet_quota`, `503 wallet_unavailable`, `503 maintenance`.
+      parameters:
+        - $ref: "#/components/parameters/HL-Client"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WalletNotifyBody" }
+      responses:
+        "200":
+          description: One result per item, in item order.
+          headers: { HL-Relay-Signature: { $ref: "#/components/headers/HL-Relay-Signature" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WalletNotifyResponse" }
+        "400": { $ref: "#/components/responses/NonceRequired" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "411": { $ref: "#/components/responses/LengthRequired" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+        "422": { $ref: "#/components/responses/Invalid" }
         "426": { $ref: "#/components/responses/UpgradeRequired" }
         "429": { $ref: "#/components/responses/TooMany" }
         "503": { $ref: "#/components/responses/Unavailable" }
@@ -1209,7 +1279,7 @@ components:
         confirmed: { type: integer, format: int64, minimum: 0, maximum: 100000 }
     StatusResponse:
       type: object
-      required: [state, tier, limits, devices, notice, relayTime, registration]
+      required: [state, tier, limits, devices, notice, relayTime, registration, wallet]
       properties:
         state:
           type: string
@@ -1234,6 +1304,61 @@ components:
         registration:
           type: string
           enum: [open, invite, closed]
+        wallet: { $ref: "#/components/schemas/WalletStatus" }
+    WalletStatus:
+      type: object
+      required: [sign, notify]
+      description: False and without identifiers while Wallet is off, the wallet process is gone, its certificate has fewer than seven days left or the instance is blocked for Wallet.
+      properties:
+        sign: { type: boolean }
+        notify: { type: boolean }
+        passTypeIdentifier: { type: string, example: pass.dev.healthlog.emergency }
+        teamIdentifier: { type: string, pattern: "^[A-Z0-9]{10}$" }
+        certNotAfterDay: { type: integer, description: Last day of validity of the pass certificate, days since 1970-01-01 UTC. }
+    WalletSignBody:
+      type: object
+      additionalProperties: false
+      required: [v, manifest]
+      properties:
+        v: { type: integer, enum: [1] }
+        manifest: { type: string, description: Unpadded base64url of the exact manifest.json bytes, at most 8192 bytes. }
+    WalletSignResponse:
+      type: object
+      required: [signature, passTypeIdentifier, teamIdentifier, signerSubjectO, certNotAfterDay]
+      properties:
+        signature: { type: string, description: Unpadded base64url of the DER detached CMS SignedData. }
+        passTypeIdentifier: { type: string }
+        teamIdentifier: { type: string }
+        signerSubjectO: { type: string, description: The O= of the pass certificate subject. }
+        certNotAfterDay: { type: integer }
+    WalletNotifyBody:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items:
+            type: object
+            additionalProperties: false
+            required: [ref, token]
+            properties:
+              ref: { type: string, pattern: "^[A-Za-z0-9_-]{1,64}$" }
+              token: { type: string, pattern: "^[0-9a-fA-F]{64,200}$", description: The pass push token, even length. }
+    WalletNotifyResponse:
+      type: object
+      required: [results]
+      properties:
+        results:
+          type: array
+          items:
+            type: object
+            required: [ref, result]
+            properties:
+              ref: { type: string }
+              result: { type: string, enum: [accepted, unregistered, rejected, token_quota, unavailable] }
     HealthStatus:
       type: object
       required: [status, db_writable, apns_recent, breaker, delivery]

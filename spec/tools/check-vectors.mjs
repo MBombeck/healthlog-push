@@ -4,13 +4,18 @@
 //    envelope (SHA-256, AAD, lengths) is byte-identical to the "alert" vector here.
 // 3. Every envelope vector opens or fails with its recorded code; every statement signature verifies and every
 //    negative statement fails.
+// 4. spec/vectors/wallet-v1.json equals what gen-wallet-vectors.mjs produces, every manifest gets its recorded
+//    answer, and every walletSign signature verifies over its signed attributes with the pass key.
 // Usage: node spec/tools/check-vectors.mjs   (exit code 1 on any failure)
 // SPDX-License-Identifier: CC0-1.0
+import crypto from "node:crypto";
 import { readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { build } from "./gen-vectors.mjs";
 import { open, unhex, sha, hex, edVerify, tokenTagOf } from "./envelope.mjs";
+import { build as buildWallet } from "./gen-wallet-vectors.mjs";
+import { checkManifest, signedAttributes } from "./wallet.mjs";
 
 let failed = 0;
 const check = (name, ok) => { if (!ok) { failed++; console.error("FAIL", name); } };
@@ -46,5 +51,22 @@ for (const n of v.negativeStatements) {
   check(`negative statement ${n.name}`, !edVerify(Buffer.from(s.publicKey, "base64url"), n.text, Buffer.from(s.signature, "base64url")));
 }
 
+const walletOnDisk = readFileSync(new URL("../vectors/wallet-v1.json", import.meta.url), "utf8");
+check("wallet file matches generator output", walletOnDisk === JSON.stringify(buildWallet(), null, 2) + "\n");
+const w = JSON.parse(walletOnDisk);
+for (const m of w.manifests) check(`wallet manifest ${m.name} -> ${m.expect}`, checkManifest(Buffer.from(m.manifest, "utf8"), w.pins) === m.expect);
+const passCert = new crypto.X509Certificate(Buffer.from(w.certificates.pass, "base64url"));
+const interCert = new crypto.X509Certificate(Buffer.from(w.certificates.intermediate, "base64url"));
+const rootCert = new crypto.X509Certificate(Buffer.from(w.certificates.root, "base64url"));
+check("wallet chain verifies", passCert.verify(interCert.publicKey) && interCert.verify(rootCert.publicKey) && rootCert.verify(rootCert.publicKey));
+for (const s of w.walletSign) {
+  const manifest = Buffer.from(s.manifest, "base64url");
+  const attrs = signedAttributes(manifest, new Date(s.signingTime));
+  check(`walletSign ${s.name} attributes`, attrs.toString("hex") === s.signedAttributes);
+  const der = Buffer.from(s.signature, "base64url");
+  const sig = der.subarray(der.length - 256);
+  check(`walletSign ${s.name} signature verifies`, crypto.verify("sha256", attrs, passCert.publicKey, sig));
+}
+
 if (failed) { console.error(`${failed} check(s) failed`); process.exit(1); }
-console.log(`vectors ok: ${v.envelopes.length} envelopes, ${v.statements.length} statements, ${v.negativeStatements.length} negative statements`);
+console.log(`vectors ok: ${v.envelopes.length} envelopes, ${v.statements.length} statements, ${v.negativeStatements.length} negative statements, ${w.manifests.length} wallet manifests, ${w.walletSign.length} wallet signatures`);
