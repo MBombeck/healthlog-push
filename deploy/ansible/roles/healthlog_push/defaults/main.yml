@@ -44,6 +44,8 @@ healthlog_push_min_client_version: ""
 # Registration mode of a new store (open, invite, closed). The relay applies it before it accepts the first
 # request; a mode stored later with `admin registration` wins. Opening registration is a deliberate step.
 healthlog_push_registration_mode: invite
+# Public day aggregates at /stats (docs/api.md). Nothing is shown while fewer than three servers are registered.
+healthlog_push_public_stats: false
 # AppArmor profile per container. docker-default is what Docker applies anyway. To confine the containers
 # further, set healthlog-push-relay and healthlog-push-signer and either let the role install the profiles
 # of this release from deploy/apparmor/ (healthlog_push_apparmor_install) or load them yourself. The role
