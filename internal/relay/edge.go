@@ -19,6 +19,8 @@ func (r *Relay) edge(mux *http.ServeMux) http.HandlerFunc {
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("Strict-Transport-Security", "max-age=31536000")
 		h.Set("Content-Security-Policy", "default-src 'none'")
+		h.Set("X-Frame-Options", "DENY")
+		h.Set("Referrer-Policy", "no-referrer")
 		if status, e, refused := edgeRefusal(mux, req); refused {
 			r.fail(w, req, status, e)
 			return

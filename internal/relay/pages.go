@@ -23,8 +23,6 @@ func humanPage(text string, page []byte) http.HandlerFunc {
 		}
 		h.Set("Content-Type", "text/html; charset=utf-8")
 		h.Set("Content-Security-Policy", notice.HTMLPolicy)
-		h.Set("X-Frame-Options", "DENY")
-		h.Set("Referrer-Policy", "no-referrer")
 		_, _ = w.Write(page)
 	}
 }
