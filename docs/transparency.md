@@ -153,9 +153,11 @@ entry here.
 
 Newest first:
 
-- **2026-11-26** Relay v1.0.10, deployed to the hosted relay on 2026-11-26. No key rotation and no
+- **2026-11-26** Relay v1.0.11, deployed to the hosted relay on 2026-11-26. No key rotation and no
   deprecation. For clients: device, update and push-to-start tokens of up to 512 hex characters are
-  accepted (the cap was 200). Nothing else changes in the protocol.
+  accepted (the cap was 200). The HealthLog brand images are pinned, so the hosted relay signs Wallet passes
+  of the emergency card under Pass Type ID `pass.dev.healthlog.emergency`, team `S8WDX4W5KX`. Nothing else
+  changes in the protocol. v1.0.10 was never published.
 - **2026-11-25** Relay v1.0.9, deployed to the hosted relay on 2026-11-25. No key rotation and no
   deprecation. For clients: a Live Activity start carries the item's `ref` as the start id `s` in its
   attributes beside `v`, and app builds that decode only `v` ignore it; every response carries
