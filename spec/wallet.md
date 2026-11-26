@@ -164,7 +164,7 @@ wallet process.
 Instance-signed. Body at most 16 KiB, 1 to 50 items with unique references:
 
 ```json
-{ "items": [ { "ref": "<1 to 64 of A-Z a-z 0-9 _ ->", "token": "<hex, 64 to 200 characters, even length>" } ] }
+{ "items": [ { "ref": "<1 to 64 of A-Z a-z 0-9 _ ->", "token": "<hex, 64 to 512 characters, even length>" } ] }
 ```
 
 The token is the pass push token Wallet registered with the instance's pass web service. The wallet process

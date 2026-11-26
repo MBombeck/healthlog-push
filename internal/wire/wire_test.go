@@ -197,3 +197,22 @@ func TestStrictKeys(t *testing.T) {
 		t.Error("nested key in another case accepted")
 	}
 }
+
+// Apple documents no fixed token length; push-to-start tokens of 128 bytes are in the field.
+func TestParseTokenLengths(t *testing.T) {
+	for _, n := range []int{64, 200, 256, 512} {
+		if _, err := ParseToken(strings.Repeat("a", n)); err != nil {
+			t.Errorf("refused a %d character token: %v", n, err)
+		}
+	}
+	for _, s := range []string{
+		strings.Repeat("a", 62),
+		strings.Repeat("a", 514),
+		strings.Repeat("a", 255),
+		strings.Repeat("g", 64),
+	} {
+		if _, err := ParseToken(s); err == nil {
+			t.Errorf("accepted a %d character token", len(s))
+		}
+	}
+}

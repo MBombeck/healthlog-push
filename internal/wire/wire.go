@@ -74,9 +74,9 @@ func Verify(pk ed25519.PublicKey, text string, sig []byte) bool {
 	return ed25519.Verify(pk, []byte(text), sig)
 }
 
-// ParseToken parses an APNs device or activity token: lowercase or uppercase hex, 32 to 100 bytes.
+// ParseToken parses an APNs device or activity token: lowercase or uppercase hex, 32 to 256 bytes. Apple documents no fixed length (push-to-start tokens run past 100 bytes).
 func ParseToken(s string) ([]byte, error) {
-	if len(s) < 64 || len(s) > 200 || len(s)%2 != 0 {
+	if len(s) < 64 || len(s) > 512 || len(s)%2 != 0 {
 		return nil, ErrInvalid
 	}
 	b, err := hex.DecodeString(s)

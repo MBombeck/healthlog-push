@@ -6,6 +6,12 @@ All notable changes to this project are documented in this file. The format foll
 
 ## [Unreleased]
 
+### Fixed
+
+- Device and activity tokens of up to 512 hex characters are accepted. The cap was 200, and an iPhone
+  that hands out a 256 character push-to-start token had its Live Activity start refused. Apple documents
+  no fixed token length; the limit stays even-length hex with a lower bound of 64 characters.
+
 ## [1.0.9] - 2026-11-25
 
 ### Added
