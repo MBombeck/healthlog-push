@@ -68,22 +68,59 @@
   diff: false
   register: healthlog_push_signer_secret
 
+- name: Write the Wallet pass key and certificate
+  when: healthlog_push_wallet_enabled | bool
+  block:
+    - name: Create the Wallet secret directory
+      ansible.builtin.file:
+        path: "{{ healthlog_push_root }}/secrets/wallet"
+        state: directory
+        owner: "{{ healthlog_push_wallet_uid }}"
+        group: root
+        mode: "0500"
+
+    - name: Write pass.key and pass.crt for the wallet process
+      ansible.builtin.copy:
+        dest: "{{ healthlog_push_root }}/secrets/wallet/{{ item.name }}"
+        content: "{{ item.value }}"
+        owner: "{{ healthlog_push_wallet_uid }}"
+        group: root
+        mode: "0400"
+        backup: false
+      loop:
+        - {name: pass.key, value: "{{ healthlog_push_secret_wallet_pass_key_pem }}"}
+        - {name: pass.crt, value: "{{ healthlog_push_secret_wallet_pass_cert_pem }}"}
+      no_log: true
+      diff: false
+      register: healthlog_push_wallet_secret
+
+- name: Remove the Wallet secrets while Wallet is off
+  when: not (healthlog_push_wallet_enabled | bool)
+  ansible.builtin.file:
+    path: "{{ healthlog_push_root }}/secrets/wallet"
+    state: absent
+  register: healthlog_push_wallet_secret_removed
+
 - name: Fingerprint the secrets
   # The fingerprint goes into .env and the compose environment, so compose recreates the containers
   # whenever a secret differs from what the running containers were started with, even if an earlier run
   # wrote the files and then failed.
   ansible.builtin.set_fact:
     healthlog_push_secrets_rev: >-
-      {{ [healthlog_push_secret_relay_id_key, healthlog_push_secret_token_mac_key,
+      {{ ([healthlog_push_secret_relay_id_key, healthlog_push_secret_token_mac_key,
           healthlog_push_secret_token_mac_key_previous, healthlog_push_secret_acme_account_key,
-          healthlog_push_secret_apns_key_p8_b64] | join('|') | hash('sha256') }}
+          healthlog_push_secret_apns_key_p8_b64]
+         + ([healthlog_push_secret_wallet_pass_key_pem, healthlog_push_secret_wallet_pass_cert_pem]
+            if healthlog_push_wallet_enabled | bool else [])) | join('|') | hash('sha256') }}
   no_log: true
 
 - name: Remember whether a secret changed (forces a container restart)
   ansible.builtin.set_fact:
     healthlog_push_secrets_changed: >-
       {{ healthlog_push_relay_secrets.changed or healthlog_push_prev_mac.changed
-         or healthlog_push_prev_mac_removed.changed or healthlog_push_signer_secret.changed }}
+         or healthlog_push_prev_mac_removed.changed or healthlog_push_signer_secret.changed
+         or (healthlog_push_wallet_secret.changed | default(false))
+         or (healthlog_push_wallet_secret_removed.changed | default(false)) }}
 
 - name: Install the compose file from the repository
   ansible.builtin.copy:

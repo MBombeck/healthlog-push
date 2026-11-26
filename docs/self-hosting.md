@@ -134,6 +134,9 @@ hosted relay, or signs with its own Pass Type ID certificate.
 4. `docker compose exec relay /healthlog-push admin wallet status` shows the certificate the wallet process
    reported.
 
+With the Ansible role, steps 2 and 3 are `healthlog_push_wallet_enabled: true` and its variables
+([deploy/ansible/README.md](../deploy/ansible/README.md#optional-pieces)).
+
 | Variable | Default | Meaning |
 |---|---|---|
 | `HLP_WALLET_DIR` | required | the shared socket directory (`/run/wallet`) |
@@ -141,8 +144,8 @@ hosted relay, or signs with its own Pass Type ID certificate.
 | `HLP_WALLET_PASS_TYPE_ID`, `HLP_WALLET_TEAM_ID` | required | must equal the certificate's `UID` and `OU` |
 
 The process does not start when the certificate was not issued by Apple's WWDR G4 intermediate (embedded
-in the binary), when fewer than seven days of validity are left, or while the compiled brand image pins are
-empty. The pins name the HealthLog artwork, so a relay signs only passes that look like HealthLog's; a
+in the binary), when fewer than seven days of validity are left, or when the compiled brand image pins lack
+`icon.png`. The pins name the HealthLog artwork, so a relay signs only passes that look like HealthLog's; a
 fork for another app changes them in `internal/wallet/pinned.go` and `spec/wallet-manifest-v1.json`.
 
 ### Serving development builds (sandbox)

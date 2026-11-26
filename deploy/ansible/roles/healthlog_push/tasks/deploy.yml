@@ -39,12 +39,18 @@
         'Started' in healthlog_push_up.stderr or 'Recreated' in healthlog_push_up.stderr
         or 'Created' in healthlog_push_up.stderr
 
+    - name: Stop and remove the wallet container while Wallet is off
+      when: healthlog_push_start | bool and not (healthlog_push_wallet_enabled | bool)
+      ansible.builtin.command:
+        argv: "{{ healthlog_push_compose_cmd + ['--profile', 'wallet', 'rm', '--stop', '--force', 'wallet'] }}"
+      register: healthlog_push_wallet_rm
+      changed_when: "'Removed' in healthlog_push_wallet_rm.stderr"
+
     - name: Wait for relay and signer health
       ansible.builtin.include_tasks: wait_healthy.yml
       when: healthlog_push_start | bool
 
     - name: Read the AppArmor profile of each container
-      when: healthlog_push_start | bool
       ansible.builtin.shell:
         cmd: >-
           set -o pipefail;
@@ -54,6 +60,8 @@
       loop:
         - {service: relay, profile: "{{ healthlog_push_apparmor_relay }}"}
         - {service: signer, profile: "{{ healthlog_push_apparmor_signer }}"}
+        - {service: wallet, profile: "{{ healthlog_push_apparmor_wallet }}", wallet: true}
+      when: healthlog_push_start | bool and (healthlog_push_wallet_enabled | bool or not (item.wallet | default(false)))
       loop_control:
         label: "{{ item.service }}"
       register: healthlog_push_apparmor_running

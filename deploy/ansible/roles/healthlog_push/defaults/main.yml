@@ -57,12 +57,25 @@ healthlog_push_public_stats: false
 # refuses to start with a profile the kernel has not loaded in enforce mode.
 healthlog_push_apparmor_relay: docker-default
 healthlog_push_apparmor_signer: docker-default
+# Only used with healthlog_push_wallet_enabled. The wallet and relay profiles name each other as the only peers
+# on the sockets in /run/wallet: set healthlog-push-wallet together with healthlog-push-relay, or neither.
+healthlog_push_apparmor_wallet: docker-default
 healthlog_push_apparmor_install: false
 healthlog_push_apparmor_src: "{{ playbook_dir }}/../apparmor"
 
 healthlog_push_relay_uid: 65532
 healthlog_push_signer_uid: 65533
+healthlog_push_wallet_uid: 65534
 healthlog_push_gid: 65530
+
+# ----------------------------------------------------------------- wallet ---
+# Apple Wallet pass signing (docs/self-hosting.md, "Wallet passes"). true writes pass.key and pass.crt to
+# secrets/wallet, starts the wallet process (compose profile wallet) and sets HLP_WALLET_DIR for the relay;
+# false stops and removes the wallet container and deletes secrets/wallet. The identifiers must equal the
+# certificate's UID and OU.
+healthlog_push_wallet_enabled: false
+healthlog_push_wallet_pass_type_id: ""
+healthlog_push_wallet_team_id: ""
 
 # ---------------------------------------------------------------- secrets ---
 # Supplied from your secret store at run time (for example through a lookup
@@ -72,11 +85,15 @@ healthlog_push_gid: 65530
 #     `healthlog-push keygen relay-id|token-mac|acme-account`.
 #   token_mac_key_previous: optional, only during a MAC key rotation.
 #   apns_key_p8_b64: the APNs .p8 file, base64 encoded.
+#   wallet_pass_key_pem, wallet_pass_cert_pem: the pass key and certificate as PEM text, only with
+#     healthlog_push_wallet_enabled.
 healthlog_push_secret_relay_id_key: ""
 healthlog_push_secret_token_mac_key: ""
 healthlog_push_secret_token_mac_key_previous: ""
 healthlog_push_secret_acme_account_key: ""
 healthlog_push_secret_apns_key_p8_b64: ""
+healthlog_push_secret_wallet_pass_key_pem: ""
+healthlog_push_secret_wallet_pass_cert_pem: ""
 
 # ----------------------------------------------------------------- deploy ---
 # false: verify, write files, render .env and pull, but do not start the
