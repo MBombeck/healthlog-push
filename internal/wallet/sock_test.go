@@ -221,8 +221,8 @@ func TestWalletNotifyWithoutPusher(t *testing.T) {
 	if _, err := NewService(nil, testPins(), nil); err == nil {
 		t.Fatal("a service without identity")
 	}
-	if _, err := NewService(svc.ID, DefaultPins, nil); err == nil {
-		t.Fatal("a service with the empty default pins")
+	if _, err := NewService(svc.ID, Pins{}, nil); err == nil {
+		t.Fatal("a service with an empty pin set")
 	}
 }
 

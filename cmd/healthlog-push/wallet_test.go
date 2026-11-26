@@ -28,7 +28,7 @@ func shortDir(t *testing.T) string {
 }
 
 // TestWalletProcessStartsOnlyWhenConfigured: the wallet process refuses to start without its identifiers,
-// key and certificate, with the empty default pins, and with a certificate from another intermediate; with
+// key and certificate, with an empty pin set, and with a certificate from another intermediate; with
 // all of them it serves its socket, the health check passes, and the relay's tunnel side starts.
 func TestWalletProcessStartsOnlyWhenConfigured(t *testing.T) {
 	logx.SetOutput(&bytes.Buffer{})
@@ -57,10 +57,11 @@ func TestWalletProcessStartsOnlyWhenConfigured(t *testing.T) {
 	}
 	walletIntermediate = func() (*x509.Certificate, error) { return pki.InterCert, nil }
 	t.Cleanup(func() { walletIntermediate = wallet.AppleWWDRG4; walletPins = wallet.DefaultPins })
+	walletPins = wallet.Pins{}
 	if _, err := loadWalletService(dir, time.Now()); err == nil || !strings.Contains(err.Error(), "pins") {
-		t.Fatalf("started with the empty default pins: %v", err)
+		t.Fatalf("started with an empty pin set: %v", err)
 	}
-	walletPins = wallet.Pins{"icon.png": {strings.Repeat("ab", 20)}}
+	walletPins = wallet.DefaultPins
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- serveWallet(ctx, dir) }()

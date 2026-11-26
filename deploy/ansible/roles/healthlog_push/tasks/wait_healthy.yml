@@ -20,3 +20,14 @@
   retries: "{{ healthlog_push_health_retries }}"
   delay: "{{ healthlog_push_health_delay }}"
   changed_when: false
+
+# With Wallet on: the wallet process answers on wallet.sock (the same check as the compose health check).
+- name: Wait for the wallet process to answer on its socket
+  when: healthlog_push_wallet_enabled | bool
+  ansible.builtin.command:
+    argv: "{{ healthlog_push_compose_cmd + ['exec', '-T', 'wallet', '/healthlog-push', 'healthcheck', '--wallet'] }}"
+  register: healthlog_push_wallet_health
+  until: healthlog_push_wallet_health.rc == 0
+  retries: "{{ healthlog_push_health_retries }}"
+  delay: "{{ healthlog_push_health_delay }}"
+  changed_when: false

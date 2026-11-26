@@ -78,7 +78,8 @@ first reason that applies:
    than one hash so that an image can change without a gap.
 5. `pass.json` and `icon.png` are present (`missing_file`).
 
-The pins are empty until the HealthLog artwork is final; until then the wallet process refuses to start.
+The pins are the SHA-1 hashes of the HealthLog brand images (asset set v2 in the HealthLog repository). A
+build whose pin set lacks `icon.png` refuses to start the wallet process.
 
 What the pins cannot stop: a registered instance writes `pass.json` itself, so the texts, the organisation
 name and the QR content of a pass it has signed are its own. The logo and the icon are always HealthLog's,

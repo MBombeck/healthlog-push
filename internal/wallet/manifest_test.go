@@ -135,11 +135,17 @@ func TestWalletRequiresPassJSONAndIcon(t *testing.T) {
 	}
 }
 
-// TestPinsValidate: the default set is empty, so the process refuses to start until the images are final;
-// a pin for an unknown path or a malformed hash is refused too.
+// TestPinsValidate: the compiled pins validate; an empty set, a set without icon.png, a pin for an unknown
+// path or a malformed hash is refused, so the process does not start with any of them.
 func TestPinsValidate(t *testing.T) {
-	if err := DefaultPins.Validate(); err == nil {
-		t.Fatal("the empty default pin set must not validate")
+	if err := DefaultPins.Validate(); err != nil {
+		t.Fatalf("the compiled pins: %v", err)
+	}
+	if (Pins{}).Validate() == nil {
+		t.Fatal("an empty pin set validated")
+	}
+	if (Pins{"logo@2x.png": DefaultPins["logo@2x.png"]}).Validate() == nil {
+		t.Fatal("a pin set without icon.png validated")
 	}
 	if err := testPins().Validate(); err != nil {
 		t.Fatal(err)
@@ -182,6 +188,28 @@ func TestManifestSpecMatchesCode(t *testing.T) {
 	for path, hashes := range spec.Pinned {
 		if !slices.Equal(hashes, DefaultPins[path]) && (len(hashes) > 0 || len(DefaultPins[path]) > 0) {
 			t.Errorf("%s: spec pins %v, code pins %v", path, hashes, DefaultPins[path])
+		}
+	}
+}
+
+// TestDefaultPinsCoverTheBrandImages: every brand image is pinned with exactly one well-formed hash, a
+// manifest that carries all of them is accepted, and changing any one hash makes it foreign_asset.
+func TestDefaultPinsCoverTheBrandImages(t *testing.T) {
+	full := map[string]string{"pass.json": sha1hex("pass"), "de.lproj/pass.strings": sha1hex("de")}
+	for _, f := range PinnedFiles {
+		if len(DefaultPins[f]) != 1 || !isSHA1Hex(DefaultPins[f][0]) {
+			t.Fatalf("%s: pins %v", f, DefaultPins[f])
+		}
+		full[f] = DefaultPins[f][0]
+	}
+	if got := reasonOf(t, manifestJSON(full), DefaultPins); got != "ok" {
+		t.Fatalf("the HealthLog brand images: %s", got)
+	}
+	for _, f := range PinnedFiles {
+		m := maps.Clone(full)
+		m[f] = sha1hex("not the HealthLog " + f)
+		if got := reasonOf(t, manifestJSON(m), DefaultPins); got != ReasonForeignAsset {
+			t.Errorf("%s with a wrong hash: %s, want %s", f, got, ReasonForeignAsset)
 		}
 	}
 }

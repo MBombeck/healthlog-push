@@ -12,7 +12,9 @@
         owner: root
         group: root
         mode: "0644"
-      loop: [healthlog-push-relay, healthlog-push-signer]
+      loop: >-
+        {{ ['healthlog-push-relay', 'healthlog-push-signer']
+           + (['healthlog-push-wallet'] if healthlog_push_wallet_enabled | bool else []) }}
       register: healthlog_push_apparmor_files
 
     - name: Load changed profiles in enforce mode  # noqa: no-handler
@@ -28,6 +30,8 @@
   when: >-
     healthlog_push_apparmor_relay not in ['docker-default', 'unconfined']
     or healthlog_push_apparmor_signer not in ['docker-default', 'unconfined']
+    or (healthlog_push_wallet_enabled | bool
+        and healthlog_push_apparmor_wallet not in ['docker-default', 'unconfined'])
   block:
     - name: Read /sys/kernel/security/apparmor/profiles
       ansible.builtin.slurp:
@@ -43,10 +47,14 @@
           - >-
             (healthlog_push_apparmor_signer ~ ' (enforce)') in healthlog_push_apparmor_profiles
             or healthlog_push_apparmor_signer in ['docker-default', 'unconfined']
+          - >-
+            (healthlog_push_apparmor_wallet ~ ' (enforce)') in healthlog_push_apparmor_profiles
+            or healthlog_push_apparmor_wallet in ['docker-default', 'unconfined']
+            or not (healthlog_push_wallet_enabled | bool)
         fail_msg: >-
           The AppArmor profiles {{ healthlog_push_apparmor_relay }} and {{ healthlog_push_apparmor_signer }}
-          must be loaded in enforce mode (healthlog_push_apparmor_install: true, or apparmor_parser -r),
-          or set docker-default.
+          (and {{ healthlog_push_apparmor_wallet }} with Wallet on) must be loaded in enforce mode
+          (healthlog_push_apparmor_install: true, or apparmor_parser -r), or set docker-default.
         quiet: true
       vars:
         healthlog_push_apparmor_profiles: "{{ (healthlog_push_apparmor_loaded.content | b64decode).splitlines() }}"

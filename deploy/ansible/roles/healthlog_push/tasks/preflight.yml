@@ -42,9 +42,27 @@
       - healthlog_push_registration_mode in ['open', 'invite', 'closed']
       - healthlog_push_apparmor_relay is match('^[a-z0-9][a-z0-9._-]*$')
       - healthlog_push_apparmor_signer is match('^[a-z0-9][a-z0-9._-]*$')
+      - healthlog_push_apparmor_wallet is match('^[a-z0-9][a-z0-9._-]*$')
       - healthlog_push_log_driver in ['json-file', 'journald']
     fail_msg: >-
       healthlog_push_registration_mode must be open, invite or closed; the AppArmor
       profile names must be plain profile names; healthlog_push_log_driver must be
       json-file or journald.
     quiet: true
+
+- name: Check the Wallet settings
+  when: healthlog_push_wallet_enabled | bool
+  ansible.builtin.assert:
+    that:
+      - healthlog_push_wallet_pass_type_id is match('^pass[.][A-Za-z0-9.-]+$')
+      - healthlog_push_wallet_team_id is match('^[A-Z0-9]{10}$')
+      - "'PRIVATE KEY-----' in healthlog_push_secret_wallet_pass_key_pem"
+      - "'-----BEGIN CERTIFICATE-----' in healthlog_push_secret_wallet_pass_cert_pem"
+      - >-
+        (healthlog_push_apparmor_wallet in ['docker-default', 'unconfined'])
+        == (healthlog_push_apparmor_relay in ['docker-default', 'unconfined'])
+    fail_msg: >-
+      With healthlog_push_wallet_enabled, set the Pass Type ID (pass.<...>), the ten-character team id, the
+      pass key and certificate as PEM, and either both or neither of the relay and wallet AppArmor profiles.
+    quiet: true
+  no_log: true

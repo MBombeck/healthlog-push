@@ -45,6 +45,8 @@ secret runs with `no_log: true` and `diff: false`.
 | `healthlog_push_secret_token_mac_key_previous` | previous MAC key, only during a rotation | `secrets/relay/token_mac_key_previous` (removed when empty) |
 | `healthlog_push_secret_acme_account_key` | output of `healthlog-push keygen acme-account` | `secrets/relay/acme_account_key` |
 | `healthlog_push_secret_apns_key_p8_b64` | the APNs `.p8` file, base64 | `secrets/signer/apns.p8` (signer only) |
+| `healthlog_push_secret_wallet_pass_key_pem` | the Wallet pass key, PEM; only with `healthlog_push_wallet_enabled` | `secrets/wallet/pass.key` (wallet only) |
+| `healthlog_push_secret_wallet_pass_cert_pem` | the Pass Type ID certificate, PEM; only with `healthlog_push_wallet_enabled` | `secrets/wallet/pass.crt` (wallet only) |
 
 All secret files are mode 0400, owned by the container user that reads them,
 and excluded from backups.
@@ -58,6 +60,7 @@ and excluded from backups.
 | `/srv/healthlog-push/acme` | 65532:65530 | 0700 | TLS certificate and key | never, never copied |
 | `/srv/healthlog-push/secrets/relay` | 65532 | 0500, files 0400 | relay keys | no |
 | `/srv/healthlog-push/secrets/signer` | 65533 | 0500, file 0400 | `apns.p8` | no |
+| `/srv/healthlog-push/secrets/wallet` | 65534 | 0500, files 0400 | `pass.key`, `pass.crt`; only while Wallet is on, removed when it is off | no |
 | `/srv/healthlog-push/compose` | root | 0750 | `compose.yaml`, `compose.journald.yaml` (used with `healthlog_push_log_driver: journald`), `.env` (0600) | no |
 | `/srv/healthlog-push/deployed-digest` | root | 0644 | image of the last healthy deploy | no |
 | `/etc/healthlog-push/backup-include.list` | root | 0644 | for your backup tool | n/a |
@@ -188,6 +191,13 @@ Forks that publish their own image set `healthlog_push_source_repo` and
 - **Prepare without starting.** `healthlog_push_start: false` verifies the
   release, writes every file and pulls the image, but leaves the containers
   stopped. Used when preparing a new host (`docs/migration.md`).
+- **Wallet passes.** `healthlog_push_wallet_enabled: true` with `healthlog_push_wallet_pass_type_id`,
+  `healthlog_push_wallet_team_id` and the two Wallet secrets above writes `secrets/wallet`, adds
+  `COMPOSE_PROFILES=wallet`, `HLP_WALLET_DIR` and the identifiers to `.env`, installs and checks the
+  `healthlog-push-wallet` AppArmor profile when `healthlog_push_apparmor_wallet` names it (set it together
+  with `healthlog_push_apparmor_relay`, the two profiles name each other), and waits until the wallet
+  process answers on its socket (`healthcheck --wallet`). `false` stops and removes the wallet container and
+  deletes `secrets/wallet`.
 - **Export timer.** The relay writes `/export/registry.json` daily by itself.
   `healthlog_push_export_timer_enabled: true` adds a systemd timer that also
   runs `docker compose exec -T relay /healthlog-push admin export` once a day.

@@ -6,6 +6,16 @@ All notable changes to this project are documented in this file. The format foll
 
 ## [Unreleased]
 
+### Changed
+
+- The wallet process signs: the HealthLog brand images (asset set v2) are pinned in
+  `internal/wallet/pinned.go` and `spec/wallet-manifest-v1.json`. Until now the pin set was empty and the
+  wallet process refused to start.
+- The Ansible role can switch Wallet on: `healthlog_push_wallet_enabled` with the Pass Type ID, the team id
+  and the pass key and certificate as PEM writes `secrets/wallet`, sets the compose profile and
+  `HLP_WALLET_DIR`, loads the `healthlog-push-wallet` AppArmor profile and waits for the wallet socket to
+  answer. Off by default; turning it off removes the container and the secrets.
+
 ## [1.0.10] - 2026-11-26
 
 ### Fixed
