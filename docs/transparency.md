@@ -153,6 +153,9 @@ entry here.
 
 Newest first:
 
+- **2026-11-26** Relay v1.0.10, deployed to the hosted relay on 2026-11-26. No key rotation and no
+  deprecation. For clients: device, update and push-to-start tokens of up to 512 hex characters are
+  accepted (the cap was 200). Nothing else changes in the protocol.
 - **2026-11-25** Relay v1.0.9, deployed to the hosted relay on 2026-11-25. No key rotation and no
   deprecation. For clients: a Live Activity start carries the item's `ref` as the start id `s` in its
   attributes beside `v`, and app builds that decode only `v` ignore it; every response carries
