@@ -6,6 +6,16 @@ All notable changes to this project are documented in this file. The format foll
 
 ## [Unreleased]
 
+## [1.0.11] - 2026-11-26
+
+v1.0.10 was never published; its fix is part of this release.
+
+### Fixed
+
+- Device and activity tokens of up to 512 hex characters are accepted. The cap was 200, and an iPhone
+  that hands out a 256 character push-to-start token had its Live Activity start refused. Apple documents
+  no fixed token length; the limit stays even-length hex with a lower bound of 64 characters.
+
 ### Changed
 
 - The wallet process signs: the HealthLog brand images (asset set v2) are pinned in
@@ -15,14 +25,6 @@ All notable changes to this project are documented in this file. The format foll
   and the pass key and certificate as PEM writes `secrets/wallet`, sets the compose profile and
   `HLP_WALLET_DIR`, loads the `healthlog-push-wallet` AppArmor profile and waits for the wallet socket to
   answer. Off by default; turning it off removes the container and the secrets.
-
-## [1.0.10] - 2026-11-26
-
-### Fixed
-
-- Device and activity tokens of up to 512 hex characters are accepted. The cap was 200, and an iPhone
-  that hands out a 256 character push-to-start token had its Live Activity start refused. Apple documents
-  no fixed token length; the limit stays even-length hex with a lower bound of 64 characters.
 
 ## [1.0.9] - 2026-11-25
 
@@ -582,7 +584,7 @@ First release.
   `HLP_MIN_CLIENT_VERSION`; the admin socket default follows `HLP_DATA_DIR` for server and client; a failing
   listener makes the process exit with an error.
 
-[1.0.10]: https://github.com/MBombeck/healthlog-push/releases/tag/v1.0.10
+[1.0.11]: https://github.com/MBombeck/healthlog-push/releases/tag/v1.0.11
 [1.0.9]: https://github.com/MBombeck/healthlog-push/releases/tag/v1.0.9
 [1.0.8]: https://github.com/MBombeck/healthlog-push/releases/tag/v1.0.8
 [1.0.7]: https://github.com/MBombeck/healthlog-push/releases/tag/v1.0.7
