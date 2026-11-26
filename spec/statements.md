@@ -29,7 +29,7 @@ entry of `spec/vectors/v1.json` covers it.
   `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`.
 - **Token tag.** `tokenTag = SHA-256("hl-push-token" || token)[0..16]` over the raw token bytes, written as
   32 lowercase hex characters (see `spec/envelope.md`, "AAD"). A token itself travels as hex (upper- or
-  lowercase, 64 to 200 characters); the tag is computed from the decoded bytes.
+  lowercase, 64 to 512 characters); the tag is computed from the decoded bytes.
 - **Clock skew.** Where a statement carries a time, the relay accepts it when it differs from the relay clock
   by at most 300 seconds in either direction. A time outside that window is refused as `stale_timestamp`
   together with the relay time, before the signature is checked.

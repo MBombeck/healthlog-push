@@ -270,7 +270,7 @@ Instance-authenticated. The instance forwards what the app produced, unchanged, 
 
 | Field | Format |
 |---|---|
-| `token` | APNs device token, hex, 64 to 200 characters |
+| `token` | APNs device token, hex, 64 to 512 characters |
 | `env` | `production` or `sandbox` |
 | `bindingKey` | Ed25519 public key, base64url |
 | `statement.instanceId` | must equal `HL-Instance` |
@@ -423,7 +423,7 @@ Instance-authenticated, body at most 4 KiB.
 
 | Field | Format |
 |---|---|
-| `token` | APNs device token of the binding, hex, 64 to 200 characters |
+| `token` | APNs device token of the binding, hex, 64 to 512 characters |
 | `bindingKey` | the binding key of the device, base64url |
 | `consent.textVersion` | the version of the Live Activity consent text the person accepted, `[A-Za-z0-9._-]{1,32}` |
 | `consent.day` | `YYYY-MM-DD`, the day of the consent |
@@ -642,7 +642,7 @@ Each item is checked on its own; a bad item does not affect the others.
 | Field | Rule |
 |---|---|
 | `ref` | `^[A-Za-z0-9._:-]{1,40}$`, unique within the batch; a repeated `ref` in the same batch is `422 invalid_item` |
-| `token` | APNs device token, hex, 64 to 200 characters; must be bound to the requesting instance |
+| `token` | APNs device token, hex, 64 to 512 characters; must be bound to the requesting instance |
 | `env` | `production` or `sandbox`; must equal the binding's environment |
 | `class` | `alert`, `silent` or `liveactivity` |
 | `ttlSeconds` | integer above 0; values above the class maximum (alert 21600, silent 3600, liveactivity 14400) are clamped |
@@ -651,7 +651,7 @@ Each item is checked on its own; a bad item does not affect the others.
 | `activity` | liveactivity: required; alert and silent: must be absent |
 | `activity.event` | `start`, `update` or `end`; `end` when absent; any other value is refused |
 | `activity.state` | `start` and `update`: required, the content state (below); `end`: must be absent (the end carries a fixed state) |
-| `activity.token` | hex, 64 to 200 characters: for `start` the push-to-start token of the app, for `update` and `end` the update token of the activity |
+| `activity.token` | hex, 64 to 512 characters: for `start` the push-to-start token of the app, for `update` and `end` the update token of the activity |
 | `activity.bindingKey` | the binding key of the device, base64url |
 | `activity.statement.tokenTag` | tag of the item's `token` |
 | `activity.statement.laTokenTag` | tag of `activity.token` |
